@@ -930,8 +930,11 @@ impl ModelsPanel {
                     .text_color(k.text2)
                     .child(chip(rate.source.clone(), match rate.source.as_str() { "calibrated" => ChipTone::Acc, "manual" => ChipTone::Amber, _ => ChipTone::Plain }, cx))
                     .child(format!("since {}", fmt::day(&rate.from)))
-                    .when_some(rate.note.clone(), |d, n| d.child(div().text_color(k.muted).child(format!("· {n}")))),
+                    ,
             );
+            if let Some(n) = rate.note.clone() {
+                cardv = cardv.child(div().mt(px(2.)).text_size(px(11.)).line_height(px(16.)).text_color(k.muted).child(n));
+            }
         }
         let id2 = id.clone();
         let id3 = id.clone();
@@ -998,7 +1001,7 @@ pub struct SettingsPanel {
 }
 impl SettingsPanel {
     pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> SettingsPanel {
-        let instr = cx.new(|cx| InputState::new(window, cx).multi_line(true).rows(4).placeholder("who you are, how your files are organized, how you want work done (sent in each turn's header)"));
+        let instr = cx.new(|cx| InputState::new(window, cx).multi_line(true).auto_grow(4, 14).placeholder("who you are, how your files are organized, how you want work done (sent in each turn's header)"));
         let cwd = cx.new(|cx| InputState::new(window, cx));
         let budget = cx.new(|cx| InputState::new(window, cx));
         let mut subs = vec![];
@@ -1044,6 +1047,9 @@ impl SettingsPanel {
 }
 fn picker(id: &str, label: String, items: Vec<(String, String, bool)>, on: impl Fn(String, &mut App) + 'static) -> impl IntoElement {
     let on = std::rc::Rc::new(on);
+    div().flex().child(picker_btn(id, label, items, on))
+}
+fn picker_btn(id: &str, label: String, items: Vec<(String, String, bool)>, on: std::rc::Rc<dyn Fn(String, &mut App)>) -> impl IntoElement {
     Button::new(SharedString::from(id.to_string())).outline().small().label(label).dropdown_caret(true).dropdown_menu(move |mut m, _, _| {
         for (v, l, checked) in &items {
             let on = on.clone();
@@ -1183,7 +1189,7 @@ impl Render for SettingsPanel {
                 .justify_between()
                 .gap(px(10.))
                 .py(px(6.))
-                .child(div().flex_1().flex().flex_col().text_size(px(13.)).child(label.to_string()).child(div().text_size(px(11.)).text_color(k.muted).child(sub)))
+                .child(div().flex_1().min_w_0().flex().flex_col().text_size(px(13.)).child(label.to_string()).child(div().text_size(px(11.)).text_color(k.muted).child(sub)))
                 .child(Switch::new(id).checked(on).on_click(move |v: &bool, _, cx| f(*v, cx)))
         };
         let mk = |me: WeakEntity<SettingsPanel>, which: &'static str| -> Box<dyn Fn(bool, &mut App)> {

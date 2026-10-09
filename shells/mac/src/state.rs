@@ -196,7 +196,6 @@ impl AppState {
     pub fn attach(&mut self, hub: Arc<Hub>, mut rx: tokio::sync::mpsc::UnboundedReceiver<HubEvent>, cx: &mut Context<Self>) {
         self.models = hub.models();
         self.global = hub.global.read().clone();
-        self.server_log = hub.logs.lock().clone();
         self.approvals = hub.pending_approvals();
         let (b, f) = hub.compactor_state();
         self.busy = b;
@@ -302,7 +301,7 @@ impl AppState {
     }
 
     pub fn open_task(&mut self, id: i64, cx: &mut Context<Self>) {
-        if !self.tasks.contains_key(&id) {
+        if id < 0 {
             return;
         }
         if id == self.current && self.cur.loaded {

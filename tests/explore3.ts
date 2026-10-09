@@ -1,0 +1,13 @@
+import { BUNDLE, Cua, ROOT, sleep } from "./lib/cua.ts";
+const c = await Cua.start();
+await c.js(`globalThis.app = await cua.getApp("${BUNDLE}"); 1`);
+const [x, y, w, h] = JSON.parse(Deno.readTextFileSync(`${ROOT}/shots/probes.json`))["rail.models"];
+const mode = Deno.args[0];
+const pt = mode === "px" ? [(x + w / 2) * 2, (y + h / 2 + 32) * 2] : [x + w / 2, y + h / 2 + 32];
+console.log("click", pt);
+let r = await c.js(`await app.click([${pt}]); 1`);
+console.log(r.text.slice(0, 300), r.isError);
+await sleep(700);
+r = await c.js(`await app.getScreenshot()`);
+Deno.writeFileSync(`${ROOT}/shots/explore3.jpg`, Uint8Array.from(atob(r.images[0]!), (ch) => ch.charCodeAt(0)));
+c.close();

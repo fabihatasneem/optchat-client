@@ -206,6 +206,11 @@ impl Workspace {
         self.composer.update(cx, |c, cx| c.focus(window, cx));
         cx.notify();
     }
+    pub fn close_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.overlay = None;
+        self.composer.update(cx, |c, cx| c.focus(window, cx));
+        cx.notify();
+    }
     pub fn select_request(&mut self, id: String, cx: &mut Context<Self>) {
         self.state.update(cx, |s, cx| {
             s.selected_request = Some(id);
@@ -298,6 +303,27 @@ impl Render for Workspace {
             let launch = crate::LAUNCH.get().map(|t| t.elapsed().as_secs_f64() * 1000.0).unwrap_or(0.0);
             self.state.update(cx, |s, _| s.stats.first_frame_ms = Some(launch));
         }
+        // nothing focused (a finished task has no composer, a dialog closed): keep the workspace's keys working
+        let ended_now = self.state.read(cx).info().map(|i| i.task.status.terminal()).unwrap_or(false);
+        if self.overlay.is_none() && self.ask.is_none() && (window.focused(cx).is_none() || (ended_now && !self.focus.contains_focused(window, cx))) {
+            window.focus(&self.focus);
+        }
+        if probes_on() {
+            let s = self.state.read(cx);
+            let th = cx.global::<crate::theme::Themes>();
+            let last_talk = s.cur.log.iter().rev().find(|e| e.kind == LogKind::Talk).map(|e| e.text.clone());
+            let j = serde_json::json!({
+                "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
+                "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
+                "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
+                "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
+                "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
+                "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
+                "firstFrameMs": s.stats.first_frame_ms, "loadedMs": s.stats.loaded_ms, "errors": s.errors.clone(),
+            });
+            set_state_json(j.to_string());
+        }
         let s = self.state.read(cx);
         let open = self.side_open(cx);
         let view = s.prefs.view;
@@ -354,8 +380,10 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &Dismiss, window, cx| {
                 if w.overlay.is_some() {
                     w.overlay = None;
+                    w.composer.update(cx, |c, cx| c.focus(window, cx));
                 } else if w.ask.is_some() {
                     w.ask = None;
+                    w.composer.update(cx, |c, cx| c.focus(window, cx));
                 } else if w.metrics_open {
                     w.metrics_open = false;
                 } else if w.narrow && w.sheet {

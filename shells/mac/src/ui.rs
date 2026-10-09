@@ -178,7 +178,7 @@ pub fn kv_row(k_: impl Into<SharedString>, v: impl Into<SharedString>, cx: &App)
         .gap(px(10.))
         .text_size(px(12.5))
         .py(px(2.))
-        .child(div().w(px(150.)).flex_none().text_color(k.muted).child(k_.into()))
+        .child(div().w(px(118.)).flex_none().text_color(k.muted).child(k_.into()))
         .child(div().flex_1().min_w_0().text_color(k.text2).child(v.into()))
 }
 
@@ -221,6 +221,13 @@ pub fn probe(name: impl Into<String>) -> impl IntoElement {
     .top_0()
     .left_0()
 }
+/// A JSON summary of the app state for UI tests (written next to the probes as `<file>.state.json`).
+pub static STATE_JSON: OnceLock<Mutex<String>> = OnceLock::new();
+pub fn set_state_json(s: String) {
+    if probes_on() {
+        *STATE_JSON.get_or_init(|| Mutex::new(String::new())).lock() = s;
+    }
+}
 pub fn start_probe_writer() {
     let Ok(path) = std::env::var("OPTCHAT_PROBES") else { return };
     std::thread::spawn(move || loop {
@@ -230,6 +237,11 @@ pub fn start_probe_writer() {
             let tmp = format!("{path}.tmp");
             if std::fs::write(&tmp, s).is_ok() {
                 let _ = std::fs::rename(&tmp, &path);
+            }
+            let st = STATE_JSON.get_or_init(|| Mutex::new(String::new())).lock().clone();
+            let sp = format!("{path}.state.json");
+            if std::fs::write(format!("{sp}.tmp"), st).is_ok() {
+                let _ = std::fs::rename(format!("{sp}.tmp"), &sp);
             }
         }
     });

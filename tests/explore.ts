@@ -1,0 +1,14 @@
+import { BUNDLE, Cua, ROOT, sleep } from "./lib/cua.ts";
+const probes = `${ROOT}/shots/probes.json`;
+await new Deno.Command("open", { args: ["-n", "--env", "OPTCHAT_REFRAME_MCP=0", "--env", `OPTCHAT_PROBES=${probes}`, `${ROOT}/dist/OptChat.app`] }).output();
+await sleep(5000);
+const c = await Cua.start();
+let r = await c.js(`globalThis.app = await cua.getApp("${BUNDLE}"); const s = await app.getAXState({disableDiffing:true, emit:false}); nodeRepl.write(s.slice(0, 3000))`);
+console.log(r.text.slice(0, 3000), r.isError, c.elicits);
+r = await c.js(`await app.getScreenshot()`);
+console.log(r.text.slice(0, 500), r.images.length);
+if (r.images[0]) Deno.writeFileSync(`${ROOT}/shots/explore.jpg`, Uint8Array.from(atob(r.images[0]), (ch) => ch.charCodeAt(0)));
+r = await c.js(`nodeRepl.write(Object.keys(app).join(",") + " | " + Object.getOwnPropertyNames(Object.getPrototypeOf(app)).join(","))`);
+console.log(r.text);
+console.log(Deno.readTextFileSync(probes).slice(0, 800));
+c.close();

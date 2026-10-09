@@ -70,7 +70,7 @@ pub fn set_theme(w: &mut Workspace, id: &str, follow: bool, cx: &mut Context<Wor
 
 fn overlay_bg(id: &str, cx: &App) -> Stateful<Div> {
     let k = c(cx);
-    div().id(SharedString::from(id.to_string())).absolute().inset_0().bg(k.shadow.opacity(0.6)).flex().items_center().justify_center().occlude()
+    div().id(SharedString::from(id.to_string())).absolute().inset_0().bg(hsla(0., 0., 0., if k.dark { 0.5 } else { 0.25 })).flex().items_center().justify_center().occlude()
 }
 fn dialog_box(cx: &App, w: f32) -> Div {
     let k = c(cx);
@@ -88,7 +88,7 @@ fn dialog_box(cx: &App, w: f32) -> Div {
 
 pub fn render_overlay(w: &mut Workspace, o: Overlay, _window: &mut Window, cx: &mut Context<Workspace>) -> AnyElement {
     match o {
-        Overlay::NewTask(d) => overlay_bg("ov-new", cx).on_click(cx.listener(|w, _, _, cx| { w.overlay = None; cx.notify(); })).child(div().id("ov-new-inner").on_click(|_, _, cx| cx.stop_propagation()).child(d)).into_any_element(),
+        Overlay::NewTask(d) => overlay_bg("ov-new", cx).on_click(cx.listener(|w, _, window, cx| w.close_overlay(window, cx))).child(div().id("ov-new-inner").on_click(|_, _, cx| cx.stop_propagation()).child(d)).into_any_element(),
         Overlay::Palette(p) => div()
             .id("ov-pal")
             .absolute()
@@ -98,7 +98,7 @@ pub fn render_overlay(w: &mut Workspace, o: Overlay, _window: &mut Window, cx: &
             .justify_center()
             .pt(px(80.))
             .bg(c(cx).shadow.opacity(0.25))
-            .on_click(cx.listener(|w, _, _, cx| { w.overlay = None; cx.notify(); }))
+            .on_click(cx.listener(|w, _, window, cx| w.close_overlay(window, cx)))
             .child(div().id("ov-pal-inner").on_click(|_, _, cx| cx.stop_propagation()).child(p))
             .into_any_element(),
         Overlay::Metrics(m) => div()
@@ -106,7 +106,7 @@ pub fn render_overlay(w: &mut Workspace, o: Overlay, _window: &mut Window, cx: &
             .absolute()
             .inset_0()
             .occlude()
-            .on_click(cx.listener(|w, _, _, cx| { w.overlay = None; cx.notify(); }))
+            .on_click(cx.listener(|w, _, window, cx| w.close_overlay(window, cx)))
             .child(div().id("ov-met-inner").absolute().right(px(10.)).bottom(px(32.)).on_click(|_, _, cx| cx.stop_propagation()).child(m))
             .into_any_element(),
         Overlay::Lightbox(blob) => {
@@ -114,7 +114,7 @@ pub fn render_overlay(w: &mut Workspace, o: Overlay, _window: &mut Window, cx: &
             overlay_bg("ov-light", cx)
                 .bg(hsla(0., 0., 0.02, 0.85))
                 .cursor_pointer()
-                .on_click(cx.listener(|w, _, _, cx| { w.overlay = None; cx.notify(); }))
+                .on_click(cx.listener(|w, _, window, cx| w.close_overlay(window, cx)))
                 .when_some(im, |d, i| d.child(img(i).max_w(relative(0.94)).max_h(relative(0.92)).object_fit(ObjectFit::Contain).rounded(px(8.))))
                 .child(probe("lightbox"))
                 .into_any_element()
@@ -234,6 +234,7 @@ pub fn open_metrics(w: &mut Workspace, window: &mut Window, cx: &mut Context<Wor
         usd.update(cx, |i, cx| i.focus(window, cx));
         MetricsPop { state: state.clone(), usd, min, tok, dl, task: info.task.id, _subs: subs }
     });
+    cx.subscribe_in(&pop, window, |w: &mut Workspace, _, _: &DismissEvent, window, cx| w.close_overlay(window, cx)).detach();
     w.overlay = Some(Overlay::Metrics(pop));
     cx.notify();
 }
@@ -273,8 +274,8 @@ impl Render for MetricsPop {
                     .flex()
                     .py(px(3.))
                     .child(div().flex_1().text_color(k.text2).child(m.id.clone()))
-                    .child(div().w(px(90.)).flex().justify_end().text_color(k.muted).child(fmt_m(&m.id, o)))
-                    .child(div().w(px(90.)).flex().justify_end().font_weight(FontWeight::SEMIBOLD).child(fmt_m(&m.id, sb))),
+                    .child(div().w(px(130.)).flex().justify_end().text_color(k.muted).child(fmt_m(&m.id, o)))
+                    .child(div().w(px(130.)).flex().justify_end().font_weight(FontWeight::SEMIBOLD).child(fmt_m(&m.id, sb))),
             );
             let (sc, sm) = (sub_k(Some(&info), &m.id, "chat"), sub_k(Some(&info), &m.id, "compact"));
             if sc > 0 && sm > 0 {
@@ -285,18 +286,18 @@ impl Render for MetricsPop {
                         .text_size(px(11.))
                         .text_color(k.muted)
                         .child(div().flex_1().pl(px(10.)).child("chat · memory"))
-                        .child(div().w(px(90.)).flex().justify_end().child(format!("{} · {}", fmt_m(&m.id, own_k(Some(&info), &m.id, "chat")), fmt_m(&m.id, own_k(Some(&info), &m.id, "compact")))))
-                        .child(div().w(px(90.)).flex().justify_end().child(format!("{} · {}", fmt_m(&m.id, sc), fmt_m(&m.id, sm)))),
+                        .child(div().w(px(130.)).flex().justify_end().child(format!("{} · {}", fmt_m(&m.id, own_k(Some(&info), &m.id, "chat")), fmt_m(&m.id, own_k(Some(&info), &m.id, "compact")))))
+                        .child(div().w(px(130.)).flex().justify_end().child(format!("{} · {}", fmt_m(&m.id, sc), fmt_m(&m.id, sm)))),
                 );
             }
         }
         if !any {
             table = table.child(div().text_color(k.muted).child("nothing yet"));
         }
-        let field = |label: &str, i: &Entity<InputState>| div().flex().flex_col().gap(px(3.)).text_size(px(11.)).text_color(k.muted).child(label.to_string()).child(Input::new(i).small());
+        let field = |label: &str, i: &Entity<InputState>| div().flex_1().flex().flex_col().gap(px(3.)).text_size(px(11.)).text_color(k.muted).child(label.to_string()).child(Input::new(i).small());
         let has_budget = t.budget.usd.is_some() || t.budget.minutes.is_some() || t.budget.tokens.is_some() || t.budget.deadline.is_some();
         div()
-            .w(px(440.))
+            .w(px(520.))
             .bg(k.panel)
             .border_1()
             .border_color(k.line2)
@@ -368,10 +369,7 @@ pub fn open_new_task(w: &mut Workspace, preset: Option<(String, Option<i64>, i64
             focus: cx.focus_handle(),
         }
     });
-    let sub = cx.subscribe(&d, |w: &mut Workspace, _, _: &DismissEvent, cx| {
-        w.overlay = None;
-        cx.notify();
-    });
+    let sub = cx.subscribe_in(&d, window, |w: &mut Workspace, _, _: &DismissEvent, window, cx| w.close_overlay(window, cx));
     sub.detach();
     w.overlay = Some(Overlay::NewTask(d));
     cx.notify();
@@ -570,6 +568,8 @@ pub enum Cmd {
     Open(i64),
     Act(&'static str),
     Theme(String),
+    Model(String),
+    Effort(String),
 }
 pub struct Palette {
     state: Entity<AppState>,
@@ -638,7 +638,7 @@ pub fn open_palette(w: &mut Workspace, tasks_only: bool, window: &mut Window, cx
     });
     let s1 = cx.subscribe_in(&p, window, |w: &mut Workspace, _, e: &PaletteEvent, window, cx| {
         let PaletteEvent::Run(cmd) = e;
-        w.overlay = None;
+        w.close_overlay(window, cx);
         run_cmd(w, cmd.clone(), window, cx);
     });
     s1.detach();
@@ -681,6 +681,20 @@ impl Palette {
             for (label, key, act) in COMMANDS {
                 if let Some(sc) = fuzzy(&q, label) {
                     items.push((sc + 50, label.to_string(), key.to_string(), Cmd::Act(act)));
+                }
+            }
+            for m in &s.models {
+                let l = format!("Model: {}", m.label);
+                if let Some(sc) = fuzzy(&q, &l) {
+                    items.push((sc + 10, l, m.id.clone(), Cmd::Model(m.id.clone())));
+                }
+            }
+            if let Some(set) = &s.cur.settings {
+                for e in s.model(&set.model).map(|m| m.efforts.clone()).unwrap_or_default() {
+                    let l = format!("Effort: {e}");
+                    if let Some(sc) = fuzzy(&q, &l) {
+                        items.push((sc + 10, l, if e == set.effort { "current".into() } else { String::new() }, Cmd::Effort(e)));
+                    }
                 }
             }
             for t in cx.global::<Themes>().all.iter() {
@@ -759,6 +773,14 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
     match cmd {
         Cmd::Open(id) => w.open_task(id, window, cx),
         Cmd::Theme(id) => set_theme(w, &id, false, cx),
+        Cmd::Model(id) => {
+            let task = w.state.read(cx).current;
+            w.state.update(cx, |s, cx| s.command(cx, true, move |h| h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).map(|r| format!("model: {r}"))));
+        }
+        Cmd::Effort(e) => {
+            let task = w.state.read(cx).current;
+            w.state.update(cx, |s, cx| s.command(cx, true, move |h| h.update_settings(task, SettingsPatch { effort: Some(e), ..Default::default() }).map(|r| format!("effort: {r}"))));
+        }
         Cmd::Act(a) => match a {
             "new" => open_new_task(w, None, window, cx),
             "sidebar" => window.dispatch_action(Box::new(ToggleSidebar), cx),
