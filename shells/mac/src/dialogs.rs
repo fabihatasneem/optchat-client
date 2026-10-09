@@ -704,6 +704,13 @@ impl Palette {
                 }
             }
         }
+        if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && !self.tasks_only {
+            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide")] {
+                if let Some(sc) = fuzzy(&q, l) {
+                    items.push((sc + 60, l.to_string(), String::new(), Cmd::Act(a)));
+                }
+            }
+        }
         for x in s.tasks.values().rev() {
             let l = format!("#{} {}", x.task.id, task_name(&x.task));
             if let Some(sc) = fuzzy(&q, &l) {
@@ -815,6 +822,19 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
             "zoomout" => zoom(w, -1.0, cx),
             "metrics" => open_metrics(w, window, cx),
             "quit" => cx.quit(),
+            "t-approval" => w.state.update(cx, |s, _| {
+                if let Some(h) = s.hub() {
+                    let _g = s.rt.enter();
+                    h.test_approval();
+                }
+            }),
+            "t-image" => {
+                let p = std::path::PathBuf::from(std::env::var("OPTCHAT_TEST_IMAGE").unwrap_or_default());
+                w.composer.update(cx, |c, cx| c.add_paths(vec![p], cx));
+            }
+            "t-frames" => crate::ui::reset_frames(),
+            "t-narrow" => window.resize(size(px(700.), px(820.))),
+            "t-wide" => window.resize(size(px(1360.), px(880.))),
             _ => {}
         },
     }

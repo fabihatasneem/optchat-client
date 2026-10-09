@@ -320,7 +320,7 @@ impl Render for Workspace {
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
-                "firstFrameMs": s.stats.first_frame_ms, "loadedMs": s.stats.loaded_ms, "errors": s.errors.clone(),
+                "firstFrameMs": s.stats.first_frame_ms, "frames": frame_summary(), "rss": crate::ui::rss_mb(), "loadedMs": s.stats.loaded_ms, "errors": s.errors.clone(),
             });
             set_state_json(j.to_string());
         }
@@ -378,7 +378,10 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &ZoomReset, _, cx| dialogs::zoom(w, 0.0, cx)))
             .on_action(cx.listener(|w, _: &NextTheme, _, cx| dialogs::next_theme(w, cx)))
             .on_action(cx.listener(|w, _: &Dismiss, window, cx| {
-                if w.overlay.is_some() {
+                if w.state.read(cx).dict.state != "idle" {
+                    // Esc stops dictation and keeps the text
+                    w.composer.update(cx, |c, cx| c.stop_dictation(cx));
+                } else if w.overlay.is_some() {
                     w.overlay = None;
                     w.composer.update(cx, |c, cx| c.focus(window, cx));
                 } else if w.ask.is_some() {
@@ -621,7 +624,8 @@ impl Workspace {
         let mut ed = div().flex_1().min_w_0().h_full().flex().flex_col().bg(k.bg);
         ed = ed.child(crate::tabs::tab_strip(self, window, cx));
         ed = ed.child(crate::tabs::task_bar(self, window, cx));
-        ed = ed.child(div().flex_1().min_h_0().child(self.feed.clone()).child(probe("feed")));
+        // a click in the feed leaves the composer (so M dictates, as outside a text field in the web app)
+        ed = ed.child(div().flex_1().min_h_0().child(self.feed.clone()).child(probe("feed")).on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, _| window.focus(&w.focus))));
         if ended {
             ed = ed.child(crate::tabs::endbar(self, cx));
         } else {

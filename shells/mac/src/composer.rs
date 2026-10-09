@@ -8,6 +8,7 @@ use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::RopeExt;
 use optchat_engine::hub::{prepare_image, ImageIn};
 use optchat_engine::types::TaskStatus;
 use std::collections::HashMap;
@@ -228,12 +229,13 @@ impl Composer {
             return;
         }
         let v = self.input.read(cx).value().to_string();
-        let pos = self.input.read(cx).cursor().min(v.len());
+        let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
+        // from outside the text field: where the last dictation left the caret, else the end
+        let pos = if focused { self.input.read(cx).cursor() } else { self.caret.unwrap_or(v.len()) }.min(v.len());
         let pos = (0..=pos).rev().find(|p| v.is_char_boundary(*p)).unwrap_or(0);
         self.anchor = Some((self.task, v[..pos].to_string(), v[pos..].to_string()));
         self.dict_seq = self.state.read(cx).dict.seq;
         let task = self.task;
-        let _ = window;
         self.state.update(cx, |s, cx| {
             s.dict.state = "connecting".into();
             s.dict.task = task;
@@ -297,7 +299,8 @@ impl Composer {
         if d.state == "idle" || d.done.is_some() && d.state == "idle" {
             // finished: caret after the dictated text, focus back
             self.anchor = None;
-            self.focus(window, cx);
+            let pos = self.input.read(cx).text().offset_to_position(caret);
+            self.input.update(cx, |i, cx| i.set_cursor_position(pos, window, cx));
             if let Some(run) = self.pending_submit.take() {
                 self.submit(run, window, cx);
             }

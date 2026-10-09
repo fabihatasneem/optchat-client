@@ -331,13 +331,27 @@ impl Render for Feed {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.entity().downgrade();
         let k = c(cx).clone();
-        div().size_full().bg(k.bg).child(
-            list(self.list.clone(), move |ix, window, cx| {
-                let Some(feed) = this.upgrade() else { return div().into_any_element() };
-                feed.update(cx, |f, cx| f.render_row(ix, window, cx))
+        div()
+            .id("feedwrap")
+            .size_full()
+            .bg(k.bg)
+            .on_scroll_wheel(|_, _, _| {
+                frames().lock().last_scroll = Some(std::time::Instant::now());
             })
-            .size_full(),
-        )
+            .child(
+                list(self.list.clone(), move |ix, window, cx| {
+                    let Some(feed) = this.upgrade() else { return div().into_any_element() };
+                    let t0 = std::time::Instant::now();
+                    let el = feed.update(cx, |f, cx| f.render_row(ix, window, cx));
+                    let mut fr = frames().lock();
+                    if fr.last_scroll.map(|t| t.elapsed().as_millis() < 120).unwrap_or(false) {
+                        fr.render_ms.push(t0.elapsed().as_secs_f32() * 1000.0);
+                    }
+                    el
+                })
+                .size_full(),
+            )
+            .child(frame_probe())
     }
 }
 

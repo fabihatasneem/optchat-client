@@ -258,3 +258,68 @@ pub fn when_some<T, E: FluentBuilder>(e: E, v: Option<T>, f: impl FnOnce(E, T) -
         None => e,
     }
 }
+
+// ---- frame timing (perf measurements): intervals between window paints while the feed scrolls ----------------------
+pub struct FrameStats {
+    pub last_paint: Option<std::time::Instant>,
+    pub last_scroll: Option<std::time::Instant>,
+    pub intervals_ms: Vec<f32>,
+    pub render_ms: Vec<f32>,
+}
+pub static FRAMES: OnceLock<Mutex<FrameStats>> = OnceLock::new();
+pub fn frames() -> &'static Mutex<FrameStats> {
+    FRAMES.get_or_init(|| Mutex::new(FrameStats { last_paint: None, last_scroll: None, intervals_ms: vec![], render_ms: vec![] }))
+}
+/// A zero-size element whose paint records the time since the previous paint (only while scrolling).
+pub fn frame_probe() -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        |_, _, _, _| {
+            let now = std::time::Instant::now();
+            let mut f = frames().lock();
+            let scrolling = f.last_scroll.map(|t| now.duration_since(t).as_millis() < 120).unwrap_or(false);
+            if let (Some(prev), true) = (f.last_paint, scrolling) {
+                let d = now.duration_since(prev).as_secs_f32() * 1000.0;
+                if d < 1000.0 {
+                    f.intervals_ms.push(d);
+                }
+            }
+            f.last_paint = Some(now);
+        },
+    )
+    .absolute()
+    .size_0()
+}
+pub fn frame_summary() -> serde_json::Value {
+    let f = frames().lock();
+    let mut v = f.intervals_ms.clone();
+    if v.is_empty() {
+        return serde_json::json!(null);
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let p = |q: f32| v[((v.len() as f32 - 1.0) * q) as usize];
+    let mut r = f.render_ms.clone();
+    r.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let rp = |q: f32| if r.is_empty() { 0.0 } else { r[((r.len() as f32 - 1.0) * q) as usize] };
+    serde_json::json!({"frames": v.len(), "p50": p(0.5), "p95": p(0.95), "p99": p(0.99), "max": v[v.len()-1], "over16": v.iter().filter(|x| **x > 16.7).count(), "over33": v.iter().filter(|x| **x > 33.4).count(), "rowRenderP50": rp(0.5), "rowRenderP99": rp(0.99)})
+}
+pub fn reset_frames() {
+    let mut f = frames().lock();
+    f.intervals_ms.clear();
+    f.render_ms.clear();
+}
+
+/// Resident memory of this process in MB (ps).
+pub fn rss_mb() -> f64 {
+    static LAST: OnceLock<Mutex<(std::time::Instant, f64)>> = OnceLock::new();
+    let l = LAST.get_or_init(|| Mutex::new((std::time::Instant::now() - Duration::from_secs(10), 0.0)));
+    let mut g = l.lock();
+    if g.0.elapsed().as_secs() >= 2 {
+        let out = std::process::Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output();
+        if let Ok(o) = out {
+            g.1 = String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().unwrap_or(0.0) / 1024.0;
+        }
+        g.0 = std::time::Instant::now();
+    }
+    g.1
+}
