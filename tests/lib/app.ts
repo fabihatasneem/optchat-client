@@ -27,7 +27,7 @@ export class App {
     try { Deno.removeSync(me.probes); } catch { /* none */ }
     try { Deno.removeSync(`${me.probes}.state.json`); } catch { /* none */ }
     const env = { OPTCHAT_REFRAME_MCP: "0", OPTCHAT_PROBES: me.probes, OPTCHAT_DB: me.db, ...(o.env ?? {}) };
-    const args = ["-n", "-W"];
+    const args = ["-n", "-W", "--stderr", `${me.dir}/stderr.txt`];
     for (const [k, v] of Object.entries(env)) args.push("--env", `${k}=${v}`);
     args.push(`${ROOT}/dist/OptChat.app`);
     await killLeftovers();
@@ -54,7 +54,9 @@ export class App {
       try { if (f()) return; } catch { /* retry */ }
       await sleep(150);
     }
-    throw new Error(`timed out waiting for ${what}; state=${JSON.stringify(this.state())?.slice(0, 600)}`);
+    const s = this.state() ?? {};
+    const brief = { active: s.active, focus: s.focus, frame: s.frame, current: s.current, loaded: s.loaded, view: s.view, overlay: s.overlay, palette: s.palette, ask: s.ask, sideOpen: s.sideOpen, status: s.status };
+    throw new Error(`timed out waiting for ${what}; state=${JSON.stringify(brief)}`);
   }
   /** run a Computer Use action; if the session lost the app, attach again (getApp + fresh state) and retry once */
   async act(code: string): Promise<{ text: string; images: string[] }> {
@@ -78,8 +80,16 @@ export class App {
     const p = await this.waitProbe(name, o.wait ?? 5000);
     await this.clickAt(p[0] + (o.dx ?? p[2] / 2), p[1] + (o.dy ?? p[3] / 2), o.right ? `{ mouseButton: "right" }` : "");
   }
-  async type(text: string) { await this.act(`await app.typeText(${JSON.stringify(text)}); 1`); await sleep(150); }
-  async key(k: string) { await this.act(`await app.pressKey(${JSON.stringify(k)}); 1`); await sleep(200); }
+  async type(text: string) { await this.ensureActive(); await this.act(`await app.typeText(${JSON.stringify(text)}); 1`); await sleep(150); }
+  /** keys reach only the key window: if another app took the focus, click a neutral spot (the status text) first */
+  async ensureActive() {
+    if (this.state()?.active !== false) return;
+    console.log("  (window inactive: clicking the status bar to activate it)");
+    const p = this.probe("status.text") ?? this.probe("statusbar");
+    if (p) await this.clickAt(p[0] + Math.min(p[2] / 2, 30), p[1] + p[3] / 2);
+    await this.waitFor(() => this.state()?.active !== false, 3000, "window active").catch(() => {});
+  }
+  async key(k: string) { await this.ensureActive(); await this.act(`await app.pressKey(${JSON.stringify(k)}); 1`); await sleep(200); }
   async scroll(name: string, dir: "up" | "down", pages = 3) {
     const p = await this.waitProbe(name);
     const [a, b] = this.px(p[0] + p[2] / 2, p[1] + p[3] / 2);
@@ -92,22 +102,56 @@ export class App {
     if (r.images[0]) Deno.writeFileSync(path, Uint8Array.from(atob(r.images[0]), (ch) => ch.charCodeAt(0)));
     return path;
   }
-  /** run a command palette entry: open, type, wait until the query is in, Return, wait until it closed */
-  async palette(q: string) {
-    await this.key("cmd+k");
-    await this.waitFor(() => this.state().overlay === "palette", 4000, "palette");
-    await this.type(q);
-    await this.waitFor(() => this.state().palette?.query === q, 4000, `palette query "${q}"`);
-    await this.key("Return");
-    await this.waitFor(() => this.state().overlay !== "palette", 4000, "palette closed");
-    await sleep(300);
+  /** scroll `container` (a probe name) until probe `name` is fully inside it; returns its bounds */
+  async reveal(name: string, container = "feed") {
+    for (let i = 0; i < 14; i++) {
+      const p = this.probe(name), box = this.probe(container);
+      if (p && box && p[1] >= box[1] && p[1] + p[3] <= box[1] + box[3]) return p;
+      if (p && box && p[3] > box[3] && p[1] <= box[1] + box[3] / 2) return p; // taller than the box: its top half is in
+      if (Deno.env.get("OPTCHAT_E2E_DEBUG")) console.log("reveal", name, p, box);
+      await this.scroll(container, p && box && p[1] < box[1] ? "up" : "down", 1);
+      await sleep(350);
+    }
+    throw new Error(`${name} not visible in ${container}`);
   }
+  /** run a command palette entry: open, type, wait until the query is in, Return, wait until it closed.
+   *  One retry (after Esc and re-activating the window): another app can take the key focus mid-run. */
+  async palette(q: string, opener = "cmd+k") {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.key(opener);
+        await this.waitFor(() => this.state().overlay === "palette", 3000, "palette");
+        await this.type(q);
+        await this.waitFor(() => this.state().palette?.query === q, 3000, `palette query "${q}"`);
+        await this.key("Return");
+        await this.waitFor(() => this.state().overlay !== "palette", 3000, "palette closed");
+        await sleep(300);
+        return;
+      } catch (e) {
+        if (attempt >= 1) throw e;
+        console.log(`  (palette "${q}" retry: ${String(e).slice(0, 80)})`);
+        await this.act(`await app.pressKey("Escape"); 1`);
+        const p = this.probe("status.text") ?? this.probe("statusbar");
+        if (p) await this.clickAt(p[0] + Math.min(p[2] / 2, 30), p[1] + p[3] / 2);
+        await sleep(400);
+      }
+    }
+  }
+  /** open a task with the switcher (⌘T) and wait until its data is shown */
+  async switchTo(id: number) {
+    await this.palette(`#${id} `, "cmd+t");
+    await this.waitFor(() => this.state().current === id && this.state().loaded, 10000, `open #${id}`);
+  }
+  /** the app's stderr so far (engine log lines, OPTCHAT_TIMING output) */
+  stderr(): string { try { return Deno.readTextFileSync(`${this.dir}/stderr.txt`); } catch { return ""; } }
   async quit() {
     try { await this.cua.js(`await app.pressKey("cmd+q"); 1`); } catch { /* gone */ }
     // `open -W` returns once the app has exited; if it has not within 8 s, kill our own instance
     const exited = await Promise.race([this.proc!.status.then(() => true), sleep(8000).then(() => false)]);
     if (!exited) { console.log("app did not quit on cmd+q: killing it"); await killLeftovers(); await this.proc!.status; }
     this.cua.close();
+    // the database copy is ~1.6 GB: never leave it behind (OPTCHAT_KEEP_E2E=1 keeps it for debugging)
+    if (!Deno.env.get("OPTCHAT_KEEP_E2E")) { try { Deno.removeSync(this.dir, { recursive: true }); } catch { /* gone */ } }
   }
 }
 

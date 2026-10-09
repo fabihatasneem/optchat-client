@@ -144,6 +144,9 @@ pub struct Stats {
     pub launch_ms: f64,
     pub first_frame_ms: Option<f64>,
     pub loaded_ms: Option<f64>,
+    /// task switches: from load_task to the first render with the task's data, ms
+    pub switch_t0: Option<std::time::Instant>,
+    pub switches: Vec<f64>,
     pub events: u64,
 }
 
@@ -285,12 +288,17 @@ impl AppState {
         self.save_prefs();
         let seq = self.open_seq;
         let t0 = std::time::Instant::now();
+        self.stats.switch_t0 = Some(t0);
         self.run(cx, move |h| h.snapshot(id), move |s, snap, cx| {
             if s.open_seq != seq {
                 return;
             }
             if let Some(snap) = snap {
+                let ta = std::time::Instant::now();
                 s.apply_snapshot(snap);
+                if std::env::var("OPTCHAT_TIMING").is_ok() {
+                    eprintln!("open #{id}: snapshot arrived {:?}, applied in {:?}", ta.duration_since(t0), ta.elapsed());
+                }
                 if s.stats.loaded_ms.is_none() {
                     s.stats.loaded_ms = Some(s.stats.launch_ms + t0.elapsed().as_secs_f64() * 1000.0);
                 }

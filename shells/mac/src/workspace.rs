@@ -118,6 +118,8 @@ pub struct Workspace {
     m_press: Option<std::time::Instant>,
     _subs: Vec<Subscription>,
     _ticker: Option<Task<()>>,
+    renders: u64,
+    focus_desc: &'static str,
 }
 
 impl Workspace {
@@ -158,8 +160,11 @@ impl Workspace {
                 this.update_title(window, cx);
             }
         }));
+        crate::ui::anim::set_window_active(window.is_window_active());
+        crate::ui::set_state_extra("active", serde_json::json!(window.is_window_active()));
         subs.push(cx.observe_window_activation(window, |_, window, _| {
             crate::ui::anim::set_window_active(window.is_window_active());
+            crate::ui::set_state_extra("active", serde_json::json!(window.is_window_active()));
         }));
         subs.push(cx.observe_window_appearance(window, |_, window, cx| {
             crate::theme::sync_window(window, cx);
@@ -175,7 +180,16 @@ impl Workspace {
         // a closed menu or a removed element leaves nothing focused, and then no workspace key works:
         // give focus back to the workspace (its keys, M to dictate)
         subs.push(cx.on_focus_lost(window, |this: &mut Workspace, window, cx| {
-            window.focus(&this.focus);
+            let input = match &this.overlay {
+                Some(Overlay::Palette(p)) => Some(p.read(cx).input()),
+                Some(Overlay::NewTask(d)) => Some(d.read(cx).input()),
+                _ if this.ask.is_some() => Some(this.ask_input.clone()),
+                _ => None,
+            };
+            match input {
+                Some(i) => i.update(cx, |i, cx| i.focus(window, cx)),
+                None => window.focus(&this.focus),
+            }
             cx.notify();
         }));
         let focus = cx.focus_handle();
@@ -200,7 +214,28 @@ impl Workspace {
             m_press: None,
             _subs: subs,
             _ticker: None,
+            renders: 0,
+            focus_desc: "",
         }
+    }
+
+    /// The app state for UI tests (OPTCHAT_PROBES): written at every render and every 250 ms, so it stays fresh
+    /// while macOS skips drawing an occluded window.
+    pub fn publish_state(&self, cx: &App) {
+            let s = self.state.read(cx);
+            let th = cx.global::<crate::theme::Themes>();
+            let last_talk = s.cur.log.iter().rev().find(|e| e.kind == LogKind::Talk).map(|e| e.text.clone());
+            let j = serde_json::json!({
+                "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
+                "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
+                "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "focus": self.focus_desc,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
+                "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
+                "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
+                "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
+                "firstFrameMs": s.stats.first_frame_ms, "frames": frame_summary(), "rss": crate::ui::rss_mb(), "loadedMs": s.stats.loaded_ms, "switches": s.stats.switches, "errors": s.errors.clone(),
+            });
+            set_state_json(j.to_string());
     }
 
     /// Redraws ambient animations (spinners, pulsing dots) at 12.5 Hz (2.5 Hz while the window is in the
@@ -208,6 +243,15 @@ impl Workspace {
     /// an idle window with a "summarizing" spinner costs.
     pub fn start_ticker(&mut self, cx: &mut Context<Self>) {
         use crate::ui::anim;
+        if probes_on() {
+            cx.spawn(async move |this, cx| loop {
+                Timer::after(std::time::Duration::from_millis(250)).await;
+                if this.update(cx, |w, cx| w.publish_state(cx)).is_err() {
+                    break;
+                }
+            })
+            .detach();
+        }
         self._ticker = Some(cx.spawn(async move |this, cx| loop {
             let ms = if anim::window_active() { 80 } else { 400 };
             Timer::after(std::time::Duration::from_millis(ms)).await;
@@ -364,26 +408,39 @@ impl Render for Workspace {
             let launch = crate::LAUNCH.get().map(|t| t.elapsed().as_secs_f64() * 1000.0).unwrap_or(0.0);
             self.state.update(cx, |s, _| s.stats.first_frame_ms = Some(launch));
         }
+        if self.state.read(cx).cur.loaded && self.state.read(cx).stats.switch_t0.is_some() {
+            self.state.update(cx, |s, _| {
+                if let Some(t0) = s.stats.switch_t0.take() {
+                    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+                    if std::env::var("OPTCHAT_TIMING").is_ok() {
+                        eprintln!("open #{}: first render with data at {ms:.1} ms", s.current);
+                    }
+                    s.stats.switches.push(ms);
+                }
+            });
+        }
         // nothing focused (a finished task has no composer, a dialog closed): keep the workspace's keys working
         let ended_now = self.state.read(cx).info().map(|i| i.task.status.terminal()).unwrap_or(false);
         if self.overlay.is_none() && self.ask.is_none() && (window.focused(cx).is_none() || (ended_now && !self.focus.contains_focused(window, cx))) {
             window.focus(&self.focus);
         }
+        self.renders = crate::ui::frame_count();
         if probes_on() {
-            let s = self.state.read(cx);
-            let th = cx.global::<crate::theme::Themes>();
-            let last_talk = s.cur.log.iter().rev().find(|e| e.kind == LogKind::Talk).map(|e| e.text.clone());
-            let j = serde_json::json!({
-                "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
-                "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
-                "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": crate::ui::frame_count(),  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
-                "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
-                "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
-                "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
-                "firstFrameMs": s.stats.first_frame_ms, "frames": frame_summary(), "rss": crate::ui::rss_mb(), "loadedMs": s.stats.loaded_ms, "errors": s.errors.clone(),
-            });
-            set_state_json(j.to_string());
+            let ci = self.composer.read(cx).input.read(cx).focus_handle(cx);
+            self.focus_desc = if window.focused(cx).is_none() {
+                "none"
+            } else if ci.is_focused(window) {
+                "composer"
+            } else if self.focus.is_focused(window) {
+                "workspace"
+            } else if self.focus.contains_focused(window, cx) {
+                "inside"
+            } else {
+                "outside"
+            };
+        }
+        if probes_on() {
+            self.publish_state(cx);
         }
         let s = self.state.read(cx);
         let open = self.side_open(cx);

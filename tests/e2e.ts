@@ -12,11 +12,14 @@
 //   panels    ⌘1–⌘6 + ⌘B, zoom, status bar model / effort menus, budgets popover, models rate edit (saved to the DB),
 //             request log + subtree, context debugger + wire, settings tabs, narrow window sheet + Esc, context menu,
 //             tab switcher / ctrl-tab / ⌘W, memory search + reveal
+//   chat      tool card expand, step table, context ↗ → Context view, image lightbox, Continue as a new task, new-task
+//             mode cards, task row / tab context menus (existing history, no model calls)
 //   perf      launch, scrolling frame times on 1749 messages, task switch, memory (release build)
 import { ROOT } from "./lib/cua.ts";
 const ALL = [
   { name: "panels", models: false },
   { name: "features", models: false },
+  { name: "chat", models: false },
   { name: "smoke", models: true },
   { name: "flow", models: true },
   { name: "perf", models: false },

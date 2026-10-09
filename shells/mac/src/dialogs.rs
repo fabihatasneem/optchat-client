@@ -328,6 +328,11 @@ impl Render for MetricsPop {
 }
 
 // ---- new task dialog ------------------------------------------------------------------------------------------------
+impl NewTaskDialog {
+    pub fn input(&self) -> Entity<InputState> {
+        self.title.clone()
+    }
+}
 pub struct NewTaskDialog {
     state: Entity<AppState>,
     parent: i64,
@@ -583,6 +588,9 @@ pub struct Palette {
     _subs: Vec<Subscription>,
 }
 impl Palette {
+    pub fn input(&self) -> Entity<InputState> {
+        self.query.clone()
+    }
     /// for UI tests: the query and the label of the selected item
     pub fn probe_state(&self, cx: &App) -> serde_json::Value {
         serde_json::json!({ "query": self.query.read(cx).value().to_string(), "selected": self.items.get(self.sel).map(|x| x.0.clone()) })
@@ -714,7 +722,7 @@ impl Palette {
             }
         }
         if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && !self.tasks_only {
-            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide")] {
+            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast")] {
                 if let Some(sc) = fuzzy(&q, l) {
                     items.push((sc + 60, l.to_string(), String::new(), Cmd::Act(a)));
                 }
@@ -845,6 +853,8 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
             "t-frames" => crate::ui::reset_frames(),
             "t-narrow" => window.resize(size(px(700.), px(820.))),
             "t-wide" => window.resize(size(px(1360.), px(880.))),
+            "t-scroll" => w.feed.update(cx, |f, cx| f.test_gesture(6.0, 14.0, cx)),
+            "t-scroll-fast" => w.feed.update(cx, |f, cx| f.test_gesture(4.0, 60.0, cx)),
             _ => {}
         },
     }

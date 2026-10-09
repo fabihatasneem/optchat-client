@@ -138,8 +138,7 @@ try {
     check(true, "right-click on a message opens its context menu (see screenshot)");
   });
   await step("tabs", async () => {
-    await a.key("cmd+t"); await a.type("#92 "); await sleep(250); await a.key("Return");
-    await a.waitFor(() => st().current === 92 && st().loaded, 10000, "open #92");
+    await a.switchTo(92);
     check(st().tabs.includes(92), "the switcher opens #92 in a tab");
     await sleep(500);
     await a.shot("panels-16-tab");

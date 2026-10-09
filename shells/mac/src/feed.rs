@@ -17,6 +17,8 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub enum Row {
+    /// "Load earlier messages (N more)": the feed shows the last PAGE entries until asked for more
+    LoadEarlier(usize),
     Divider,
     Empty,
     Skeleton,
@@ -53,6 +55,23 @@ pub struct Feed {
     pub images: HashMap<String, Option<Arc<Image>>>,
     _ticker: Option<Task<()>>,
     _subs: Vec<Subscription>,
+    /// first log index shown (paging); None until the task's log is in
+    from: Option<usize>,
+    loading_more: bool,
+    /// the user scrolled away from the bottom: new text no longer pulls the view down (follow mode off)
+    pub scrolled_up: bool,
+}
+
+/// entries shown when a task opens, and added per "load earlier" (like the web app's snapshot of 120)
+pub const PAGE: usize = 120;
+pub const MORE: usize = 200;
+
+/// move `from` back to the start of its turn group, so a turn is never split
+fn group_start(log: &[Arc<LogEntry>], mut from: usize) -> usize {
+    while from > 0 && from < log.len() && log[from].turn_id.is_some() && log[from - 1].turn_id == log[from].turn_id {
+        from -= 1;
+    }
+    from
 }
 
 const WORK_RE: &str = r"^\[[ac]\d+\] ";
@@ -76,8 +95,21 @@ impl Feed {
             images: HashMap::new(),
             _ticker: None,
             _subs: vec![sub],
+            from: None,
+            loading_more: false,
+            scrolled_up: false,
         };
         f.sync(cx);
+        let me = cx.entity().downgrade();
+        f.list.set_scroll_handler(move |ev: &ListScrollEvent, _, cx| {
+            let up = ev.is_scrolled;
+            let _ = me.update(cx, |f, cx| {
+                if f.scrolled_up != up {
+                    f.scrolled_up = up;
+                    cx.notify();
+                }
+            });
+        });
         // a 1 s tick while something runs: elapsed timers
         f._ticker = Some(cx.spawn(async move |this, cx| loop {
             Timer::after(std::time::Duration::from_millis(1000)).await;
@@ -92,6 +124,32 @@ impl Feed {
             }
         }));
         f
+    }
+
+    /// Test hook: a continuous scroll at 120 Hz (`px` per step, direction flips every second) through the same
+    /// list scrolling, layout and paint path as a trackpad gesture (synthetic OS events need permissions we don't take).
+    pub fn test_gesture(&mut self, secs: f32, px_step: f32, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let t0 = std::time::Instant::now();
+            let mut flip = t0;
+            let mut dir = -1.0f32;
+            while t0.elapsed().as_secs_f32() < secs {
+                Timer::after(std::time::Duration::from_micros(8333)).await;
+                if flip.elapsed().as_secs_f32() >= 1.0 {
+                    dir = -dir;
+                    flip = std::time::Instant::now();
+                }
+                let ok = this.update(cx, |f, cx| {
+                    frames().lock().last_scroll = Some(std::time::Instant::now());
+                    f.list.scroll_by(px(px_step * dir));
+                    cx.notify();
+                });
+                if ok.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     /// the chat text zoom changed: every row's height changes, so measure them all again
@@ -130,8 +188,15 @@ impl Feed {
             self.live_md.clear();
             self.open.clear();
             self.full.clear();
+            self.from = None;
+            for p in ["tool.", "img.", "foot.", "feed.more", "feed.jump"] {
+                crate::ui::clear_probes(p);
+            }
         }
-        let rows = build_rows(s);
+        if self.from.is_none() && s.cur.loaded {
+            self.from = Some(group_start(&s.cur.log, s.cur.log.len().saturating_sub(PAGE)));
+        }
+        let rows = build_rows(s, self.from.unwrap_or(0));
         let keys: Vec<(String, u64)> = rows.iter().map(|r| row_key(r, s, &self.open)).collect();
         if switched {
             self.list.reset(rows.len());
@@ -140,6 +205,14 @@ impl Feed {
             let old = self.keys.len();
             if k < old || k < keys.len() {
                 self.list.splice(k..old, keys.len() - k);
+            }
+            // the user's own new message: follow again (like sending in the web app)
+            let sent = keys.len() > old && rows[old..].iter().any(|r| matches!(r, Row::User(_) | Row::Image(_)));
+            if sent && self.scrolled_up {
+                self.rows = rows;
+                self.keys = keys;
+                self.jump_to_bottom(cx);
+                return;
             }
         }
         self.rows = rows;
@@ -214,6 +287,7 @@ fn row_blobs(r: &Row) -> Vec<String> {
 fn row_key(r: &Row, s: &AppState, open: &HashSet<String>) -> (String, u64) {
     let o = |k: &str| if open.contains(k) { 1u64 << 40 } else { 0 };
     match r {
+        Row::LoadEarlier(n) => ("more".into(), *n as u64),
         Row::Divider => ("div".into(), 0),
         Row::Empty => ("empty".into(), s.tasks.get(&s.current).map(|t| t.task.status as u64).unwrap_or(0)),
         Row::Skeleton => ("skel".into(), 0),
@@ -241,7 +315,7 @@ fn row_key(r: &Row, s: &AppState, open: &HashSet<String>) -> (String, u64) {
     }
 }
 
-pub fn build_rows(s: &AppState) -> Vec<Row> {
+pub fn build_rows(s: &AppState, from: usize) -> Vec<Row> {
     if !s.cur.loaded {
         return vec![Row::Skeleton];
     }
@@ -253,8 +327,12 @@ pub fn build_rows(s: &AppState) -> Vec<Row> {
     let work = regex_lite(WORK_RE);
     let running_id = s.cur.running.as_ref().map(|r| r.id.clone());
     let mut rows = vec![];
+    let from = from.min(log.len());
+    if from > 0 {
+        rows.push(Row::LoadEarlier(from));
+    }
     // groups by turnId
-    let mut k = 0;
+    let mut k = from;
     let mut seen_running = false;
     while k < log.len() {
         let tid = log[k].turn_id.clone();
@@ -338,6 +416,12 @@ fn regex_lite(_: &str) -> impl Fn(&str) -> bool {
 impl Render for Feed {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::ui::anim::area(crate::ui::anim::FEED);
+        // row probes are re-recorded by the rows rendered in this frame: drop the ones scrolled out of range
+        if crate::ui::probes_on() {
+            for p in ["tool.", "img.", "foot.", "feed.more", "feed.jump", "feed.last"] {
+                crate::ui::clear_probes(p);
+            }
+        }
         let this = cx.entity().downgrade();
         let k = c(cx).clone();
         div()
@@ -362,7 +446,29 @@ impl Render for Feed {
                 })
                 .size_full(),
             )
-
+            .when(self.scrolled_up, |d| {
+                let k2 = k.clone();
+                d.relative().child(
+                    div().absolute().bottom(px(14.)).right(px(22.)).child(
+                        div()
+                            .id("jump-bottom")
+                            .size(px(34.))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(k2.panel2)
+                            .border_1()
+                            .border_color(k2.line2)
+                            .shadow_md()
+                            .cursor_pointer()
+                            .hover(move |s| s.bg(k2.hover))
+                            .child(icon("arrow-down", 16., k.text2))
+                            .child(probe("feed.jump"))
+                            .on_click(cx.listener(|f, _, _, cx| f.jump_to_bottom(cx))),
+                    ),
+                )
+            })
     }
 }
 
@@ -378,6 +484,7 @@ impl Feed {
         let first = ix == 0;
         let last = ix + 1 == self.rows.len();
         let el = match row {
+            Row::LoadEarlier(n) => self.load_earlier_row(n, cx),
             Row::Skeleton => self.skeleton(cx),
             Row::Empty => self.empty(cx),
             Row::Divider => self.divider(cx),
@@ -449,6 +556,72 @@ impl Feed {
                 .child(div().text_size(zx(12.)).child("Running on your local Claude Code and Codex logins."))
                 .into_any_element(),
         }
+    }
+
+    fn load_earlier_row(&mut self, n: usize, cx: &mut Context<Self>) -> AnyElement {
+        let k = c(cx).clone();
+        let hover = k.hover;
+        // reaching the top loads more on its own (infinite load); the button is there for keyboard / clarity
+        if !self.loading_more {
+            self.loading_more = true;
+            cx.spawn(async move |this, cx| {
+                Timer::after(std::time::Duration::from_millis(16)).await;
+                let _ = this.update(cx, |f, cx| f.load_earlier(cx));
+            })
+            .detach();
+        }
+        div()
+            .flex()
+            .justify_center()
+            .py(zx(10.))
+            .child(
+                div()
+                    .id("load-earlier")
+                    .px(zx(12.))
+                    .py(zx(5.))
+                    .rounded(zx(8.))
+                    .border_1()
+                    .border_color(k.line2)
+                    .text_size(zx(12.))
+                    .text_color(k.text2)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover))
+                    .child(format!("Load earlier messages ({n} more)"))
+                    .child(probe("feed.more"))
+                    .on_click(cx.listener(|f, _, _, cx| f.load_earlier(cx))),
+            )
+            .into_any_element()
+    }
+
+    /// Follow again: back to the bottom, pinned there while new text streams in.
+    pub fn jump_to_bottom(&mut self, cx: &mut Context<Self>) {
+        // only a reset puts a bottom-aligned list back into its pinned (None) state
+        self.list.reset(self.rows.len());
+        self.scrolled_up = false;
+        cx.notify();
+    }
+
+    /// Show MORE earlier entries, keeping the rows on screen where they are.
+    pub fn load_earlier(&mut self, cx: &mut Context<Self>) {
+        self.loading_more = false;
+        let Some(from) = self.from else { return };
+        if from == 0 {
+            return;
+        }
+        let top = self.list.logical_scroll_top();
+        let old = self.rows.len();
+        let s = self.state.read(cx);
+        self.from = Some(group_start(&s.cur.log, from.saturating_sub(MORE)));
+        let rows = build_rows(s, self.from.unwrap());
+        let keys: Vec<(String, u64)> = rows.iter().map(|r| row_key(r, s, &self.open)).collect();
+        // old rows: [more, r1..rn]; new rows: [more?, earlier..., r1..rn]. Replace the old "more" row so r1..rn
+        // keep their measured heights and only the earlier rows get measured.
+        let added = rows.len() as isize - old as isize;
+        self.list.splice(0..1, rows.len() + 1 - old);
+        self.rows = rows;
+        self.keys = keys;
+        self.list.scroll_to(ListOffset { item_ix: (top.item_ix as isize + added).max(0) as usize, offset_in_item: top.offset_in_item });
+        cx.notify();
     }
 
     fn divider(&self, cx: &App) -> AnyElement {
@@ -554,6 +727,7 @@ impl Feed {
             .overflow_hidden()
             .cursor_pointer()
             .child(img_el)
+            .child(probe(format!("img.{}", &blob[..12.min(blob.len())])))
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::Lightbox(blob.clone()))))
             .into_any_element()
     }
@@ -791,7 +965,7 @@ impl Feed {
             Some(s) => s.input.clone(),
             None if e.kind == LogKind::Tool => {
                 let rest = e.text.splitn(2, ' ').nth(1).unwrap_or("");
-                serde_json::from_str(rest).unwrap_or(serde_json::Value::String(e.text.clone()))
+                serde_json::from_str(rest).unwrap_or_else(|_| lenient_json(rest).unwrap_or(serde_json::Value::String(e.text.clone())))
             }
             None => serde_json::Value::Null,
         };
@@ -823,6 +997,7 @@ impl Feed {
             .child(
                 div()
                     .id(ElementId::Name(format!("th{}", e.i).into()))
+                    .child(probe(format!("tool.{}", e.i)))
                     .flex()
                     .items_center()
                     .gap(zx(9.))
@@ -1052,6 +1227,7 @@ impl Feed {
         row = row.child(
             chip(format!("{} step{} {}", reqs.len(), if reqs.len() == 1 { "" } else { "s" }, if open { "▴" } else { "▾" }), ChipTone::Plain, cx)
                 .id(ElementId::Name(format!("steps{turn_id}").into()))
+                .child(probe(format!("foot.steps.{turn_id}")))
                 .cursor_pointer()
                 .on_click(cx.listener({
                     let key = key.clone();
@@ -1072,7 +1248,7 @@ impl Feed {
         }
         if let Some(l) = &last {
             let rid = l.id.clone();
-            row = row.child(chip("context ↗", ChipTone::Plain, cx).id(ElementId::Name(format!("ctx{turn_id}").into())).cursor_pointer().on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::SelectRequest(rid.clone())))));
+            row = row.child(chip("context ↗", ChipTone::Plain, cx).id(ElementId::Name(format!("ctx{turn_id}").into())).child(probe(format!("foot.ctx.{turn_id}"))).cursor_pointer().on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::SelectRequest(rid.clone())))));
         }
         let mut d = div().flex().flex_col().mb(zx(18.));
         if let Some(err) = &turn.error {
@@ -1171,6 +1347,42 @@ fn split_work(text: &str) -> Vec<(String, String)> {
     out
 }
 
+/// The complete top-level fields of a JSON object whose text was cut (long tool inputs are stored shortened):
+/// `{"mode":"handoff","title":"x","instruction":"very lo` -> {"mode":"handoff","title":"x"}.
+pub fn lenient_json(text: &str) -> Option<serde_json::Value> {
+    let t = text.trim_start();
+    if !t.starts_with('{') {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    // walk "key": value pairs with a tiny scanner: each value is handed to serde, a cut one ends the walk
+    let b = t.as_bytes();
+    let mut i = 1;
+    loop {
+        while i < b.len() && (b[i] == b' ' || b[i] == b',' || b[i] == b'\n' || b[i] == b'\t' || b[i] == b'\r') {
+            i += 1;
+        }
+        if i >= b.len() || b[i] != b'"' {
+            break;
+        }
+        let mut stream = serde_json::Deserializer::from_str(&t[i..]).into_iter::<String>();
+        let Some(Ok(key)) = stream.next() else { break };
+        i += stream.byte_offset();
+        while i < b.len() && (b[i] == b' ' || b[i] == b':') {
+            i += 1;
+        }
+        let mut vs = serde_json::Deserializer::from_str(&t[i..]).into_iter::<serde_json::Value>();
+        match vs.next() {
+            Some(Ok(v)) => {
+                i += vs.byte_offset();
+                out.insert(key, v);
+            }
+            _ => break,
+        }
+    }
+    if out.is_empty() { None } else { Some(serde_json::Value::Object(out)) }
+}
+
 pub fn arg_preview(name: &str, input: &serde_json::Value) -> String {
     let s = |k: &str| input.get(k).map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).unwrap_or_default();
     let has = |k: &str| input.get(k).map(|v| !v.is_null()).unwrap_or(false);
@@ -1222,3 +1434,18 @@ pub fn logo(size: f32, cx: &App) -> Div {
 
 #[allow(dead_code)]
 fn _unused(_: &C) {}
+
+#[cfg(test)]
+mod lenient_tests {
+    use super::*;
+    #[::core::prelude::v1::test]
+    fn cut_tool_input() {
+        let v = lenient_json(r#"{"mode":"handoff","title":"clean caches","n":3,"instruction":"do this and th"#).unwrap();
+        assert_eq!(v["mode"], "handoff");
+        assert_eq!(v["title"], "clean caches");
+        assert_eq!(v["n"], 3);
+        assert!(v.get("instruction").is_none());
+        assert_eq!(arg_preview("task_spawn", &v), "handoff: clean caches");
+        assert!(lenient_json("not json").is_none());
+    }
+}
