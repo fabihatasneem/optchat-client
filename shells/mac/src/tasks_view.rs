@@ -1,0 +1,161 @@
+//! The Tasks view (sidebar): the current task's subtree with its ancestors above it, or every task.
+use crate::dialogs;
+use crate::fmt;
+use crate::state::*;
+use crate::theme::c;
+use crate::ui::*;
+use crate::workspace::Workspace;
+use gpui::prelude::FluentBuilder;
+use gpui::*;
+use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use optchat_engine::engine::TaskInfo;
+
+pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) -> impl IntoElement {
+    let k = c(cx).clone();
+    let s = w.state.read(cx);
+    let mut list = div().flex().flex_col().pb(px(16.)).px(px(6.));
+    if s.tasks.get(&s.current).is_none() || s.tasks.get(&0).is_none() {
+        return list.child(skeleton_line(None, cx)).child(skeleton_line(Some(160.), cx)).child(skeleton_line(None, cx));
+    }
+    let mut rows: Vec<(TaskInfo, usize, bool)> = vec![];
+    let show_ended = s.prefs.show_ended;
+    let cur = s.current;
+    fn walk(s: &AppState, id: i64, depth: usize, closed: &std::collections::HashSet<i64>, show_ended: bool, cur: i64, out: &mut Vec<(TaskInfo, usize, bool)>) {
+        let Some(x) = s.tasks.get(&id) else { return };
+        out.push((x.clone(), depth, false));
+        if closed.contains(&id) {
+            return;
+        }
+        for c in s.children_of(id) {
+            if show_ended || !c.task.status.terminal() || c.task.id == cur {
+                walk(s, c.task.id, depth + 1, closed, show_ended, cur, out);
+            }
+        }
+    }
+    if s.prefs.task_scope_all {
+        walk(s, 0, 0, &w.collapsed, show_ended, cur, &mut rows);
+    } else {
+        let up = s.ancestors(cur);
+        let n = up.len();
+        for (d, x) in up.into_iter().enumerate() {
+            rows.push((x.clone(), d, true));
+        }
+        walk(s, cur, n, &w.collapsed, show_ended, cur, &mut rows);
+    }
+    let no_kids = s.children_of(cur).is_empty();
+    let up_n = if s.prefs.task_scope_all { 0 } else { s.ancestors(cur).len() };
+    let scope_all = s.prefs.task_scope_all;
+    for (x, depth, path) in rows {
+        list = list.child(row(w, &x, depth, path, cx));
+    }
+    if no_kids && !scope_all {
+        list = list.child(div().pl(px(40. + up_n as f32 * 14.)).py(px(6.)).text_size(px(12.)).text_color(k.faint).child("no subtasks yet"));
+    }
+    list
+}
+
+fn row(w: &Workspace, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<Workspace>) -> impl IntoElement {
+    let k = c(cx).clone();
+    let s = w.state.read(cx);
+    let t = &x.task;
+    let id = t.id;
+    let is_cur = id == s.current;
+    let ended = t.status.terminal();
+    let kids = if path { 0 } else { s.children_of(id).iter().filter(|c| s.prefs.show_ended || !c.task.status.terminal() || c.task.id == s.current).count() };
+    let open = !w.collapsed.contains(&id);
+    let usd = sub(Some(x), "usd");
+    let active = sub(Some(x), "time.active");
+    let tip = format!(
+        "{}\n#{} · {} · {}{}{}",
+        t.title,
+        id,
+        t.mode.as_str(),
+        t.status.as_str(),
+        t.reason.as_ref().map(|r| format!(" ({r})")).unwrap_or_default(),
+        t.result.as_ref().map(|r| format!("\n→ {r}")).unwrap_or_default()
+    );
+    let status_word = if x.running { "working".to_string() } else if x.waiting { "waiting".into() } else { t.status.as_str().into() };
+    let st_col = match t.status.as_str() {
+        "paused" => k.amber,
+        "canceled" => k.red,
+        "done" => k.green,
+        "active" => k.accent,
+        _ => k.muted,
+    };
+    let hover = k.hover;
+    let mut meta = div().flex().gap(px(7.)).text_size(px(11.)).text_color(k.faint).whitespace_nowrap().child(div().font_family("Menlo").child(format!("#{id}")));
+    if usd > 0 {
+        meta = meta.child(fmt::usd(usd as f64 / 1e6));
+    }
+    if active >= 1000 {
+        meta = meta.child(fmt::ms(active));
+    }
+    if t.parent.is_some() {
+        meta = meta.child(t.mode.as_str().to_string());
+    }
+    if t.status.as_str() != "idle" {
+        meta = meta.child(div().text_color(st_col).child(status_word));
+    }
+    let can_pause = !ended && t.status.as_str() != "paused" && t.status.as_str() != "pending";
+    let st = w.state.clone();
+    div()
+        .id(SharedString::from(format!("trow-{id}")))
+        .flex()
+        .items_center()
+        .gap(px(7.))
+        .h(px(40.))
+        .pl(px(6. + depth as f32 * 14.))
+        .pr(px(8.))
+        .rounded(px(7.))
+        .cursor_pointer()
+        .text_color(if path { k.muted } else { k.text2 })
+        .when(is_cur, |d| d.bg(k.accent_bg).text_color(k.text).child(div().absolute().left_0().top(px(6.)).bottom(px(6.)).w(px(2.)).bg(k.accent)))
+        .when(!is_cur, |d| d.hover(move |s| s.bg(hover)))
+        .relative()
+        .tooltip(tooltip(tip))
+        .child(probe(format!("trow.{id}")))
+        .child(
+            div()
+                .id(SharedString::from(format!("tw-{id}")))
+                .w(px(12.))
+                .flex_none()
+                .when(kids > 0, |d| {
+                    d.child(icon("chevron-right", 13., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25))))).on_click(cx.listener(move |w, _, _, cx| {
+                        cx.stop_propagation();
+                        if !w.collapsed.remove(&id) {
+                            w.collapsed.insert(id);
+                        }
+                        cx.notify();
+                    }))
+                }),
+        )
+        .child(status_dot(format!("tr{id}"), t.status.as_str(), 8., cx))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(1.))
+                .child(div().text_size(px(13.)).overflow_hidden().whitespace_nowrap().text_ellipsis().when(ended, |d| d.text_color(k.muted)).child(task_name(t)))
+                .child(meta),
+        )
+        .when(x.running, |d| d.child(spinner(SharedString::from(format!("trs{id}")), 13., k.accent)))
+        .on_click(cx.listener(move |w, _, window, cx| w.open_task(id, window, cx)))
+        .context_menu(move |m, _, _| {
+            let st1 = st.clone();
+            let st2 = st.clone();
+            let mut m = m.item(PopupMenuItem::new("Open").on_click({
+                let st = st.clone();
+                move |_, _, cx| st.update(cx, |s, cx| s.open_task(id, cx))
+            }));
+            if can_pause {
+                m = m.item(PopupMenuItem::new("Pause").on_click(move |_, _, cx| st1.update(cx, |s, cx| s.command(cx, true, move |h| h.pause(id, "")))));
+            }
+            if !ended {
+                m = m.item(PopupMenuItem::new("Cancel").on_click(move |_, _, cx| st2.update(cx, |s, cx| s.command(cx, true, move |h| h.cancel(id, "")))));
+            }
+            m.separator().item(PopupMenuItem::new(format!("Copy #{id}")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(format!("#{id}")))))
+        })
+        .when(false, |d| d.child(dialogs::noop()))
+}
