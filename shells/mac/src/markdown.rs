@@ -528,7 +528,7 @@ pub fn highlight(text: &str, lang: &str, k: &C) -> StyledText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[::core::prelude::v1::test]
     fn parses() {
         let d = parse("# Title\n\nsome **bold** and `code` [link](https://x.y)\n\n- a\n- [x] b\n  - nested\n\n```rust\nfn x() {}\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> quote");
         assert!(matches!(d[0], Block::Heading(1, _)));

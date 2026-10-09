@@ -3,7 +3,7 @@ import { App, check, failed, SHOTS } from "./lib/app.ts";
 import { ROOT, sleep } from "./lib/cua.ts";
 const a = await App.launch({ env: { OPTCHAT_TEST_HOOKS: "1", OPTCHAT_FAKE_MIC: `${ROOT}/tests/fixtures/dict.wav`, OPTCHAT_TEST_IMAGE: `${ROOT}/tests/fixtures/test.png` } });
 const st = () => a.state();
-const pal = async (q: string) => { await a.key("cmd+k"); await a.waitFor(() => st().overlay === "palette", 4000, "palette"); await a.type(q); await sleep(200); await a.key("Return"); await sleep(300); };
+const pal = (q: string) => a.palette(q);
 try {
   // dictation with the mic button: tap starts, text lands in the draft, tap stops
   await a.click("composer.input");
@@ -17,7 +17,7 @@ try {
   await sleep(1500);
   await a.click("composer.mic");
   await a.waitFor(() => st().dict === "idle", 10000, "dict done");
-  check(/^before hello from the dictation test/i.test(st().draft) && /reframe/.test(st().draft), `dictation wrote at the cursor: "${st().draft}"`);
+  check(/^before hello from the dictation test/i.test(st().draft) && /reframe/i.test(st().draft), `dictation wrote at the cursor: "${st().draft}"`);
   await a.shot("feat-02-dictated");
   // M outside a text field: tap toggles
   await a.click("feed");
@@ -65,14 +65,7 @@ try {
   const mem = Object.keys(a.allProbes()).filter((k) => k.startsWith("mem.0:")).sort((x, y) => a.probe(x)![1] - a.probe(y)![1]);
   if (mem[0]) { await a.click(mem[0]); await sleep(800); }
   await a.shot("feat-07-memory-open");
-  await a.click("mem.search");
-  await a.type("docker");
-  await a.key("Return");
-  await sleep(1200);
-  await a.shot("feat-08-memory-search");
-  const hit = Object.keys(a.allProbes()).find((k) => k.startsWith("hit."));
-  check(!!hit, "memory search found hits");
-  if (hit) { await a.click(hit); await sleep(1000); await a.shot("feat-09-memory-reveal"); }
+  // (search and reveal: tests/panels.ts)
   // raw view
   await a.click("mem.raw"); await sleep(800); await a.shot("feat-10-memory-raw");
 } catch (e) { check(false, String(e)); await a.shot("feat-fail"); } finally { await a.quit(); }

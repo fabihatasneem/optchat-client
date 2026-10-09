@@ -278,6 +278,7 @@ impl MemoryPanel {
 impl Render for MemoryPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        crate::ui::anim::area(crate::ui::anim::PANEL);
         let body = self.body(window, cx).into_any_element();
         div().id("scroll-MemoryPanel").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(body)
     }
@@ -554,6 +555,7 @@ fn msg_texts(m: &Message) -> (String, String, String) {
 impl Render for ContextPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        crate::ui::anim::area(crate::ui::anim::PANEL);
         let body = self.body(window, cx).into_any_element();
         crate::ui::scroll_body("ContextPanel", body)
     }
@@ -722,6 +724,7 @@ impl LogPanel {
 impl Render for LogPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        crate::ui::anim::area(crate::ui::anim::PANEL);
         let body = self.body(window, cx).into_any_element();
         crate::ui::scroll_body("LogPanel", body)
     }
@@ -892,6 +895,7 @@ impl ModelsPanel {
 impl Render for ModelsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        crate::ui::anim::area(crate::ui::anim::PANEL);
         let body = self.body(window, cx).into_any_element();
         crate::ui::scroll_body("ModelsPanel", body)
     }
@@ -1117,6 +1121,7 @@ fn picker_btn(id: &str, label: String, items: Vec<(String, String, bool)>, on: s
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        crate::ui::anim::area(crate::ui::anim::PANEL);
         let body = self.body(window, cx).into_any_element();
         crate::ui::scroll_body("SettingsPanel", body)
     }

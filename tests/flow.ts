@@ -4,7 +4,7 @@ import { sleep } from "./lib/cua.ts";
 const a = await App.launch();
 const st = () => a.state();
 try {
-  await a.key("cmd+k"); await a.type("Model: Claude Haiku"); await a.key("Return");
+  await a.palette("Model: Claude Haiku");
   await a.waitFor(() => st().model === "claude-haiku-5-5", 8000, "haiku");
   // spawn a handoff child from the dialog
   await a.key("cmd+n");

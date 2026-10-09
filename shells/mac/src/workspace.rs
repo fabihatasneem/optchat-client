@@ -117,6 +117,7 @@ pub struct Workspace {
     pub sheet: bool,
     m_press: Option<std::time::Instant>,
     _subs: Vec<Subscription>,
+    _ticker: Option<Task<()>>,
 }
 
 impl Workspace {
@@ -157,6 +158,9 @@ impl Workspace {
                 this.update_title(window, cx);
             }
         }));
+        subs.push(cx.observe_window_activation(window, |_, window, _| {
+            crate::ui::anim::set_window_active(window.is_window_active());
+        }));
         subs.push(cx.observe_window_appearance(window, |_, window, cx| {
             crate::theme::sync_window(window, cx);
         }));
@@ -195,7 +199,47 @@ impl Workspace {
             sheet: false,
             m_press: None,
             _subs: subs,
+            _ticker: None,
         }
+    }
+
+    /// Redraws ambient animations (spinners, pulsing dots) at 12.5 Hz (2.5 Hz while the window is in the
+    /// background), only in the views that drew one. Every redraw re-encodes the whole window, so this is what
+    /// an idle window with a "summarizing" spinner costs.
+    pub fn start_ticker(&mut self, cx: &mut Context<Self>) {
+        use crate::ui::anim;
+        self._ticker = Some(cx.spawn(async move |this, cx| loop {
+            let ms = if anim::window_active() { 80 } else { 400 };
+            Timer::after(std::time::Duration::from_millis(ms)).await;
+            let w = anim::take();
+            if w == 0 {
+                if this.upgrade().is_none() {
+                    break;
+                }
+                continue;
+            }
+            let alive = this.update(cx, |ws, cx| {
+                if w & anim::WORKSPACE != 0 {
+                    cx.notify();
+                }
+                if w & anim::FEED != 0 {
+                    ws.feed.update(cx, |_, cx| cx.notify());
+                }
+                if w & anim::TASKS != 0 {
+                    ws.tasks_panel.update(cx, |_, cx| cx.notify());
+                }
+                if w & anim::PANEL != 0 {
+                    ws.memory.update(cx, |_, cx| cx.notify());
+                    ws.context.update(cx, |_, cx| cx.notify());
+                    ws.log.update(cx, |_, cx| cx.notify());
+                    ws.models.update(cx, |_, cx| cx.notify());
+                    ws.settings.update(cx, |_, cx| cx.notify());
+                }
+            });
+            if alive.is_err() {
+                break;
+            }
+        }));
     }
 
     pub fn update_title(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -310,6 +354,11 @@ impl Focusable for Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::ui::frame_begin();
+        crate::ui::anim::area(crate::ui::anim::WORKSPACE);
+        if self._ticker.is_none() {
+            self.start_ticker(cx);
+        }
         let k = c(cx).clone();
         if self.state.read(cx).stats.first_frame_ms.is_none() {
             let launch = crate::LAUNCH.get().map(|t| t.elapsed().as_secs_f64() * 1000.0).unwrap_or(0.0);
@@ -328,7 +377,7 @@ impl Render for Workspace {
                 "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
                 "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
                 "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": crate::ui::frame_count(),  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),

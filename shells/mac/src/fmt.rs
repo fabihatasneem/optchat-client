@@ -91,7 +91,7 @@ pub fn price(n: Option<f64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[::core::prelude::v1::test]
     fn f() {
         assert_eq!(tokens(999), "999");
         assert_eq!(tokens(1500), "1.5k");

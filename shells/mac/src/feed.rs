@@ -337,6 +337,7 @@ fn regex_lite(_: &str) -> impl Fn(&str) -> bool {
 
 impl Render for Feed {
     fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::ui::anim::area(crate::ui::anim::FEED);
         let this = cx.entity().downgrade();
         let k = c(cx).clone();
         div()
@@ -351,6 +352,7 @@ impl Render for Feed {
                 list(self.list.clone(), move |ix, window, cx| {
                     let Some(feed) = this.upgrade() else { return div().into_any_element() };
                     let t0 = std::time::Instant::now();
+                    crate::ui::anim::area(crate::ui::anim::FEED);
                     let el = feed.update(cx, |f, cx| f.render_row(ix, window, cx));
                     let mut fr = frames().lock();
                     if fr.last_scroll.map(|t| t.elapsed().as_millis() < 120).unwrap_or(false) {

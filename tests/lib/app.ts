@@ -92,6 +92,16 @@ export class App {
     if (r.images[0]) Deno.writeFileSync(path, Uint8Array.from(atob(r.images[0]), (ch) => ch.charCodeAt(0)));
     return path;
   }
+  /** run a command palette entry: open, type, wait until the query is in, Return, wait until it closed */
+  async palette(q: string) {
+    await this.key("cmd+k");
+    await this.waitFor(() => this.state().overlay === "palette", 4000, "palette");
+    await this.type(q);
+    await this.waitFor(() => this.state().palette?.query === q, 4000, `palette query "${q}"`);
+    await this.key("Return");
+    await this.waitFor(() => this.state().overlay !== "palette", 4000, "palette closed");
+    await sleep(300);
+  }
   async quit() {
     try { await this.cua.js(`await app.pressKey("cmd+q"); 1`); } catch { /* gone */ }
     // `open -W` returns once the app has exited; if it has not within 8 s, kill our own instance

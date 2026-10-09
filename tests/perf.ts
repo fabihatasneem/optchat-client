@@ -11,7 +11,7 @@ try {
   out.launch = { firstFrameMs: st().firstFrameMs, loadedMs: st().loadedMs, wallToReadyMs: Math.round(wall), messages: st().t };
   await sleep(1500);
   out.rssIdleMb = st().rss;
-  await a.key("cmd+k"); await a.type("Test: reset frame stats"); await a.key("Return"); await sleep(300);
+  await a.palette("Test: reset frame stats");
   for (let k = 0; k < 12; k++) await a.scroll("feed", "up", 5);
   for (let k = 0; k < 12; k++) await a.scroll("feed", "down", 5);
   await sleep(500);

@@ -12,13 +12,54 @@ pub fn icon(name: &str, size: f32, color: Hsla) -> Svg {
     svg().path(SharedString::from(format!("icons/{name}.svg"))).size(px(size)).flex_none().text_color(color)
 }
 
-pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> impl IntoElement {
-    icon("loader-circle", size, color).with_animation(id.into(), Animation::new(Duration::from_millis(800)).repeat(), |s, d| s.with_transformation(Transformation::rotate(percentage(d))))
+// ---- ambient animations (spinners, pulsing dots) ----
+// A 60 fps animation redraws the whole window every frame (the platform draw dominates, ~25% CPU while a
+// "summarizing" spinner shows). These are driven by the clock instead and redrawn by a 20 Hz ticker
+// (Workspace::start_ticker) that notifies only the views that drew one in their last render.
+pub mod anim {
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    pub const WORKSPACE: u32 = 1;
+    pub const FEED: u32 = 2;
+    pub const TASKS: u32 = 4;
+    pub const PANEL: u32 = 8;
+    static WANTED: AtomicU32 = AtomicU32::new(0);
+    thread_local!(static AREA: Cell<u32> = const { Cell::new(WORKSPACE) });
+    /// called at the start of a view's render: animations drawn from here on belong to that view
+    pub fn area(a: u32) {
+        AREA.with(|x| x.set(a));
+    }
+    pub(crate) fn want() {
+        WANTED.fetch_or(AREA.with(|x| x.get()), Ordering::Relaxed);
+    }
+    pub fn take() -> u32 {
+        WANTED.swap(0, Ordering::Relaxed)
+    }
+    static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+    pub fn set_window_active(v: bool) {
+        ACTIVE.store(v, Ordering::Relaxed);
+    }
+    pub fn window_active() -> bool {
+        ACTIVE.load(Ordering::Relaxed)
+    }
+    pub fn clock() -> f32 {
+        static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        T0.get_or_init(std::time::Instant::now).elapsed().as_secs_f32()
+    }
+}
+
+pub fn spinner(_id: impl Into<ElementId>, size: f32, color: Hsla) -> impl IntoElement {
+    anim::want();
+    // 12 steps of 30° per second, in step with the 12.5 Hz ticker
+    let turn = ((anim::clock() * 12.0).floor() / 12.0).fract();
+    icon("loader-circle", size, color).with_transformation(Transformation::rotate(percentage(turn)))
 }
 
 /// A soft pulse (opacity) for "live" dots.
-pub fn pulse<E: IntoElement + Styled + 'static>(id: impl Into<ElementId>, el: E) -> impl IntoElement {
-    el.with_animation(id.into(), Animation::new(Duration::from_millis(1200)).repeat().with_easing(|t| (t * std::f32::consts::PI * 2.0).cos() * 0.5 + 0.5), |e, d| e.opacity(0.35 + 0.65 * d))
+pub fn pulse<E: IntoElement + Styled + 'static>(_id: impl Into<ElementId>, el: E) -> impl IntoElement {
+    anim::want();
+    let d = (anim::clock() / 1.2 * std::f32::consts::TAU).cos() * 0.5 + 0.5;
+    el.opacity(0.35 + 0.65 * d)
 }
 
 pub fn dot(color: Hsla, size: f32) -> Div {
@@ -278,10 +319,17 @@ pub struct FrameStats {
     pub last_scroll: Option<std::time::Instant>,
     pub intervals_ms: Vec<f32>,
     pub render_ms: Vec<f32>,
+    /// main-thread work per frame while scrolling: from the root render to the end of paint
+    pub work_ms: Vec<f32>,
+    pub frame_start: Option<std::time::Instant>,
+}
+/// called first thing in the root view's render
+pub fn frame_begin() {
+    frames().lock().frame_start = Some(std::time::Instant::now());
 }
 pub static FRAMES: OnceLock<Mutex<FrameStats>> = OnceLock::new();
 pub fn frames() -> &'static Mutex<FrameStats> {
-    FRAMES.get_or_init(|| Mutex::new(FrameStats { last_paint: None, last_scroll: None, intervals_ms: vec![], render_ms: vec![] }))
+    FRAMES.get_or_init(|| Mutex::new(FrameStats { last_paint: None, last_scroll: None, intervals_ms: vec![], render_ms: vec![], work_ms: vec![], frame_start: None }))
 }
 /// A zero-size element whose paint records the time since the previous paint (only while scrolling).
 pub fn frame_probe() -> impl IntoElement {
@@ -291,6 +339,10 @@ pub fn frame_probe() -> impl IntoElement {
             let now = std::time::Instant::now();
             let mut f = frames().lock();
             let scrolling = f.last_scroll.map(|t| now.duration_since(t).as_millis() < 120).unwrap_or(false);
+            if let (Some(t0), true) = (f.frame_start.take(), scrolling) {
+                let w = now.duration_since(t0).as_secs_f32() * 1000.0;
+                f.work_ms.push(w);
+            }
             if let (Some(prev), true) = (f.last_paint, scrolling) {
                 let d = now.duration_since(prev).as_secs_f32() * 1000.0;
                 if d < 1000.0 {
@@ -314,12 +366,16 @@ pub fn frame_summary() -> serde_json::Value {
     let mut r = f.render_ms.clone();
     r.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let rp = |q: f32| if r.is_empty() { 0.0 } else { r[((r.len() as f32 - 1.0) * q) as usize] };
-    serde_json::json!({"frames": v.len(), "p50": p(0.5), "p95": p(0.95), "p99": p(0.99), "max": v[v.len()-1], "over16": v.iter().filter(|x| **x > 16.7).count(), "over33": v.iter().filter(|x| **x > 33.4).count(), "rowRenderP50": rp(0.5), "rowRenderP99": rp(0.99)})
+    let mut w = f.work_ms.clone();
+    w.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let wp = |q: f32| if w.is_empty() { 0.0 } else { w[((w.len() as f32 - 1.0) * q) as usize] };
+    serde_json::json!({"workFrames": w.len(), "workP50": wp(0.5), "workP95": wp(0.95), "workP99": wp(0.99), "workMax": w.last().copied().unwrap_or(0.0), "workOver8": w.iter().filter(|x| **x > 8.0).count(), "workOver16": w.iter().filter(|x| **x > 16.7).count(), "frames": v.len(), "p50": p(0.5), "p95": p(0.95), "p99": p(0.99), "max": v[v.len()-1], "over16": v.iter().filter(|x| **x > 16.7).count(), "over33": v.iter().filter(|x| **x > 33.4).count(), "rowRenderP50": rp(0.5), "rowRenderP99": rp(0.99)})
 }
 pub fn reset_frames() {
     let mut f = frames().lock();
     f.intervals_ms.clear();
     f.render_ms.clear();
+    f.work_ms.clear();
 }
 
 /// Resident memory of this process in MB (ps).
@@ -347,4 +403,9 @@ pub fn zoom() -> f32 {
 /// a feed size in points at the current zoom
 pub fn zx(v: f32) -> Pixels {
     px(v * zoom())
+}
+/// renders of the workspace so far (tests check the state file is fresh)
+pub fn frame_count() -> u64 {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }

@@ -4,15 +4,7 @@ import { App, check, failed } from "./lib/app.ts";
 import { sleep } from "./lib/cua.ts";
 const a = await App.launch({ env: { OPTCHAT_TEST_HOOKS: "1" } });
 const st = () => a.state();
-const pal = async (q: string) => {
-  await a.key("cmd+k");
-  await a.waitFor(() => st().overlay === "palette", 4000, "palette");
-  await a.type(q);
-  await a.waitFor(() => st().palette?.query === q, 4000, `palette query "${q}"`);
-  await a.key("Return");
-  await a.waitFor(() => st().overlay !== "palette", 4000, "palette closed");
-  await sleep(300);
-};
+const pal = (q: string) => a.palette(q);
 const visibleIn = (p: number[] | undefined, box: number[] | undefined) => !!p && !!box && p[1] >= box[1] && p[1] + p[3] <= box[1] + box[3];
 /** scroll the sidebar until a probed element is fully visible in it */
 const reveal = async (name: string) => {
