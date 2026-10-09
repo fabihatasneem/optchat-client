@@ -40,7 +40,7 @@ pub struct Composer {
     pub state: Entity<AppState>,
     pub input: Entity<InputState>,
     drafts: HashMap<i64, String>,
-    task: i64,
+    pub task: i64,
     pub images: Vec<Attachment>,
     busy: bool,
     drag: bool,
@@ -55,7 +55,9 @@ pub struct Composer {
 
 impl Composer {
     pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Composer {
-        let input = cx.new(|cx| InputState::new(window, cx).multi_line(true).auto_grow(1, 12).placeholder("Message OptChat…"));
+        let first = state.read(cx).current;
+        let who = if first == 0 { "OptChat".to_string() } else { format!("#{first}") };
+        let input = cx.new(|cx| InputState::new(window, cx).multi_line(true).auto_grow(1, 10).placeholder(format!("Message {who}…")));
         let s1 = cx.subscribe_in(&input, window, |this: &mut Composer, _, ev: &InputEvent, _, cx| {
             if let InputEvent::Change = ev {
                 let v = this.input.read(cx).value().to_string();
@@ -370,7 +372,8 @@ impl Render for Composer {
         let has = !self.input.read(cx).value().trim().is_empty() || !self.images.is_empty();
         let disabled = self.disabled(cx);
         let dictating = self.dictating(cx) && s.dict.task == self.task;
-        let err = self.err.as_ref().filter(|(_, t)| t.elapsed().as_secs() < 6).map(|(e, _)| e.clone()).or_else(|| s.errors.last().cloned());
+        let fresh = |e: &Option<(String, std::time::Instant)>| e.as_ref().filter(|(_, t)| t.elapsed().as_secs_f32() < 6.0).map(|(e, _)| e.clone());
+        let err = fresh(&self.err).or_else(|| fresh(&s.dict.error)).or_else(|| s.errors.last().cloned());
         let task = self.task;
         let mut thumbs = div().flex().flex_wrap().gap(px(8.)).mb(px(8.));
         for (n, a) in self.images.iter().enumerate() {

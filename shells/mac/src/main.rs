@@ -68,8 +68,11 @@ fn main() {
         set_menus(cx);
 
         let state = state::new_state(cx, rt.handle().clone(), prefs_path.clone());
-        let size = size(px(1360.), px(880.));
-        let bounds = Bounds::centered(None, size, cx);
+        // the last window bounds, when they are sane; else 1360×880 centered
+        let bounds = match prefs.window {
+            Some([x, y, w, h]) if w >= 560. && h >= 420. && w < 10000. && h < 10000. && x > -5000. && y > -5000. => Bounds::new(point(px(x), px(y)), size(px(w), px(h))),
+            _ => Bounds::centered(None, size(px(1360.), px(880.)), cx),
+        };
         let st2 = state.clone();
         let win = cx
             .open_window(

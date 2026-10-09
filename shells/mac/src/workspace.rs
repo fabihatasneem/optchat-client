@@ -120,6 +120,9 @@ pub struct Workspace {
     _ticker: Option<Task<()>>,
     renders: u64,
     focus_desc: &'static str,
+    ask_limit: std::rc::Rc<std::cell::Cell<usize>>,
+    bounds_seq: u64,
+    title: String,
 }
 
 impl Workspace {
@@ -131,7 +134,10 @@ impl Workspace {
         let log = cx.new(|cx| LogPanel::new(state.clone(), cx));
         let models = cx.new(|cx| ModelsPanel::new(state.clone(), window, cx));
         let settings = cx.new(|cx| SettingsPanel::new(state.clone(), window, cx));
-        let ask_input = cx.new(|cx| InputState::new(window, cx));
+        // like the web's maxLength: 280 for a close result, 2000 otherwise (UTF-16 units, as in JS)
+        let ask_limit = std::rc::Rc::new(std::cell::Cell::new(2000usize));
+        let lim = ask_limit.clone();
+        let ask_input = cx.new(|cx| InputState::new(window, cx).validate(move |t, _| t.encode_utf16().count() <= lim.get()));
         let tasks_panel = cx.new(|cx| tasks_view::TasksPanel::new(state.clone(), cx));
         let mut subs = vec![];
         subs.push(cx.observe(&state, |_, _, cx| cx.notify()));
@@ -170,6 +176,23 @@ impl Workspace {
             crate::theme::sync_window(window, cx);
         }));
         subs.push(cx.observe_window_bounds(window, |this: &mut Workspace, window, cx| {
+            // remember the window's bounds (saved 800 ms after the last change)
+            // origin of the frame, size of the content: what opening a window takes (bounds() includes the titlebar)
+            let b = window.bounds();
+            let v = window.viewport_size();
+            let wb = [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(v.width), f32::from(v.height)];
+            this.state.update(cx, |s, _| s.prefs.window = Some(wb));
+            this.bounds_seq += 1;
+            let seq = this.bounds_seq;
+            cx.spawn(async move |this, cx| {
+                Timer::after(std::time::Duration::from_millis(800)).await;
+                let _ = this.update(cx, |w, cx| {
+                    if w.bounds_seq == seq {
+                        w.state.update(cx, |s, _| s.save_prefs());
+                    }
+                });
+            })
+            .detach();
             let narrow = f32::from(window.bounds().size.width) < 760.0;
             if narrow != this.narrow {
                 this.narrow = narrow;
@@ -209,13 +232,16 @@ impl Workspace {
             tasks_panel,
             resizing: None,
             metrics_open: false,
-            narrow: false,
+            narrow: f32::from(window.bounds().size.width) < 760.0,
             sheet: false,
             m_press: None,
             _subs: subs,
             _ticker: None,
             renders: 0,
             focus_desc: "",
+            ask_limit,
+            bounds_seq: 0,
+            title: String::new(),
         }
     }
 
@@ -229,7 +255,7 @@ impl Workspace {
                 "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
                 "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
                 "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "focus": self.focus_desc,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "focus": self.focus_desc, "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window, "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
@@ -286,13 +312,16 @@ impl Workspace {
         }));
     }
 
-    pub fn update_title(&self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn update_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s = self.state.read(cx);
         let t = match s.info() {
             Some(i) => format!("{}{} · OptChat", task_name(&i.task), if i.task.id != 0 { format!(" · #{}", i.task.id) } else { String::new() }),
             None => "OptChat".into(),
         };
-        window.set_window_title(&t);
+        if t != self.title {
+            window.set_window_title(&t);
+            self.title = t;
+        }
     }
 
     pub fn open_task(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
@@ -351,6 +380,7 @@ impl Workspace {
 
     pub fn start_ask(&mut self, op: &str, window: &mut Window, cx: &mut Context<Self>) {
         let a = ask_of(op);
+        self.ask_limit.set(if op == "close" { 280 } else { 2000 });
         self.ask_input.update(cx, |i, cx| {
             i.set_value("", window, cx);
             i.set_placeholder(a.placeholder, window, cx);
@@ -425,6 +455,7 @@ impl Render for Workspace {
             window.focus(&self.focus);
         }
         self.renders = crate::ui::frame_count();
+        self.update_title(window, cx); // a rename shows at once
         if probes_on() {
             let ci = self.composer.read(cx).input.read(cx).focus_handle(cx);
             self.focus_desc = if window.focused(cx).is_none() {

@@ -347,7 +347,7 @@ pub struct NewTaskDialog {
     focus: FocusHandle,
 }
 impl EventEmitter<DismissEvent> for NewTaskDialog {}
-actions!(newtask, [SubmitStart]);
+actions!(newtask, [SubmitStart, NewTaskPaste]);
 
 pub fn open_new_task(w: &mut Workspace, preset: Option<(String, Option<i64>, i64)>, window: &mut Window, cx: &mut Context<Workspace>) {
     let s = w.state.read(cx);
@@ -358,8 +358,8 @@ pub fn open_new_task(w: &mut Workspace, preset: Option<(String, Option<i64>, i64
     }
     let state = w.state.clone();
     let d = cx.new(|cx| {
-        let title = cx.new(|cx| InputState::new(window, cx).placeholder("e.g. Add image upload to the composer"));
-        let instruction = cx.new(|cx| InputState::new(window, cx).multi_line(true).rows(5).placeholder("What to do. For handoff and blind: everything it needs to know."));
+        let title = cx.new(|cx| InputState::new(window, cx).placeholder("e.g. Add image upload to the composer").validate(|t, _| t.encode_utf16().count() <= 80));
+        let instruction = cx.new(|cx| InputState::new(window, cx).multi_line(true).auto_grow(5, 14).placeholder("What to do. For handoff and blind: everything it needs to know."));
         let usd = cx.new(|cx| InputState::new(window, cx).placeholder("$ budget"));
         let minutes = cx.new(|cx| InputState::new(window, cx).placeholder("minutes"));
         title.update(cx, |i, cx| i.focus(window, cx));
@@ -414,6 +414,40 @@ impl NewTaskDialog {
         });
         cx.emit(DismissEvent);
     }
+    /// at most 20 images, downscaled to 1568 px and re-encoded like the composer's
+    fn add_bytes(&mut self, name: String, mt: &str, bytes: &[u8]) {
+        if self.images.len() >= 20 {
+            return;
+        }
+        if let Ok((mt, b, w, h)) = prepare_image(bytes, mt) {
+            let fmt = if mt == "image/png" { ImageFormat::Png } else { ImageFormat::Jpeg };
+            let img = Arc::new(Image::from_bytes(fmt, b.clone()));
+            self.images.push(crate::composer::Attachment { name, media_type: mt, bytes: Arc::new(b), w, h, img });
+        }
+    }
+    /// ⌘V in the instruction: an image on the clipboard is attached, text is pasted
+    fn on_paste(&mut self, _: &NewTaskPaste, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = cx.read_from_clipboard() else { return };
+        let mut got = false;
+        for e in item.entries() {
+            if let ClipboardEntry::Image(img) = e {
+                let mt = match img.format {
+                    ImageFormat::Jpeg => "image/jpeg",
+                    ImageFormat::Gif => "image/gif",
+                    ImageFormat::Webp => "image/webp",
+                    _ => "image/png",
+                };
+                self.add_bytes("pasted image".into(), mt, &img.bytes);
+                got = true;
+            }
+        }
+        if !got {
+            if let Some(t) = item.text() {
+                self.instruction.update(cx, |i, cx| i.insert(t, window, cx));
+            }
+        }
+        cx.notify();
+    }
     fn attach(&mut self, cx: &mut Context<Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some("Attach".into()) });
         cx.spawn(async move |this, cx| {
@@ -429,11 +463,7 @@ impl NewTaskDialog {
                             _ => continue,
                         };
                         if let Ok(b) = std::fs::read(&p) {
-                            if let Ok((mt, b, w, h)) = prepare_image(&b, mt) {
-                                let fmt = if mt == "image/png" { ImageFormat::Png } else { ImageFormat::Jpeg };
-                                let img = Arc::new(Image::from_bytes(fmt, b.clone()));
-                                d.images.push(crate::composer::Attachment { name: p.file_name().and_then(|n| n.to_str()).unwrap_or("image").into(), media_type: mt, bytes: Arc::new(b), w, h, img });
-                            }
+                            d.add_bytes(p.file_name().and_then(|n| n.to_str()).unwrap_or("image").into(), mt, &b);
                         }
                     }
                     cx.notify();
@@ -446,6 +476,7 @@ impl NewTaskDialog {
 
 impl Render for NewTaskDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::ui::set_state_extra("newtask", serde_json::json!({ "title": self.title.read(cx).value().to_string(), "instruction": self.instruction.read(cx).value().to_string(), "images": self.images.len(), "mode": self.mode }));
         let k = c(cx).clone();
         let s = self.state.read(cx);
         let parent = self.parent;
@@ -497,7 +528,7 @@ impl Render for NewTaskDialog {
         let sib2 = siblings.clone();
         let mut thumbs = div().flex().gap(px(8.)).mb(px(10.));
         for (n, a) in self.images.iter().enumerate() {
-            thumbs = thumbs.child(div().id(("ntthumb", n)).size(px(56.)).rounded(px(8.)).overflow_hidden().border_1().border_color(k.line2).child(img(a.img.clone()).size_full().object_fit(ObjectFit::Cover)).cursor_pointer().on_click(cx.listener(move |d, _, _, cx| {
+            thumbs = thumbs.child(div().id(("ntthumb", n)).relative().size(px(56.)).rounded(px(8.)).overflow_hidden().border_1().border_color(k.line2).child(img(a.img.clone()).size_full().object_fit(ObjectFit::Cover)).child(div().absolute().top(px(3.)).right(px(3.)).size(px(16.)).rounded_full().bg(hsla(0., 0., 0., 0.6)).flex().items_center().justify_center().text_size(px(11.)).text_color(gpui::white()).child("×")).tooltip(tooltip("remove")).cursor_pointer().on_click(cx.listener(move |d, _, _, cx| {
                 if n < d.images.len() {
                     d.images.remove(n);
                 }
@@ -509,6 +540,7 @@ impl Render for NewTaskDialog {
             .key_context("NewTask")
             .track_focus(&self.focus)
             .on_action(cx.listener(|d, _: &SubmitStart, _, cx| d.create(true, cx)))
+            .on_action(cx.listener(Self::on_paste))
             .overflow_y_scroll()
             .child(probe("newtask"))
             .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).mb(px(6.)).child(format!("New task under {ptitle}")))
@@ -530,7 +562,7 @@ impl Render for NewTaskDialog {
                 })))
             })
             .child(div().mb(px(10.)).flex().flex_col().gap(px(4.)).child(div().text_size(px(11.5)).text_color(k.muted).child("title (imperative, ≤ 80 chars)")).child(div().child(Input::new(&self.title)).child(probe("newtask.title"))))
-            .child(div().mb(px(10.)).flex().flex_col().gap(px(4.)).child(div().text_size(px(11.5)).text_color(k.muted).child("instruction")).child(div().child(Input::new(&self.instruction)).child(probe("newtask.instruction"))))
+            .child(div().mb(px(10.)).flex().flex_col().gap(px(4.)).child(div().text_size(px(11.5)).text_color(k.muted).child("instruction")).child(div().key_context("instruction").child(Input::new(&self.instruction)).child(probe("newtask.instruction"))))
             .when(!self.images.is_empty(), |d| d.child(thumbs))
             .child(
                 div()
@@ -609,6 +641,7 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("down", Down, Some("Palette")),
         KeyBinding::new("enter", Confirm, Some("Palette")),
         KeyBinding::new("cmd-enter", SubmitStart, Some("NewTask")),
+        KeyBinding::new("cmd-v", NewTaskPaste, Some("instruction > Input")),
     ]);
 }
 

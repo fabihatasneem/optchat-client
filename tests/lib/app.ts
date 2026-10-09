@@ -13,11 +13,14 @@ export class App {
   db = "";
   log: string[] = [];
   proc?: Deno.ChildProcess;
-  static async launch(o: { db?: string; fresh?: boolean; env?: Record<string, string> } = {}): Promise<App> {
+  /** `dir`: relaunch on a previous run's directory (same database copy and prefs; see quit({ keep: true })) */
+  static async launch(o: { db?: string; fresh?: boolean; env?: Record<string, string>; dir?: string } = {}): Promise<App> {
     const me = new App();
-    me.dir = await Deno.makeTempDir({ prefix: "optchat-e2e-" });
+    me.dir = o.dir ?? await Deno.makeTempDir({ prefix: "optchat-e2e-" });
     me.db = `${me.dir}/optchat.db`;
-    if (o.fresh) {
+    if (o.dir) {
+      // relaunch: keep everything
+    } else if (o.fresh) {
       // an empty database
     } else {
       const src = o.db ?? `${ROOT}/data/optchat.db`;
@@ -144,14 +147,14 @@ export class App {
   }
   /** the app's stderr so far (engine log lines, OPTCHAT_TIMING output) */
   stderr(): string { try { return Deno.readTextFileSync(`${this.dir}/stderr.txt`); } catch { return ""; } }
-  async quit() {
+  async quit(o: { keep?: boolean } = {}) {
     try { await this.cua.js(`await app.pressKey("cmd+q"); 1`); } catch { /* gone */ }
     // `open -W` returns once the app has exited; if it has not within 8 s, kill our own instance
     const exited = await Promise.race([this.proc!.status.then(() => true), sleep(8000).then(() => false)]);
     if (!exited) { console.log("app did not quit on cmd+q: killing it"); await killLeftovers(); await this.proc!.status; }
     this.cua.close();
     // the database copy is ~1.6 GB: never leave it behind (OPTCHAT_KEEP_E2E=1 keeps it for debugging)
-    if (!Deno.env.get("OPTCHAT_KEEP_E2E")) { try { Deno.removeSync(this.dir, { recursive: true }); } catch { /* gone */ } }
+    if (!o.keep && !Deno.env.get("OPTCHAT_KEEP_E2E")) { try { Deno.removeSync(this.dir, { recursive: true }); } catch { /* gone */ } }
   }
 }
 

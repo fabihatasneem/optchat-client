@@ -43,9 +43,12 @@ impl View {
     }
 }
 
-/// per-viewer layout preferences (a JSON file next to the database)
+/// per-viewer layout preferences (a JSON file next to the database); missing fields take their defaults
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Prefs {
+    /// window bounds [x, y, w, h] in points, restored at launch
+    pub window: Option<[f32; 4]>,
     pub view: View,
     pub side_open: bool,
     pub side_w: f32,
@@ -60,7 +63,7 @@ pub struct Prefs {
 }
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { view: View::Tasks, side_open: true, side_w: 320.0, task_scope_all: false, show_ended: true, settings_tab_global: false, theme: None, follow_system: true, tabs: vec![0], current: 0, font_size: 14.0 }
+        Prefs { window: None, view: View::Tasks, side_open: true, side_w: 320.0, task_scope_all: false, show_ended: true, settings_tab_global: false, theme: None, follow_system: true, tabs: vec![0], current: 0, font_size: 14.0 }
     }
 }
 
@@ -109,6 +112,8 @@ pub struct Dict {
     pub text: Option<String>,
     pub done: Option<String>,
     pub seq: u64,
+    /// a dictation error shows in the composer for 6 s (engine errors stay, like the web app)
+    pub error: Option<(String, std::time::Instant)>,
 }
 
 pub struct AppState {
@@ -482,7 +487,12 @@ impl AppState {
                         cx.emit(StateEvent::DictText);
                     }
                     DictEvent::Error(m) => {
-                        self.errors.push(m);
+                        self.dict.error = Some((m, std::time::Instant::now()));
+                        cx.spawn(async move |this, cx| {
+                            gpui::Timer::after(std::time::Duration::from_millis(6050)).await;
+                            let _ = this.update(cx, |_, cx| cx.notify());
+                        })
+                        .detach();
                     }
                     DictEvent::Done { text, .. } => {
                         self.dict.state = "idle".into();
