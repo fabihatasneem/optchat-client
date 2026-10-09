@@ -299,8 +299,15 @@ fn build_palette(style: &Map<String, Value>, ap: Appearance) -> Palette {
     pool.extend([accent, green, amber, red]);
     let picker = HuePicker::new(pool, bg, dark);
 
-    let violet = over(st.ext("violet"), bg).unwrap_or_else(|| picker.pick(275.0, &[]));
-    let cyan = over(st.ext("cyan"), bg).unwrap_or_else(|| picker.pick(190.0, &[]));
+    // Prefer the terminal's own cyan/magenta when they are in the right hue range.
+    let ansi = |k: &str, hue: f32, used: &[u32]| {
+        st.c(&format!("terminal.ansi.{k}"))
+            .map(|c| solid(c, bg))
+            .filter(|c| picker.accepts(*c) && hue_dist(to_hsl(*c).0, hue) <= 30.0 && !used.contains(c))
+            .unwrap_or_else(|| picker.pick(hue, used))
+    };
+    let cyan = over(st.ext("cyan"), bg).unwrap_or_else(|| ansi("cyan", 190.0, &[accent]));
+    let violet = over(st.ext("violet"), bg).unwrap_or_else(|| ansi("magenta", 275.0, &[accent, cyan]));
 
     let levels = ext_levels(&st).unwrap_or_else(|| {
         // OptChat order: cyan, blue, violet, pink, amber, green, orange, lime.
@@ -378,7 +385,7 @@ impl HuePicker {
         for c in raw {
             let c = solid(c, bg);
             let (h, s, l) = to_hsl(c);
-            if s >= 0.25 && (0.15..=0.9).contains(&l) && contrast(c, bg) >= 2.0 && !pool.iter().any(|(p, _)| *p == c) {
+            if Self::ok(c, bg) && !pool.iter().any(|(p, _)| *p == c) {
                 ss += s;
                 ls += l;
                 pool.push((c, h));
@@ -391,6 +398,15 @@ impl HuePicker {
             (ss / n, ls / n)
         };
         HuePicker { pool, bg, s, l }
+    }
+
+    fn ok(c: u32, bg: u32) -> bool {
+        let (_, s, l) = to_hsl(c);
+        s >= 0.18 && (0.15..=0.9).contains(&l) && contrast(c, bg) >= 2.0
+    }
+
+    fn accepts(&self, c: u32) -> bool {
+        Self::ok(c, self.bg)
     }
 
     fn pick(&self, hue: f32, used: &[u32]) -> u32 {
