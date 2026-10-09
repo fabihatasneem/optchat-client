@@ -311,15 +311,9 @@ pub fn reset_frames() {
 
 /// Resident memory of this process in MB (ps).
 pub fn rss_mb() -> f64 {
-    static LAST: OnceLock<Mutex<(std::time::Instant, f64)>> = OnceLock::new();
-    let l = LAST.get_or_init(|| Mutex::new((std::time::Instant::now() - Duration::from_secs(10), 0.0)));
-    let mut g = l.lock();
-    if g.0.elapsed().as_secs() >= 2 {
-        let out = std::process::Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output();
-        if let Ok(o) = out {
-            g.1 = String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().unwrap_or(0.0) / 1024.0;
-        }
-        g.0 = std::time::Instant::now();
-    }
-    g.1
+    // proc_pidinfo(PROC_PIDTASKINFO): a syscall, no subprocess on the UI thread
+    let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_taskinfo>() as i32;
+    let n = unsafe { libc::proc_pidinfo(std::process::id() as i32, libc::PROC_PIDTASKINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
+    if n == size { info.pti_resident_size as f64 / (1024.0 * 1024.0) } else { 0.0 }
 }

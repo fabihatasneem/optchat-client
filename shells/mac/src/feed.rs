@@ -351,7 +351,7 @@ impl Render for Feed {
                 })
                 .size_full(),
             )
-            .child(frame_probe())
+
     }
 }
 

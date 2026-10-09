@@ -4276,6 +4276,7 @@ dependencies = [
  "chrono",
  "gpui",
  "gpui-component",
+ "libc",
  "optchat-engine",
  "optchat-theme",
  "parking_lot",

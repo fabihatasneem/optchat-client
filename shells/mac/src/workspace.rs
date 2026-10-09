@@ -109,7 +109,7 @@ pub struct Workspace {
     pub ask: Option<Ask>,
     pub ask_input: Entity<InputState>,
     pub overlay: Option<Overlay>,
-    pub collapsed: std::collections::HashSet<i64>,
+    pub tasks_panel: Entity<tasks_view::TasksPanel>,
     resizing: Option<(f32, f32)>,
     pub metrics_open: bool,
     pub narrow: bool,
@@ -128,6 +128,7 @@ impl Workspace {
         let models = cx.new(|cx| ModelsPanel::new(state.clone(), window, cx));
         let settings = cx.new(|cx| SettingsPanel::new(state.clone(), window, cx));
         let ask_input = cx.new(|cx| InputState::new(window, cx));
+        let tasks_panel = cx.new(|cx| tasks_view::TasksPanel::new(state.clone(), cx));
         let mut subs = vec![];
         subs.push(cx.observe(&state, |_, _, cx| cx.notify()));
         subs.push(cx.subscribe_in(&feed, window, |this: &mut Workspace, _, ev: &FeedEvent, window, cx| match ev {
@@ -137,6 +138,10 @@ impl Workspace {
                 this.overlay = Some(Overlay::Lightbox(blob.clone()));
                 cx.notify();
             }
+        }));
+        subs.push(cx.subscribe_in(&tasks_panel, window, |this: &mut Workspace, _, ev: &tasks_view::TasksEvent, window, cx| {
+            let tasks_view::TasksEvent::Open(id) = ev;
+            this.open_task(*id, window, cx);
         }));
         subs.push(cx.subscribe_in(&ask_input, window, |this: &mut Workspace, _, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { .. } = ev {
@@ -176,7 +181,7 @@ impl Workspace {
             ask: None,
             ask_input,
             overlay: None,
-            collapsed: Default::default(),
+            tasks_panel,
             resizing: None,
             metrics_open: false,
             narrow: false,
@@ -437,6 +442,7 @@ impl Render for Workspace {
         body = body.child(self.editor(ended, window, cx));
         root = root.child(body);
         root = root.child(statusbar::render(self, window, cx));
+        root = root.child(frame_probe());
 
         // ---- overlays
         if let Some(o) = self.overlay.clone() {
@@ -579,14 +585,15 @@ impl Workspace {
         }
         head = head.child(icon_btn("side-hide", "panel-left-close", 15., cx).tooltip(tooltip("hide the sidebar (⌘B)")).on_click(cx.listener(|w, _, _, cx| w.set_side_open(false, cx))));
         let loaded = s.cur.loaded;
+        let cached = |v: AnyView| v.cached(StyleRefinement::default().w_full()).into_any_element();
         let body: AnyElement = match view {
-            View::Tasks => tasks_view::render(self, window, cx).into_any_element(),
+            View::Tasks => cached(self.tasks_panel.clone().into()),
             _ if !loaded => div().p(px(12.)).child(skeleton_line(None, cx)).child(skeleton_line(Some(160.), cx)).into_any_element(),
-            View::Memory => self.memory.clone().into_any_element(),
-            View::Context => self.context.clone().into_any_element(),
-            View::Log => self.log.clone().into_any_element(),
-            View::Models => self.models.clone().into_any_element(),
-            View::Settings => self.settings.clone().into_any_element(),
+            View::Memory => cached(self.memory.clone().into()),
+            View::Context => cached(self.context.clone().into()),
+            View::Log => cached(self.log.clone().into()),
+            View::Models => cached(self.models.clone().into()),
+            View::Settings => cached(self.settings.clone().into()),
         };
         let resizer = div()
             .id("resizer")
@@ -625,11 +632,11 @@ impl Workspace {
         ed = ed.child(crate::tabs::tab_strip(self, window, cx));
         ed = ed.child(crate::tabs::task_bar(self, window, cx));
         // a click in the feed leaves the composer (so M dictates, as outside a text field in the web app)
-        ed = ed.child(div().flex_1().min_h_0().child(self.feed.clone()).child(probe("feed")).on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, _| window.focus(&w.focus))));
+        ed = ed.child(div().flex_1().min_h_0().child(AnyView::from(self.feed.clone()).cached(StyleRefinement::default().size_full())).child(probe("feed")).on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, _| window.focus(&w.focus))));
         if ended {
             ed = ed.child(crate::tabs::endbar(self, cx));
         } else {
-            ed = ed.child(self.composer.clone());
+            ed = ed.child(AnyView::from(self.composer.clone()).cached(StyleRefinement::default().w_full()));
         }
         ed
     }

@@ -1,16 +1,36 @@
 //! The Tasks view (sidebar): the current task's subtree with its ancestors above it, or every task.
-use crate::dialogs;
 use crate::fmt;
 use crate::state::*;
 use crate::theme::c;
 use crate::ui::*;
-use crate::workspace::Workspace;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use optchat_engine::engine::TaskInfo;
 
-pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) -> impl IntoElement {
+pub enum TasksEvent {
+    Open(i64),
+}
+/// The Tasks view as its own (cached) view: it re-renders only when the state changes, never while the feed scrolls.
+pub struct TasksPanel {
+    pub state: Entity<AppState>,
+    pub collapsed: std::collections::HashSet<i64>,
+    _sub: Subscription,
+}
+impl EventEmitter<TasksEvent> for TasksPanel {}
+impl TasksPanel {
+    pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> TasksPanel {
+        let _sub = cx.observe(&state, |_, _, cx| cx.notify());
+        TasksPanel { state, collapsed: Default::default(), _sub }
+    }
+}
+impl Render for TasksPanel {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        render(self, window, cx)
+    }
+}
+
+pub fn render(w: &mut TasksPanel, _window: &mut Window, cx: &mut Context<TasksPanel>) -> impl IntoElement {
     let k = c(cx).clone();
     let s = w.state.read(cx);
     let mut list = div().flex().flex_col().pb(px(16.)).px(px(6.));
@@ -54,7 +74,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
     list
 }
 
-fn row(w: &Workspace, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<Workspace>) -> impl IntoElement {
+fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<TasksPanel>) -> impl IntoElement {
     let k = c(cx).clone();
     let s = w.state.read(cx);
     let t = &x.task;
@@ -141,7 +161,7 @@ fn row(w: &Workspace, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<W
                 .child(meta),
         )
         .when(x.running, |d| d.child(spinner(SharedString::from(format!("trs{id}")), 13., k.accent)))
-        .on_click(cx.listener(move |w, _, window, cx| w.open_task(id, window, cx)))
+        .on_click(cx.listener(move |_, _, _, cx| cx.emit(TasksEvent::Open(id))))
         .context_menu(move |m, _, _| {
             let st1 = st.clone();
             let st2 = st.clone();
@@ -157,5 +177,4 @@ fn row(w: &Workspace, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<W
             }
             m.separator().item(PopupMenuItem::new(format!("Copy #{id}")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(format!("#{id}")))))
         })
-        .when(false, |d| d.child(dialogs::noop()))
 }

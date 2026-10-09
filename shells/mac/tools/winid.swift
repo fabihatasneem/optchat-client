@@ -1,10 +1,9 @@
-// Prints the CGWindowID of the frontmost on-screen window owned by a process whose name matches argv[1].
+// Prints the CGWindowID of the on-screen window owned by process id argv[1] (only our own process, never another app).
 import Cocoa
-let name = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "OptChat"
+guard CommandLine.arguments.count > 1, let pid = Int(CommandLine.arguments[1]) else { exit(2) }
 let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
 for w in list {
-    if let owner = w[kCGWindowOwnerName as String] as? String, owner == name, let layer = w[kCGWindowLayer as String] as? Int, layer == 0 {
-        if let id = w[kCGWindowNumber as String] as? Int { print(id); exit(0) }
-    }
+    if let owner = w[kCGWindowOwnerPID as String] as? Int, owner == pid, let layer = w[kCGWindowLayer as String] as? Int, layer == 0,
+       let id = w[kCGWindowNumber as String] as? Int { print(id); exit(0) }
 }
 exit(1)

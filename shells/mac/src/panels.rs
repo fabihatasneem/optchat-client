@@ -95,7 +95,7 @@ impl MemoryPanel {
                 m.do_search(cx);
             }
         });
-        let s2 = cx.observe(&state, |m: &mut MemoryPanel, _, cx| m.maybe_refresh(cx));
+        let s2 = cx.observe(&state, |m: &mut MemoryPanel, _, cx| { m.maybe_refresh(cx); cx.notify(); });
         MemoryPanel { state, texts: HashMap::new(), cview: vec![], open: HashSet::new(), kids: HashMap::new(), hit: None, which_c: false, rendered: None, search, hits: None, seen: (-1, 0, -1, 0, 0), scroll: ScrollHandle::new(), _subs: vec![s1, s2] }
     }
     fn maybe_refresh(&mut self, cx: &mut Context<Self>) {
@@ -421,7 +421,7 @@ pub struct ContextPanel {
 }
 impl ContextPanel {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> ContextPanel {
-        let s = cx.observe(&state, |p: &mut ContextPanel, _, cx| p.maybe(cx));
+        let s = cx.observe(&state, |p: &mut ContextPanel, _, cx| { p.maybe(cx); cx.notify(); });
         ContextPanel { state, detail: None, loading: None, err: None, open: HashSet::new(), wire: false, _subs: vec![s] }
     }
     fn maybe(&mut self, cx: &mut Context<Self>) {
@@ -640,7 +640,7 @@ pub struct LogPanel {
 }
 impl LogPanel {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> LogPanel {
-        let s = cx.observe(&state, |p: &mut LogPanel, _, cx| p.maybe(cx));
+        let s = cx.observe(&state, |p: &mut LogPanel, _, cx| { p.maybe(cx); cx.notify(); });
         LogPanel { state, subtree: false, filter: "all", sub: None, bd: None, seen: (-1, false, 0, 0), _subs: vec![s] }
     }
     fn maybe(&mut self, cx: &mut Context<Self>) {
@@ -787,7 +787,7 @@ pub struct ModelsPanel {
 }
 impl ModelsPanel {
     pub fn new(state: Entity<AppState>, _window: &mut Window, cx: &mut Context<Self>) -> ModelsPanel {
-        let s = cx.observe(&state, |p: &mut ModelsPanel, _, cx| p.maybe(cx));
+        let s = cx.observe(&state, |p: &mut ModelsPanel, _, cx| { p.maybe(cx); cx.notify(); });
         ModelsPanel { state, rows: None, show_hidden: false, edit: None, hist: HashSet::new(), seen: (usize::MAX, 0), _subs: vec![s] }
     }
     fn maybe(&mut self, cx: &mut Context<Self>) {

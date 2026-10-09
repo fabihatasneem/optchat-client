@@ -21,3 +21,4 @@ tokio.workspace = true
 chrono.workspace = true
 pulldown-cmark = { version = "0.13", default-features = false }
 smallvec = "1"
+libc = "0.2"
