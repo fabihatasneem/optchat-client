@@ -129,6 +129,7 @@ pub struct Workspace {
     ask_limit: std::rc::Rc<std::cell::Cell<usize>>,
     bounds_seq: u64,
     title: String,
+    task_menu: Option<(Entity<gpui_component::menu::PopupMenu>, Point<Pixels>, Subscription)>,
 }
 
 impl Workspace {
@@ -159,6 +160,7 @@ impl Workspace {
             match ev {
                 tasks_view::TasksEvent::Open(id) => this.open_task(*id, window, cx),
                 tasks_view::TasksEvent::Act(id, op) => this.act(*id, op, window, cx),
+                tasks_view::TasksEvent::Menu(id, status, pos) => this.open_task_menu(*id, *status, *pos, window, cx),
             }
         }));
         subs.push(cx.subscribe_in(&ask_input, window, |this: &mut Workspace, _, ev: &InputEvent, window, cx| {
@@ -250,6 +252,7 @@ impl Workspace {
             ask_limit,
             bounds_seq: 0,
             title: String::new(),
+            task_menu: None,
         }
     }
 
@@ -263,7 +266,7 @@ impl Workspace {
                 "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
                 "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
                 "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "focus": self.focus_desc, "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window, "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window, "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
@@ -384,6 +387,40 @@ impl Workspace {
             s.save_prefs();
         });
         self.set_side_open(true, cx);
+    }
+
+    /// A task's context menu at the mouse (task rows): drawn by the workspace above everything.
+    pub fn open_task_menu(&mut self, id: i64, status: TaskStatus, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let ws = cx.entity().downgrade();
+        let act: std::rc::Rc<dyn Fn(i64, &'static str, &mut Window, &mut App)> = std::rc::Rc::new(move |id, op, window, cx| {
+            let _ = ws.update(cx, |w, cx| {
+                w.close_task_menu(cx);
+                if op == "open" { w.open_task(id, window, cx) } else { w.act(id, op, window, cx) }
+            });
+        });
+        let menu = gpui_component::menu::PopupMenu::build(window, cx, move |m, _, _| task_menu(m, id, status, act));
+        let sub = cx.subscribe_in(&menu, window, |w: &mut Workspace, _, _: &DismissEvent, _, cx| {
+            w.close_task_menu(cx);
+        });
+        self.tasks_panel.update(cx, |p, cx| {
+            p.menu_open = true;
+            cx.notify();
+        });
+        menu.update(cx, |m, cx| m.focus_handle(cx).focus(window));
+        self.task_menu = Some((menu, pos, sub));
+        cx.notify();
+    }
+
+    pub fn close_task_menu(&mut self, cx: &mut Context<Self>) {
+        self.task_menu = None;
+        self.tasks_panel.update(cx, |p, cx| {
+            p.menu_open = false;
+            cx.notify();
+        });
+        cx.notify();
+    }
+    pub fn task_menu_open(&self) -> bool {
+        self.task_menu.is_some()
     }
 
     /// A task action from a context menu: open the task, then the same ask bar (or dialog) as its tab actions.
@@ -624,6 +661,9 @@ impl Render for Workspace {
         }
         root = root.child(body);
         root = root.child(statusbar::render(self, window, cx));
+        if let Some((menu, pos, _)) = &self.task_menu {
+            root = root.child(deferred(anchored().position(*pos).snap_to_window_with_margin(px(8.)).child(menu.clone())).with_priority(2));
+        }
         root = root.child(frame_probe());
 
         // ---- overlays

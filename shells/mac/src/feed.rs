@@ -498,7 +498,9 @@ impl Feed {
             Row::Live { turn_id } => self.live(&turn_id, window, cx),
             Row::Foot { turn_id } => self.foot(&turn_id, cx),
         };
-        let mut d = div().w_full().child(self.wrap(el));
+        // keyed by the row: element state inside (context menus all use the id "context-menu") stays per row
+        let key = self.keys.get(ix).map(|k| k.0.clone()).unwrap_or_else(|| format!("row{ix}"));
+        let mut d = div().id(ElementId::Name(key.into())).w_full().child(self.wrap(el));
         if first {
             d = d.pt(zx(26.));
         }

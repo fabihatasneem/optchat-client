@@ -10,12 +10,11 @@ use gpui::*;
 use gpui::Context;
 use gpui_component::input::Input;
 use gpui_component::Sizable;
-use gpui_component::menu::ContextMenuExt;
 use optchat_engine::types::*;
 
 pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) -> impl IntoElement {
     let k = c(cx).clone();
-    let ws = cx.entity().downgrade();
+    let menu_open = w.task_menu_open();
     let s = w.state.read(cx);
     let tabs = s.prefs.tabs.clone();
     let cur = s.current;
@@ -35,7 +34,8 @@ pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Works
             status_dot(format!("tab{id}"), x.as_ref().map(|x| x.task.status.as_str()).unwrap_or("idle"), 7., cx)
         };
         let tip = x.as_ref().map(|x| format!("{} · #{id} · {}", x.task.title, x.task.status.as_str())).unwrap_or(format!("#{id}"));
-        strip = strip.child(
+        // keyed parent: sibling tabs' context menus (all id "context-menu") stay apart
+        strip = strip.child(div().id(SharedString::from(format!("tab-k-{id}"))).flex_none().h_full().child(
             div()
                 .id(SharedString::from(format!("tab-{id}")))
                 .group("tab")
@@ -55,7 +55,7 @@ pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Works
                 .text_color(if on { k.text } else if ended { k.faint } else { k.muted })
                 .when(on, |d| d.bg(k.bg).child(div().absolute().top_0().left_0().right_0().h(px(2.)).bg(k.accent)))
                 .when(!on, |d| d.bg(k.bg2).hover(move |s| s.bg(hover)))
-                .tooltip(tooltip(tip))
+                .when(!menu_open, |d| d.tooltip(tooltip(tip)))
                 .child(probe(format!("tab.{id}")))
                 .child(lead)
                 .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
@@ -84,18 +84,11 @@ pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Works
                     w.state.update(cx, |s, cx| s.close_tab(id, cx));
                     w.update_title(window, cx);
                 }))
-                .context_menu({
-                    let ws = ws.clone();
+                .on_mouse_down(MouseButton::Right, {
                     let status = x.as_ref().map(|x| x.task.status).unwrap_or(TaskStatus::Idle);
-                    move |m, _, _| {
-                        let ws = ws.clone();
-                        let act: std::rc::Rc<dyn Fn(i64, &'static str, &mut Window, &mut App)> = std::rc::Rc::new(move |id, op, window, cx| {
-                            let _ = ws.update(cx, |w, cx| if op == "open" { w.open_task(id, window, cx) } else { w.act(id, op, window, cx) });
-                        });
-                        crate::workspace::task_menu(m, id, status, act)
-                    }
+                    cx.listener(move |w, e: &MouseDownEvent, window, cx| w.open_task_menu(id, status, e.position, window, cx))
                 }),
-        );
+        ));
     }
     let mut actions = div().flex().flex_none().items_center().gap(px(2.)).px(px(6.)).h_full().border_l_1().border_color(k.line);
     if let Some(st) = st {

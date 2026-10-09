@@ -5,24 +5,26 @@ use crate::theme::c;
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::menu::ContextMenuExt;
 use optchat_engine::engine::TaskInfo;
 
 pub enum TasksEvent {
     Open(i64),
     Act(i64, &'static str),
+    Menu(i64, optchat_engine::types::TaskStatus, Point<Pixels>),
 }
 /// The Tasks view as its own (cached) view: it re-renders only when the state changes, never while the feed scrolls.
 pub struct TasksPanel {
     pub state: Entity<AppState>,
     pub collapsed: std::collections::HashSet<i64>,
+    /// a task menu is open: no row tooltips (they are drawn above everything and would cover the menu)
+    pub menu_open: bool,
     _sub: Subscription,
 }
 impl EventEmitter<TasksEvent> for TasksPanel {}
 impl TasksPanel {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> TasksPanel {
         let _sub = cx.observe(&state, |_, _, cx| cx.notify());
-        TasksPanel { state, collapsed: Default::default(), _sub }
+        TasksPanel { state, collapsed: Default::default(), menu_open: false, _sub }
     }
 }
 impl Render for TasksPanel {
@@ -127,7 +129,7 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
     }
     let me = cx.entity().downgrade();
     let status = t.status;
-    div()
+    div().id(SharedString::from(format!("trow-k-{id}"))).child(div()
         .id(SharedString::from(format!("trow-{id}")))
         .flex()
         .items_center()
@@ -141,7 +143,7 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
         .when(is_cur, |d| d.bg(k.accent_bg).text_color(k.text).child(div().absolute().left_0().top(px(6.)).bottom(px(6.)).w(px(2.)).bg(k.accent)))
         .when(!is_cur, |d| d.hover(move |s| s.bg(hover)))
         .relative()
-        .tooltip(tooltip(tip))
+        .when(!w.menu_open, |d| d.tooltip(tooltip(tip)))
         .child(probe(format!("trow.{id}")))
         .child(
             div()
@@ -171,11 +173,9 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
         )
         .when(x.running, |d| d.child(spinner(SharedString::from(format!("trs{id}")), 13., k.accent)))
         .on_click(cx.listener(move |_, _, _, cx| cx.emit(TasksEvent::Open(id))))
-        .context_menu(move |m, _, _| {
-            let me = me.clone();
-            let act: std::rc::Rc<dyn Fn(i64, &'static str, &mut Window, &mut App)> = std::rc::Rc::new(move |id, op, _, cx| {
-                let _ = me.update(cx, |_, cx| cx.emit(if op == "open" { TasksEvent::Open(id) } else { TasksEvent::Act(id, op) }));
-            });
-            crate::workspace::task_menu(m, id, status, act)
-        })
+        // the menu itself is drawn by the workspace (see Workspace::open_task_menu)
+        .on_mouse_down(MouseButton::Right, move |e: &MouseDownEvent, _, cx| {
+            let pos = e.position;
+            let _ = me.update(cx, |_, cx| cx.emit(TasksEvent::Menu(id, status, pos)));
+        }))
 }

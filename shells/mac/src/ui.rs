@@ -409,3 +409,49 @@ pub fn frame_count() -> u64 {
     static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
+
+// ---- images from the database (blobs), shared by the panels: fetched off the UI thread, cached for the session ----
+thread_local!(static BLOB_IMAGES: std::cell::RefCell<HashMap<String, Option<std::sync::Arc<Image>>>> = std::cell::RefCell::new(HashMap::new()));
+/// The image of a blob, or None while it loads (the calling view is redrawn when it arrives).
+pub fn blob_image<V: 'static>(state: &Entity<crate::state::AppState>, blob: &str, cx: &mut Context<V>) -> Option<std::sync::Arc<Image>> {
+    if let Some(v) = BLOB_IMAGES.with(|m| m.borrow().get(blob).cloned()) {
+        return v;
+    }
+    BLOB_IMAGES.with(|m| m.borrow_mut().insert(blob.to_string(), None));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let s = state.read(cx);
+    if let Some(h) = s.hub() {
+        let b2 = blob.to_string();
+        s.rt.spawn(async move {
+            let _ = tx.send(h.store.get_blob(&b2).ok().flatten());
+        });
+    }
+    let eid = cx.entity_id();
+    let blob = blob.to_string();
+    cx.spawn(async move |_, cx| {
+        if let Ok(Some(b)) = rx.await {
+            let fmt = match b.media_type.as_str() {
+                "image/jpeg" => ImageFormat::Jpeg,
+                "image/gif" => ImageFormat::Gif,
+                "image/webp" => ImageFormat::Webp,
+                _ => ImageFormat::Png,
+            };
+            let img = std::sync::Arc::new(Image::from_bytes(fmt, b.bytes));
+            BLOB_IMAGES.with(|m| m.borrow_mut().insert(blob, Some(img)));
+            let _ = cx.update(|cx| cx.notify(eid));
+        }
+    })
+    .detach();
+    None
+}
+/// A thumbnail (max w × h) of a blob image, a placeholder while it loads.
+pub fn blob_thumb<V: 'static>(state: &Entity<crate::state::AppState>, blob: &str, max_w: f32, max_h: f32, wh: Option<(u32, u32)>, cx: &mut Context<V>) -> AnyElement {
+    let k = c(cx).clone();
+    let (w, h) = wh.map(|(w, h)| (w as f32, h as f32)).unwrap_or((max_w, max_h * 0.75));
+    let sc = (max_w / w).min(max_h / h).min(1.0);
+    let (dw, dh) = (w * sc, h * sc);
+    match blob_image(state, blob, cx) {
+        Some(i) => img(i).w(px(dw)).h(px(dh)).rounded(px(6.)).into_any_element(),
+        None => div().w(px(dw)).h(px(dh)).rounded(px(6.)).bg(k.panel2).into_any_element(),
+    }
+}

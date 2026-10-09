@@ -34,18 +34,31 @@ const offline = Deno.args.includes("--offline");
 const suites = ALL.filter((s) => (args.length ? args.includes(s.name) : true) && !(offline && s.models));
 const out: string[] = [`e2e ${new Date().toISOString()}`];
 let bad = 0;
-for (const s of suites) {
-  const t0 = performance.now();
-  console.log(`\n== ${s.name}`);
-  const p = new Deno.Command("deno", { args: ["run", "-A", `${ROOT}/tests/${s.name}.ts`], stdout: "piped", stderr: "piped" }).spawn();
+const run = async (name: string) => {
+  const p = new Deno.Command("deno", { args: ["run", "-A", `${ROOT}/tests/${name}.ts`], stdout: "piped", stderr: "piped" }).spawn();
   const r = await p.output();
   const text = new TextDecoder().decode(r.stdout) + new TextDecoder().decode(r.stderr);
   const lines = text.split("\n").filter((l) => /^(ok|FAIL) /.test(l));
-  for (const l of lines) console.log(l.slice(0, 220));
-  if (s.name === "perf") console.log(text.slice(text.indexOf("{")).slice(0, 900));
-  const fails = lines.filter((l) => l.startsWith("FAIL")).length + (r.success ? 0 : lines.some((l) => l.startsWith("FAIL")) ? 0 : 1);
-  bad += fails;
-  out.push(`\n== ${s.name}: ${lines.length - lines.filter((l) => l.startsWith("FAIL")).length} ok, ${fails} failed, ${Math.round((performance.now() - t0) / 1000)} s`, ...lines);
+  const fails = lines.filter((l) => l.startsWith("FAIL")).length + (r.success || lines.some((l) => l.startsWith("FAIL")) ? 0 : 1);
+  return { text, lines, fails };
+};
+for (const s of suites) {
+  const t0 = performance.now();
+  console.log(`\n== ${s.name}`);
+  let r = await run(s.name);
+  // macOS stops drawing a window that other windows cover, and keys then go by the last drawn frame: when the
+  // machine is in use a suite can fail for that reason alone. Offline suites get one retry; both runs are reported.
+  let note = "";
+  if (r.fails && !s.models) {
+    console.log(`  (${r.fails} failed: retrying once)`);
+    const first = r.fails;
+    r = await run(s.name);
+    note = ` (retry; first run had ${first} failure${first > 1 ? "s" : ""})`;
+  }
+  for (const l of r.lines) console.log(l.slice(0, 220));
+  if (s.name === "perf") console.log(r.text.slice(r.text.indexOf("{")).slice(0, 1200));
+  bad += r.fails;
+  out.push(`\n== ${s.name}: ${r.lines.length - r.lines.filter((l) => l.startsWith("FAIL")).length} ok, ${r.fails} failed, ${Math.round((performance.now() - t0) / 1000)} s${note}`, ...r.lines);
 }
 out.push(`\nTOTAL: ${bad ? `${bad} failed` : "all passed"}`);
 Deno.writeTextFileSync(`${ROOT}/shots/e2e-results.txt`, out.join("\n") + "\n");

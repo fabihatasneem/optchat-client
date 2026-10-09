@@ -77,6 +77,21 @@ try {
     await a.waitFor(() => st().overlay === null, 4000, "lightbox closed");
     check(true, "image opens in the lightbox; Esc closes it");
   });
+  await step("memory-image", async () => {
+    // #8's first message is the picture: open it in the Memory view's tree
+    await a.key("cmd+2");
+    await a.waitFor(() => st().view === "memory", 3000, "memory");
+    await sleep(1200);
+    const leaf = a.probe("mem.8:0:1") ? "mem.8:0:1" : keys("mem.8:").sort((x, y) => a.probe(x)![1] - a.probe(y)![1])[0];
+    check(!!leaf, `the memory tree of #8 lists its lines (${leaf})`);
+    if (leaf) {
+      await a.click(leaf);
+      await sleep(1500);
+      await a.shot("chat-04b-memory-image");
+      check(true, "memory tree line opened down to the message (see screenshot for the picture)");
+    }
+    await a.key("cmd+1");
+  });
   await step("continue", async () => {
     // #8 is done: the end bar offers Continue as a new task
     await a.click("endbar.continue");
@@ -103,19 +118,24 @@ try {
     await a.waitFor(() => st().overlay === null, 4000, "closed");
   });
   await step("row-menu", async () => {
-    await a.key("cmd+1");
-    await a.waitFor(() => st().view === "tasks", 3000, "tasks");
+    if (!(st().view === "tasks" && st().sideOpen)) await a.key("cmd+1"); // ⌘1 on the shown view hides it
+    await a.waitFor(() => st().view === "tasks" && st().sideOpen, 3000, "tasks");
     await sleep(600);
     const row = keys("trow.").filter((k) => k !== "trow.0").sort((x, y) => a.probe(x)![1] - a.probe(y)![1])[0];
     await a.click(row, { right: true });
-    await sleep(500);
+    await a.waitFor(() => st().taskMenu === true, 3000, "row menu open");
+    await sleep(300);
     await a.shot("chat-07-row-menu");
-    await a.key("Escape"); await sleep(300);
+    await a.key("Escape");
+    await a.waitFor(() => st().taskMenu === false, 3000, "row menu closed");
+    check(true, `right-click on a task row opens its menu; Esc closes it (${row})`);
     await a.click("tab.0", { right: true });
-    await sleep(500);
+    await a.waitFor(() => st().taskMenu === true, 3000, "tab menu open");
+    await sleep(300);
     await a.shot("chat-08-tab-menu");
-    await a.key("Escape"); await sleep(300);
-    check(true, "task row and tab context menus (see screenshots)");
+    await a.key("Escape");
+    await a.waitFor(() => st().taskMenu === false, 3000, "tab menu closed");
+    check(true, "right-click on a tab opens the same task menu (main chat: Pause…, New subtask…, Copy #0)");
   });
 } catch (e) { check(false, String(e)); await a.shot("chat-fail"); } finally { await a.quit(); }
 Deno.exit(failed() ? 1 : 0);

@@ -258,7 +258,8 @@ impl MemoryPanel {
                                 .text_size(px(12.))
                                 .line_height(px(18.))
                                 .child(div().font_family("Menlo").text_size(px(10.5)).text_color(k.muted).mb(px(4.)).child(format!("{}message {} · {} · {}", if foreign { format!("#{t} · ") } else { String::new() }, m.i, m.kind.as_str(), fmt::datetime(&m.date))))
-                                .child(div().text_color(k.text2).child(m.text.clone())),
+                                .child(div().text_color(k.text2).child(m.text.clone()))
+                                .when_some(m.image.clone(), |d, r| d.child(div().mt(px(6.)).child(crate::ui::blob_thumb(&self.state, &r.blob, 260., 200., r.w.zip(r.h), cx)))),
                         );
                     }
                     let kids = kids.clone();
@@ -514,7 +515,13 @@ impl ContextPanel {
                         cx.notify();
                     })),
             )
-            .when(open, |d| d.child(div().ml(px(18.)).mb(px(6.)).p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.5)).line_height(px(17.)).text_color(k.text2).child(full)))
+            .when(open, |d| {
+                let image = match &m.body {
+                    Body::Image { blob: Some(b), .. } => Some(crate::ui::blob_thumb(&self.state, b, 260., 200., None, cx)),
+                    _ => None,
+                };
+                d.child(div().ml(px(18.)).mb(px(6.)).p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.5)).line_height(px(17.)).text_color(k.text2).child(full).when_some(image, |d, i| d.child(div().mt(px(6.)).child(i))))
+            })
             .into_any_element()
     }
 }
