@@ -5,9 +5,11 @@ use crate::fmt;
 use crate::markdown::{self, Doc};
 use crate::state::{task_name, AppState, ToolState};
 use crate::theme::{c, C};
+use crate::ui::zx;
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui::Context;
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use optchat_engine::types::*;
 use std::collections::{HashMap, HashSet};
@@ -90,6 +92,12 @@ impl Feed {
             }
         }));
         f
+    }
+
+    /// the chat text zoom changed: every row's height changes, so measure them all again
+    pub fn relayout(&mut self, cx: &mut Context<Self>) {
+        self.list.reset(self.rows.len());
+        cx.notify();
     }
 
     fn toggle(&mut self, key: &str, cx: &mut Context<Self>) {
@@ -334,6 +342,7 @@ impl Render for Feed {
         div()
             .id("feedwrap")
             .size_full()
+            .text_size(zx(13.5))
             .bg(k.bg)
             .on_scroll_wheel(|_, _, _| {
                 frames().lock().last_scroll = Some(std::time::Instant::now());
@@ -359,7 +368,7 @@ const MAXW: f32 = 860.0;
 
 impl Feed {
     fn wrap(&self, el: impl IntoElement) -> AnyElement {
-        div().w_full().flex().justify_center().px(px(26.)).child(div().w_full().max_w(px(MAXW)).child(el)).into_any_element()
+        div().w_full().flex().justify_center().px(zx(26.)).child(div().w_full().max_w(zx(MAXW)).child(el)).into_any_element()
     }
 
     fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -382,23 +391,23 @@ impl Feed {
         };
         let mut d = div().w_full().child(self.wrap(el));
         if first {
-            d = d.pt(px(26.));
+            d = d.pt(zx(26.));
         }
         if last {
-            d = d.pb(px(30.)).child(probe("feed.last"));
+            d = d.pb(zx(30.)).child(probe("feed.last"));
         }
         d.into_any_element()
     }
 
     fn skeleton(&self, cx: &App) -> AnyElement {
         let k = c(cx);
-        let mut d = div().flex().flex_col().gap(px(24.));
+        let mut d = div().flex().flex_col().gap(zx(24.));
         for w in [260.0, 180.0, 320.0] {
             d = d.child(
                 div()
                     .flex()
                     .flex_col()
-                    .child(div().flex().justify_end().mb(px(14.)).child(div().w(px(w)).h(px(40.)).rounded(px(14.)).bg(k.panel2)))
+                    .child(div().flex().justify_end().mb(zx(14.)).child(div().w(zx(w)).h(zx(40.)).rounded(zx(14.)).bg(k.panel2)))
                     .child(skeleton_line(None, cx))
                     .child(skeleton_line(None, cx))
                     .child(skeleton_line(Some(220.), cx)),
@@ -413,29 +422,29 @@ impl Feed {
         let t = s.tasks.get(&s.current).map(|x| x.task.clone());
         match t {
             Some(t) if t.parent.is_some() => div()
-                .mt(px(120.))
+                .mt(zx(120.))
                 .flex()
                 .flex_col()
                 .items_center()
-                .gap(px(8.))
+                .gap(zx(8.))
                 .text_color(k.muted)
-                .child(div().text_size(px(24.)).text_color(k.text).font_weight(FontWeight::SEMIBOLD).child(t.title.clone()))
+                .child(div().text_size(zx(24.)).text_color(k.text).font_weight(FontWeight::SEMIBOLD).child(t.title.clone()))
                 .child(format!("This task has no messages yet.{}", if t.status == TaskStatus::Active { " Its first turn is starting." } else { "" }))
                 .into_any_element(),
             _ => div()
-                .mt(px(110.))
+                .mt(zx(110.))
                 .flex()
                 .flex_col()
                 .items_center()
-                .gap(px(10.))
+                .gap(zx(10.))
                 .text_color(k.muted)
-                .max_w(px(520.))
+                .max_w(zx(520.))
                 .mx_auto()
                 .text_center()
                 .child(logo(44.0, cx))
-                .child(div().text_size(px(26.)).text_color(k.text).font_weight(FontWeight::SEMIBOLD).child("One chat. It never ends."))
+                .child(div().text_size(zx(26.)).text_color(k.text).font_weight(FontWeight::SEMIBOLD).child("One chat. It never ends."))
                 .child("Every message is kept forever and folded into a tree of summaries. Each turn starts fresh with a ~128 KB view of the whole history, and the agent zooms in when it needs detail. Work can branch into tasks: each one a chat of its own.")
-                .child(div().text_size(px(12.)).child("Running on your local Claude Code and Codex logins."))
+                .child(div().text_size(zx(12.)).child("Running on your local Claude Code and Codex logins."))
                 .into_any_element(),
         }
     }
@@ -445,13 +454,13 @@ impl Feed {
         div()
             .flex()
             .items_center()
-            .gap(px(10.))
-            .my(px(12.))
-            .text_size(px(11.))
+            .gap(zx(10.))
+            .my(zx(12.))
+            .text_size(zx(11.))
             .text_color(k.faint)
-            .child(div().flex_1().h(px(1.)).bg(k.line2))
+            .child(div().flex_1().h(zx(1.)).bg(k.line2))
             .child("NOT RUN YET")
-            .child(div().flex_1().h(px(1.)).bg(k.line2))
+            .child(div().flex_1().h(zx(1.)).bg(k.line2))
             .into_any_element()
     }
 
@@ -469,7 +478,7 @@ impl Feed {
         let i = e.i;
         Some(
             btn_small(ElementId::Name(format!("cut{i}").into()), format!("shortened · show all {} chars", group_thousands(n)), Tone::Ghost, cx)
-                .mt(px(4.))
+                .mt(zx(4.))
                 .on_click(cx.listener(move |f, _, _, cx| {
                     f.full.insert(i);
                     f.md.remove(&i);
@@ -485,7 +494,7 @@ impl Feed {
 
     fn meta_line(&self, e: &LogEntry, cx: &App) -> Div {
         let k = c(cx);
-        div().flex().justify_end().gap(px(8.)).mt(px(4.)).text_size(px(10.5)).font_family("Menlo").text_color(k.faint).child(format!("#{}", e.i)).child(fmt::time(&e.date))
+        div().flex().justify_end().gap(zx(8.)).mt(zx(4.)).text_size(zx(10.5)).font_family("Menlo").text_color(k.faint).child(format!("#{}", e.i)).child(fmt::time(&e.date))
     }
 
     fn user(&mut self, e: &Arc<LogEntry>, _w: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -496,7 +505,7 @@ impl Feed {
         div()
             .flex()
             .justify_end()
-            .my(px(10.))
+            .my(zx(10.))
             .child(
                 div()
                     .max_w(relative(0.78))
@@ -509,12 +518,12 @@ impl Feed {
                             .bg(k.panel2)
                             .border_1()
                             .border_color(k.line2)
-                            .rounded(px(16.))
-                            .rounded_br(px(4.))
-                            .px(px(14.))
-                            .py(px(10.))
-                            .text_size(px(14.))
-                            .line_height(px(21.5))
+                            .rounded(zx(16.))
+                            .rounded_br(zx(4.))
+                            .px(zx(14.))
+                            .py(zx(10.))
+                            .text_size(zx(14.))
+                            .line_height(zx(21.5))
                             .text_color(k.text)
                             .child(text)
                             .context_menu(move |m, _, _| m.item(PopupMenuItem::new("Copy text").on_click({ let c2 = copy.clone(); move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(c2.clone())) }))),
@@ -532,12 +541,12 @@ impl Feed {
         let scale = (max_w / w).min(max_h / h).min(1.0);
         let (dw, dh) = (w * scale, h * scale);
         let img_el: AnyElement = match self.image(&blob, cx) {
-            Some(i) => img(i).w(px(dw)).h(px(dh)).rounded(px(12.)).into_any_element(),
-            None => div().w(px(dw)).h(px(dh)).rounded(px(12.)).bg(k.panel2).into_any_element(),
+            Some(i) => img(i).w(zx(dw)).h(zx(dh)).rounded(zx(12.)).into_any_element(),
+            None => div().w(zx(dw)).h(zx(dh)).rounded(zx(12.)).bg(k.panel2).into_any_element(),
         };
         div()
             .id(ElementId::Name(format!("img{blob}{max_w}").into()))
-            .rounded(px(12.))
+            .rounded(zx(12.))
             .border_1()
             .border_color(k.line2)
             .overflow_hidden()
@@ -551,11 +560,11 @@ impl Feed {
         let user = e.kind == LogKind::User;
         let im = self.blob_img(e.image.as_ref().unwrap(), 420., 360., cx);
         let k = c(cx);
-        let meta = div().mt(px(4.)).text_size(px(10.5)).font_family("Menlo").text_color(k.faint).child(format!("#{} {}", e.i, e.text));
+        let meta = div().mt(zx(4.)).text_size(zx(10.5)).font_family("Menlo").text_color(k.faint).child(format!("#{} {}", e.i, e.text));
         if user {
-            div().flex().justify_end().my(px(10.)).child(div().flex().flex_col().items_end().child(im).child(meta)).into_any_element()
+            div().flex().justify_end().my(zx(10.)).child(div().flex().flex_col().items_end().child(im).child(meta)).into_any_element()
         } else {
-            div().my(px(8.)).flex().flex_col().child(im).child(meta).into_any_element()
+            div().my(zx(8.)).flex().flex_col().child(im).child(meta).into_any_element()
         }
     }
 
@@ -584,22 +593,22 @@ impl Feed {
             }
         };
         div()
-            .my(px(10.))
-            .border_l(px(3.))
+            .my(zx(10.))
+            .border_l(zx(3.))
             .border_color(k.violet)
             .bg(k.violet.opacity(0.06))
-            .rounded_r(px(12.))
-            .rounded_l(px(4.))
-            .px(px(12.))
-            .pt(px(8.))
-            .pb(px(10.))
+            .rounded_r(zx(12.))
+            .rounded_l(zx(4.))
+            .px(zx(12.))
+            .pt(zx(8.))
+            .pb(zx(10.))
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(8.))
-                    .text_size(px(12.))
-                    .mb(px(4.))
+                    .gap(zx(8.))
+                    .text_size(zx(12.))
+                    .mb(zx(4.))
                     .child(
                         div()
                             .id(ElementId::Name(format!("pfrom{}", e.i).into()))
@@ -609,7 +618,7 @@ impl Feed {
                             .child(format!("↳ {label}"))
                             .when_some(from, |d, f| d.on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::OpenTask(f))))),
                     )
-                    .child(div().ml_auto().font_family("Menlo").text_size(px(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date)))),
+                    .child(div().ml_auto().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date)))),
             )
             .child(body)
             .into_any_element()
@@ -623,14 +632,14 @@ impl Feed {
         if let Some(r) = &e.image {
             let im = self.blob_img(r, 240., 200., cx);
             return div()
-                .my(px(8.))
+                .my(zx(8.))
                 .flex()
-                .gap(px(8.))
-                .px(px(12.))
-                .py(px(8.))
+                .gap(zx(8.))
+                .px(zx(12.))
+                .py(zx(8.))
                 .border_1()
                 .border_color(k.line2)
-                .rounded(px(12.))
+                .rounded(zx(12.))
                 .child(div().font_family("Menlo").text_color(k.violet).font_weight(FontWeight::BOLD).child(format!("#{id}")))
                 .child(im)
                 .into_any_element();
@@ -650,14 +659,25 @@ impl Feed {
             let doc = markdown::parse(&shown);
             markdown::render(&format!("rb{}", e.i), &doc, &markdown::Opts { size: 13.5, color: k.text2 }, w, cx).into_any_element()
         } else {
-            div().text_size(px(13.5)).line_height(px(21.)).text_color(k.text2).child(shown).into_any_element()
+            div().text_size(zx(13.5)).line_height(zx(21.)).text_color(k.text2).child(shown).into_any_element()
         };
         let hover = k.hover;
+        let copy = body.clone();
+        let me = cx.entity().downgrade();
         div()
-            .my(px(8.))
+            .id(ElementId::Name(format!("rc{}", e.i).into()))
+            .context_menu(move |m, _, _| {
+                let c2 = copy.clone();
+                let me = me.clone();
+                m.item(PopupMenuItem::new(format!("Open #{id}")).on_click(move |_, _, cx| {
+                    let _ = me.update(cx, |_, cx| cx.emit(FeedEvent::OpenTask(id)));
+                }))
+                .item(PopupMenuItem::new("Copy text").on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(c2.clone()))))
+            })
+            .my(zx(8.))
             .border_1()
             .border_color(border)
-            .rounded(px(12.))
+            .rounded(zx(12.))
             .bg(bg)
             .overflow_hidden()
             .child(
@@ -665,10 +685,10 @@ impl Feed {
                     .id(ElementId::Name(format!("rh{}", e.i).into()))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
-                    .px(px(12.))
-                    .py(px(7.))
-                    .text_size(px(12.5))
+                    .gap(zx(8.))
+                    .px(zx(12.))
+                    .py(zx(7.))
+                    .text_size(zx(12.5))
                     .border_b_1()
                     .border_color(k.line)
                     .cursor_pointer()
@@ -677,15 +697,15 @@ impl Feed {
                     .child(div().font_family("Menlo").font_weight(FontWeight::BOLD).text_color(k.violet).child(format!("#{id}")))
                     .child(div().text_color(kcol).child(klabel))
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(k.text2).child(child))
-                    .child(div().font_family("Menlo").text_size(px(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date))))
-                    .child(div().text_size(px(11.)).text_color(k.accent).child("open ↗")),
+                    .child(div().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date))))
+                    .child(div().text_size(zx(11.)).text_color(k.accent).child("open ↗")),
             )
             .child(
                 div()
                     .id(ElementId::Name(format!("rbody{}", e.i).into()))
-                    .px(px(12.))
-                    .pt(px(8.))
-                    .pb(px(10.))
+                    .px(zx(12.))
+                    .pt(zx(8.))
+                    .pb(zx(10.))
                     .when(long, |d| d.cursor_pointer().on_click(cx.listener(move |f, _, _, cx| f.toggle(&format!("r{}", e_i(&key)), cx))))
                     .child(body_el),
             )
@@ -696,33 +716,33 @@ impl Feed {
         let k = c(cx).clone();
         let parts: Vec<(String, String)> = split_work(&e.text);
         let mut d = div()
-            .my(px(10.))
+            .my(zx(10.))
             .border_1()
             .border_color(k.line2)
-            .rounded(px(12.))
+            .rounded(zx(12.))
             .bg(k.panel)
-            .p(px(12.))
+            .p(zx(12.))
             .child(
                 div()
                     .flex()
-                    .text_size(px(12.))
+                    .text_size(zx(12.))
                     .text_color(k.amber)
-                    .mb(px(6.))
+                    .mb(zx(6.))
                     .child(if parts.len() == 1 { "⭑ report from a background task".to_string() } else { format!("⭑ {} reports from background tasks", parts.len()) })
                     .child(div().flex_1())
-                    .child(div().font_family("Menlo").text_size(px(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date)))),
+                    .child(div().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date)))),
             );
         for (n, (id, text)) in parts.into_iter().enumerate() {
             let tid: Option<i64> = id.strip_prefix('a').and_then(|x| x.parse().ok());
             let doc = markdown::parse(&text);
             d = d.child(
                 div()
-                    .mt(px(6.))
+                    .mt(zx(6.))
                     .when(!id.is_empty(), |d| {
                         d.child(
                             div()
                                 .id(ElementId::Name(format!("w{}.{n}", e.i).into()))
-                                .text_size(px(12.))
+                                .text_size(zx(12.))
                                 .font_family("Menlo")
                                 .text_color(k.violet)
                                 .cursor_pointer()
@@ -746,7 +766,7 @@ impl Feed {
         let copy = e.text.clone();
         div()
             .id(ElementId::Name(format!("talk{}", e.i).into()))
-            .my(px(8.))
+            .my(zx(8.))
             .child(markdown::render(&format!("t{}", e.i), &doc, &markdown::Opts { size: 14.0, color: k.text }, w, cx))
             .children(self.cut_button(e, n, cx))
             .context_menu(move |m, _, _| {
@@ -792,21 +812,21 @@ impl Feed {
         let state_e = self.state.clone();
         let cid2 = cid.clone();
         let mut card = div()
-            .my(px(8.))
+            .my(zx(8.))
             .border_1()
             .border_color(k.line)
             .bg(k.bg2)
-            .rounded(px(10.))
+            .rounded(zx(10.))
             .overflow_hidden()
             .child(
                 div()
                     .id(ElementId::Name(format!("th{}", e.i).into()))
                     .flex()
                     .items_center()
-                    .gap(px(9.))
-                    .px(px(11.))
-                    .py(px(7.))
-                    .text_size(px(13.))
+                    .gap(zx(9.))
+                    .px(zx(11.))
+                    .py(zx(7.))
+                    .text_size(zx(13.))
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
                     .on_click(cx.listener({
@@ -814,9 +834,9 @@ impl Feed {
                         move |f, _, _, cx| f.toggle(&key, cx)
                     }))
                     .child(icon("chevron-right", 12., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))))
-                    .child(div().font_family("Menlo").text_size(px(12.)).text_color(k.cyan).whitespace_nowrap().child(name.clone()))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().font_family("Menlo").text_size(px(12.)).text_color(k.text2).child(arg_preview(&name, &input)))
-                    .child(div().text_size(px(11.)).whitespace_nowrap().text_color(scol).child(stext))
+                    .child(div().font_family("Menlo").text_size(zx(12.)).text_color(k.cyan).whitespace_nowrap().child(name.clone()))
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().font_family("Menlo").text_size(zx(12.)).text_color(k.text2).child(arg_preview(&name, &input)))
+                    .child(div().text_size(zx(11.)).whitespace_nowrap().text_color(scol).child(stext))
                     .when(can_stop, |d| {
                         d.child(btn_small(ElementId::Name(format!("stop{}", e.i).into()), "stop", Tone::Danger, cx).on_click(move |_, _, cx| {
                             cx.stop_propagation();
@@ -824,7 +844,7 @@ impl Feed {
                             state_e.update(cx, |s, cx| s.command(cx, false, move |h| { h.stop_tool(&c3); Ok(String::new()) }));
                         }))
                     })
-                    .child(div().font_family("Menlo").text_size(px(10.5)).text_color(k.faint).child(format!("#{}{}", e.i, echo.map(|x| format!("–{}", x.i)).unwrap_or_default()))),
+                    .child(div().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{}{}", e.i, echo.map(|x| format!("–{}", x.i)).unwrap_or_default()))),
             );
         if name.starts_with("task_") && name != "task_list" {
             let mut ids: Vec<i64> = vec![];
@@ -844,7 +864,7 @@ impl Feed {
                 }
             }
             if !ids.is_empty() {
-                let mut chips = div().flex().flex_wrap().gap(px(6.)).px(px(10.)).pb(px(8.));
+                let mut chips = div().flex().flex_wrap().gap(zx(6.)).px(zx(10.)).pb(zx(8.));
                 for id in ids.into_iter().take(8) {
                     chips = chips.child(
                         chip(format!("#{id} ↗"), ChipTone::Violet, cx)
@@ -857,17 +877,17 @@ impl Feed {
             }
         }
         if open {
-            let lbl = |t: &str| div().text_size(px(10.5)).text_color(k.muted).px(px(12.)).pt(px(8.)).child(t.to_uppercase());
+            let lbl = |t: &str| div().text_size(zx(10.5)).text_color(k.muted).px(zx(12.)).pt(zx(8.)).child(t.to_uppercase());
             let pre = |id: String, t: String| {
                 div()
                     .id(ElementId::Name(id.into()))
-                    .max_h(px(420.))
+                    .max_h(zx(420.))
                     .overflow_y_scroll()
-                    .px(px(12.))
-                    .py(px(8.))
+                    .px(zx(12.))
+                    .py(zx(8.))
                     .font_family("Menlo")
-                    .text_size(px(12.))
-                    .line_height(px(18.))
+                    .text_size(zx(12.))
+                    .line_height(zx(18.))
                     .text_color(k.text2)
                     .child(t)
             };
@@ -885,12 +905,12 @@ impl Feed {
                 let copy_out = x.text.clone();
                 detail = detail.child(lbl("output")).child(pre(format!("tout{}", e.i), txt.to_string()).context_menu(move |m, _, _| m.item(PopupMenuItem::new("Copy output").on_click({ let c2 = copy_out.clone(); move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(c2.clone())) }))));
                 if let Some(b) = self.cut_button(x, n, cx) {
-                    detail = detail.child(div().px(px(10.)).child(b));
+                    detail = detail.child(div().px(zx(10.)).child(b));
                 }
             } else if let Some(r) = st.as_ref().and_then(|s| s.result.clone()) {
                 detail = detail.child(lbl("output")).child(pre(format!("tres{}", e.i), optchat_engine::adapters::result_text(&r.content)));
             }
-            let mut ims = div().flex().flex_wrap().gap(px(8.)).p(px(10.));
+            let mut ims = div().flex().flex_wrap().gap(zx(8.)).p(zx(10.));
             let mut any = false;
             for x in images {
                 if let Some(r) = &x.image {
@@ -921,14 +941,14 @@ impl Feed {
         let unbuilt = s.cur.view.as_ref().map(|v| v.parts.iter().filter(|p| !p.built).count()).unwrap_or(0);
         let busy = s.busy.len();
         let failed = s.failed.len();
-        let mut d = div().flex().flex_col().gap(px(6.));
+        let mut d = div().flex().flex_col().gap(zx(6.));
         let waiting_line = |text: String, color: Hsla, id: &str| {
             div()
                 .flex()
                 .items_center()
-                .gap(px(8.))
-                .my(px(8.))
-                .text_size(px(13.))
+                .gap(zx(8.))
+                .my(zx(8.))
+                .text_size(zx(13.))
                 .text_color(k.muted)
                 .child(pulse(ElementId::Name(format!("wl{id}").into()), dot(color, 7.)))
                 .child(text)
@@ -948,8 +968,8 @@ impl Feed {
                                 .id(ElementId::Name(format!("thh{rid}").into()))
                                 .flex()
                                 .items_center()
-                                .gap(px(7.))
-                                .text_size(px(13.))
+                                .gap(zx(7.))
+                                .text_size(zx(13.))
                                 .text_color(k.muted)
                                 .cursor_pointer()
                                 .on_click(cx.listener({
@@ -961,7 +981,7 @@ impl Feed {
                                 .when(!live_now, |d| d.child("thought"))
                                 .when(!open, |d| d.child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().italic().child(last))),
                         )
-                        .when(open, |dd| dd.child(div().mt(px(6.)).pl(px(12.)).border_l_2().border_color(k.line2).italic().text_size(px(13.)).line_height(px(20.)).text_color(k.muted).child(thinking.clone()))),
+                        .when(open, |dd| dd.child(div().mt(zx(6.)).pl(zx(12.)).border_l_2().border_color(k.line2).italic().text_size(zx(13.)).line_height(zx(20.)).text_color(k.muted).child(thinking.clone()))),
                 );
             }
             if !text.is_empty() {
@@ -976,7 +996,7 @@ impl Feed {
                 d = d.child(
                     div()
                         .child(markdown::render(&format!("lv{rid}"), &doc, &markdown::Opts { size: 14.0, color: k.text }, w, cx))
-                        .child(pulse(ElementId::Name(format!("cur{rid}").into()), div().w(px(8.)).h(px(16.)).rounded(px(2.)).bg(k.accent))),
+                        .child(pulse(ElementId::Name(format!("cur{rid}").into()), div().w(zx(8.)).h(zx(16.)).rounded(zx(2.)).bg(k.accent))),
                 );
             }
             if text.is_empty() && thinking.is_empty() {
@@ -1025,7 +1045,7 @@ impl Feed {
             }
         );
         let u = &turn.usage;
-        let mut row = div().flex().flex_wrap().items_center().gap(px(6.)).mt(px(10.)).text_size(px(11.5));
+        let mut row = div().flex().flex_wrap().items_center().gap(zx(6.)).mt(zx(10.)).text_size(zx(11.5));
         row = row.child(chip(label, if turn.backend == Backend::ClaudeCode { ChipTone::Acc } else { ChipTone::Green }, cx).child(probe(format!("foot.model.{}", turn.id))));
         row = row.child(
             chip(format!("{} step{} {}", reqs.len(), if reqs.len() == 1 { "" } else { "s" }, if open { "▴" } else { "▾" }), ChipTone::Plain, cx)
@@ -1052,16 +1072,16 @@ impl Feed {
             let rid = l.id.clone();
             row = row.child(chip("context ↗", ChipTone::Plain, cx).id(ElementId::Name(format!("ctx{turn_id}").into())).cursor_pointer().on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::SelectRequest(rid.clone())))));
         }
-        let mut d = div().flex().flex_col().mb(px(18.));
+        let mut d = div().flex().flex_col().mb(zx(18.));
         if let Some(err) = &turn.error {
-            d = d.child(div().text_size(px(13.)).text_color(k.red).my(px(6.)).child(format!("⚠ {err}")));
+            d = d.child(div().text_size(zx(13.)).text_color(k.red).my(zx(6.)).child(format!("⚠ {err}")));
         }
         d = d.child(row);
         if open {
-            let mut t = div().mt(px(8.)).flex().flex_col().text_size(px(12.)).border_1().border_color(k.line).rounded(px(8.)).overflow_hidden();
+            let mut t = div().mt(zx(8.)).flex().flex_col().text_size(zx(12.)).border_1().border_color(k.line).rounded(zx(8.)).overflow_hidden();
             let cols: Vec<&str> = if switched { vec!["#", "model", "stop", "in", "cached", "write", "out", "cost", "time"] } else { vec!["#", "stop", "in", "cached", "write", "out", "cost", "time"] };
             let cell = |s: String, right: bool, w: f32| {
-                let d = div().w(px(w)).flex_none().px(px(6.)).py(px(3.)).overflow_hidden().whitespace_nowrap();
+                let d = div().w(zx(w)).flex_none().px(zx(6.)).py(zx(3.)).overflow_hidden().whitespace_nowrap();
                 if right { d.flex().justify_end().child(s) } else { d.child(s) }
             };
             let widths = |c: &str| match c {
@@ -1192,10 +1212,10 @@ fn group_thousands(n: usize) -> String {
 pub fn logo(size: f32, cx: &App) -> Div {
     let k = c(cx);
     div()
-        .size(px(size))
-        .rounded(px(size * 0.3))
+        .size(zx(size))
+        .rounded(zx(size * 0.3))
         .bg(linear_gradient(200., linear_color_stop(k.accent, 0.), linear_color_stop(k.violet, 1.)))
-        .shadow(vec![BoxShadow { color: k.accent.opacity(0.35), offset: point(px(0.), px(0.)), blur_radius: px(18.), spread_radius: px(0.) }])
+        .shadow(vec![BoxShadow { color: k.accent.opacity(0.35), offset: point(zx(0.), zx(0.)), blur_radius: zx(18.), spread_radius: zx(0.) }])
 }
 
 #[allow(dead_code)]

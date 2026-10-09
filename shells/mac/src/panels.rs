@@ -6,7 +6,8 @@ use crate::theme::{c, Themes};
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::button::{Button, ButtonVariants};
+use gpui::Context;
+use gpui_component::button::Button;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_component::switch::Switch;
@@ -85,6 +86,8 @@ pub struct MemoryPanel {
     hits: Option<Vec<SearchHit>>,
     seen: (i64, u64, i64, usize, u64),
     scroll: ScrollHandle,
+    /// set by reveal: the highlighted row scrolls itself into view once it is laid out
+    want_hit: std::rc::Rc<std::cell::Cell<bool>>,
     _subs: Vec<Subscription>,
 }
 impl MemoryPanel {
@@ -96,7 +99,7 @@ impl MemoryPanel {
             }
         });
         let s2 = cx.observe(&state, |m: &mut MemoryPanel, _, cx| { m.maybe_refresh(cx); cx.notify(); });
-        MemoryPanel { state, texts: HashMap::new(), cview: vec![], open: HashSet::new(), kids: HashMap::new(), hit: None, which_c: false, rendered: None, search, hits: None, seen: (-1, 0, -1, 0, 0), scroll: ScrollHandle::new(), _subs: vec![s1, s2] }
+        MemoryPanel { state, texts: HashMap::new(), cview: vec![], open: HashSet::new(), kids: HashMap::new(), hit: None, which_c: false, rendered: None, search, hits: None, seen: (-1, 0, -1, 0, 0), scroll: ScrollHandle::new(), want_hit: Default::default(), _subs: vec![s1, s2] }
     }
     fn maybe_refresh(&mut self, cx: &mut Context<Self>) {
         let s = self.state.read(cx);
@@ -167,6 +170,7 @@ impl MemoryPanel {
             }
         }
         self.hit = path.last().cloned();
+        self.want_hit.set(true);
         cx.notify();
     }
     fn row(&self, t: i64, l: u32, i: i64, text: String, built: bool, depth: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -195,7 +199,26 @@ impl MemoryPanel {
                 .cursor_pointer()
                 .text_size(px(12.))
                 .line_height(px(17.))
-                .when(self.hit == Some(key), |d| d.bg(k.accent_bg))
+                .when(self.hit == Some(key), |d| {
+                    let (want, sh) = (self.want_hit.clone(), self.scroll.clone());
+                    d.bg(k.accent_bg).child(
+                        canvas(
+                            move |b, window, _| {
+                                if want.replace(false) {
+                                    window.refresh();
+                                    // put the row about a fifth of the way down the panel
+                                    let top = sh.bounds().origin.y + sh.bounds().size.height * 0.2;
+                                    let mut o = sh.offset();
+                                    o.y -= b.origin.y - top;
+                                    sh.set_offset(o);
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
+                })
                 .when(open, |d| d.bg(k.panel))
                 .hover(move |s| s.bg(hover))
                 .tooltip(tooltip(if l == 0 { "open the message".to_string() } else { format!("zoom: open into two lines of {}", n / 2) }))
@@ -253,7 +276,14 @@ impl MemoryPanel {
     }
 }
 impl Render for MemoryPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        let body = self.body(window, cx).into_any_element();
+        div().id("scroll-MemoryPanel").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(body)
+    }
+}
+impl MemoryPanel {
+    fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.maybe_refresh(cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);
@@ -522,7 +552,14 @@ fn msg_texts(m: &Message) -> (String, String, String) {
     }
 }
 impl Render for ContextPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        let body = self.body(window, cx).into_any_element();
+        crate::ui::scroll_body("ContextPanel", body)
+    }
+}
+impl ContextPanel {
+    fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.maybe(cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);
@@ -683,7 +720,14 @@ impl LogPanel {
     }
 }
 impl Render for LogPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        let body = self.body(window, cx).into_any_element();
+        crate::ui::scroll_body("LogPanel", body)
+    }
+}
+impl LogPanel {
+    fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.maybe(cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);
@@ -846,7 +890,14 @@ impl ModelsPanel {
     }
 }
 impl Render for ModelsPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        let body = self.body(window, cx).into_any_element();
+        crate::ui::scroll_body("ModelsPanel", body)
+    }
+}
+impl ModelsPanel {
+    fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.maybe(cx);
         let k = c(cx).clone();
         let Some(rows) = self.rows.clone() else { return pad(div()).child(skeleton_line(None, cx)).child(skeleton_line(Some(200.), cx)) };
@@ -975,7 +1026,7 @@ impl ModelsPanel {
             cardv = cardv
                 .child(grid)
                 .child(div().mt(px(6.)).child(Input::new(&inputs[5]).small()))
-                .child(div().flex().items_center().mt(px(6.)).gap(px(8.)).child(div().flex_1().text_size(px(11.)).text_color(k.muted).child("A new rate applies from now; past calls keep the rate they were priced at.")).child(btn_small("saverate", "Save rate", Tone::Primary, cx).child(probe("rate.save")).on_click(cx.listener(|m, _, _, cx| m.save_edit(cx)))));
+                .child(div().flex().items_center().mt(px(6.)).gap(px(8.)).child(div().flex_1().min_w_0().text_size(px(11.)).text_color(k.muted).child("A new rate applies from now; past calls keep the rate they were priced at.")).child(btn_small("saverate", "Save rate", Tone::Primary, cx).child(probe("rate.save")).on_click(cx.listener(|m, _, _, cx| m.save_edit(cx)))));
         }
         if hist_open {
             let mut h = div().flex().flex_col().mt(px(8.)).text_size(px(11.5));
@@ -1065,6 +1116,13 @@ fn picker_btn(id: &str, label: String, items: Vec<(String, String, bool)>, on: s
 }
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // a cached view is laid out at the size its parent gives it, so the panel scrolls itself
+        let body = self.body(window, cx).into_any_element();
+        crate::ui::scroll_body("SettingsPanel", body)
+    }
+}
+impl SettingsPanel {
+    fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_inputs(window, cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);

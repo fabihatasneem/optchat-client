@@ -7,6 +7,7 @@ use crate::ui::*;
 use crate::workspace::Workspace;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui::Context;
 use gpui_component::input::Input;
 use gpui_component::Sizable;
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};

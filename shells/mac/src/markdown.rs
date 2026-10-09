@@ -2,6 +2,7 @@
 //! pulldown-cmark into a small block tree, rendered to GPUI elements with the theme's colors. Code blocks get a
 //! language bar, light syntax colors and a copy button. Nothing is ever rendered as HTML.
 use crate::theme::{c, C};
+use crate::ui::zx;
 use crate::ui::icon;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -304,8 +305,8 @@ fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Wi
             font: f,
             color: col,
             background_color: if st.code { Some(k.panel2) } else { None },
-            underline: link.map(|_| UnderlineStyle { thickness: px(1.), color: Some(k.accent.opacity(0.35)), wavy: false }),
-            strikethrough: if st.strike { Some(StrikethroughStyle { thickness: px(1.), color: Some(color) }) } else { None },
+            underline: link.map(|_| UnderlineStyle { thickness: zx(1.), color: Some(k.accent.opacity(0.35)), wavy: false }),
+            strikethrough: if st.strike { Some(StrikethroughStyle { thickness: zx(1.), color: Some(color) }) } else { None },
         });
         if let Some(l) = link {
             links.push((r.clone(), l.clone()));
@@ -318,13 +319,13 @@ fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Wi
     let st = StyledText::new(SharedString::from(il.text.clone())).with_runs(runs);
     let line_h = size * 1.6;
     if links.is_empty() {
-        div().text_size(px(size)).line_height(px(line_h)).text_color(color).child(st).into_any_element()
+        div().text_size(zx(size)).line_height(zx(line_h)).text_color(color).child(st).into_any_element()
     } else {
         let ranges: Vec<Range<usize>> = links.iter().map(|l| l.0.clone()).collect();
         let urls: Vec<String> = links.into_iter().map(|l| l.1).collect();
         div()
-            .text_size(px(size))
-            .line_height(px(line_h))
+            .text_size(zx(size))
+            .line_height(zx(line_h))
             .text_color(color)
             .child(InteractiveText::new(id, st).on_click(ranges, move |ix, _w, cx| cx.open_url(&urls[ix])))
             .into_any_element()
@@ -333,7 +334,7 @@ fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Wi
 
 pub fn render(id: &str, doc: &Doc, o: &Opts, window: &Window, cx: &App) -> Div {
     let k = c(cx).clone();
-    let mut out = div().flex().flex_col().gap(px(8.)).min_w_0();
+    let mut out = div().flex().flex_col().gap(zx(8.)).min_w_0();
     for (n, b) in doc.iter().enumerate() {
         out = out.child(block(&format!("{id}.{n}"), b, o, &k, window, cx));
     }
@@ -350,12 +351,12 @@ fn block(id: &str, b: &Block, o: &Opts, k: &C, window: &Window, cx: &App) -> Any
                 3 => 15.5,
                 _ => 14.5,
             };
-            div().mt(px(6.)).font_weight(FontWeight::SEMIBOLD).child(styled(ElementId::Name(id.to_string().into()), il, size, k.text, k, window)).into_any_element()
+            div().mt(zx(6.)).font_weight(FontWeight::SEMIBOLD).child(styled(ElementId::Name(id.to_string().into()), il, size, k.text, k, window)).into_any_element()
         }
         Block::Code { lang, text } => code_block(id, lang, text, k, cx).into_any_element(),
-        Block::Rule => div().h(px(1.)).bg(k.line2).my(px(6.)).into_any_element(),
+        Block::Rule => div().h(zx(1.)).bg(k.line2).my(zx(6.)).into_any_element(),
         Block::Quote(bs) => {
-            let mut d = div().pl(px(12.)).border_l_2().border_color(k.line2).flex().flex_col().gap(px(6.));
+            let mut d = div().pl(zx(12.)).border_l_2().border_color(k.line2).flex().flex_col().gap(zx(6.));
             let o2 = Opts { size: o.size, color: k.text2 };
             for (n, b) in bs.iter().enumerate() {
                 d = d.child(block(&format!("{id}.q{n}"), b, &o2, k, window, cx));
@@ -363,34 +364,34 @@ fn block(id: &str, b: &Block, o: &Opts, k: &C, window: &Window, cx: &App) -> Any
             d.into_any_element()
         }
         Block::List { start, items } => {
-            let mut d = div().flex().flex_col().gap(px(3.));
+            let mut d = div().flex().flex_col().gap(zx(3.));
             for (n, (task, bs)) in items.iter().enumerate() {
                 let marker: AnyElement = match task {
                     Some(done) => div()
-                        .size(px(13.))
-                        .mt(px(4.))
-                        .rounded(px(3.))
+                        .size(zx(13.))
+                        .mt(zx(4.))
+                        .rounded(zx(3.))
                         .border_1()
                         .border_color(k.line2)
                         .when(*done, |d| d.bg(k.accent2).child(icon("check", 11., k.on_accent)))
                         .into_any_element(),
                     None => match start {
-                        Some(s) => div().text_size(px(o.size)).line_height(px(o.size * 1.6)).text_color(k.muted).child(format!("{}.", s + n as u64)).into_any_element(),
-                        None => div().mt(px(o.size * 0.62)).size(px(5.)).rounded_full().bg(k.muted).into_any_element(),
+                        Some(s) => div().text_size(zx(o.size)).line_height(zx(o.size * 1.6)).text_color(k.muted).child(format!("{}.", s + n as u64)).into_any_element(),
+                        None => div().mt(zx(o.size * 0.62)).size(zx(5.)).rounded_full().bg(k.muted).into_any_element(),
                     },
                 };
-                let mut body = div().flex_1().min_w_0().flex().flex_col().gap(px(4.));
+                let mut body = div().flex_1().min_w_0().flex().flex_col().gap(zx(4.));
                 for (m, b) in bs.iter().enumerate() {
                     body = body.child(block(&format!("{id}.l{n}.{m}"), b, o, k, window, cx));
                 }
-                d = d.child(div().flex().gap(px(8.)).child(div().w(px(16.)).flex_none().flex().justify_end().child(marker)).child(body));
+                d = d.child(div().flex().gap(zx(8.)).child(div().w(zx(16.)).flex_none().flex().justify_end().child(marker)).child(body));
             }
             d.into_any_element()
         }
         Block::Table { head, rows } => {
             let cols = head.len().max(rows.iter().map(|r| r.len()).max().unwrap_or(0));
             let cell = |il: Option<&Inline>, key: String, bold: bool| {
-                let mut d = div().flex_1().min_w(px(60.)).px(px(9.)).py(px(5.)).border_1().border_color(k.line2);
+                let mut d = div().flex_1().min_w(zx(60.)).px(zx(9.)).py(zx(5.)).border_1().border_color(k.line2);
                 if bold {
                     d = d.bg(k.panel2).font_weight(FontWeight::SEMIBOLD);
                 }
@@ -399,7 +400,7 @@ fn block(id: &str, b: &Block, o: &Opts, k: &C, window: &Window, cx: &App) -> Any
                     None => d,
                 }
             };
-            let mut t = div().flex().flex_col().text_size(px(13.));
+            let mut t = div().flex().flex_col().text_size(zx(13.));
             let mut hr = div().flex();
             for i in 0..cols {
                 hr = hr.child(cell(head.get(i), format!("{id}.h{i}"), true));
@@ -423,7 +424,7 @@ pub fn code_block(id: &str, lang: &str, text: &str, k: &C, _cx: &App) -> Statefu
     let hover = k.hover;
     div()
         .id(ElementId::Name(format!("{id}.code").into()))
-        .rounded(px(10.))
+        .rounded(zx(10.))
         .border_1()
         .border_color(k.line)
         .bg(k.code_bg)
@@ -433,19 +434,19 @@ pub fn code_block(id: &str, lang: &str, text: &str, k: &C, _cx: &App) -> Statefu
                 .flex()
                 .justify_between()
                 .items_center()
-                .px(px(10.))
-                .py(px(4.))
+                .px(zx(10.))
+                .py(zx(4.))
                 .bg(k.panel)
                 .border_b_1()
                 .border_color(k.line)
-                .text_size(px(11.5))
+                .text_size(zx(11.5))
                 .text_color(k.muted)
                 .child(div().font_family("Menlo").child(lang_l))
                 .child(
                     div()
                         .id(ElementId::Name(format!("{id}.copy").into()))
-                        .px(px(6.))
-                        .rounded(px(5.))
+                        .px(zx(6.))
+                        .rounded(zx(5.))
                         .cursor_pointer()
                         .hover(move |s| s.bg(hover))
                         .child("copy")
@@ -456,11 +457,11 @@ pub fn code_block(id: &str, lang: &str, text: &str, k: &C, _cx: &App) -> Statefu
             div()
                 .id(ElementId::Name(format!("{id}.pre").into()))
                 .overflow_x_scroll()
-                .px(px(14.))
-                .py(px(10.))
+                .px(zx(14.))
+                .py(zx(10.))
                 .font_family("Menlo")
-                .text_size(px(12.5))
-                .line_height(px(19.))
+                .text_size(zx(12.5))
+                .line_height(zx(19.))
                 .child(highlight(text, lang, k)),
         )
 }

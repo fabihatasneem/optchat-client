@@ -7,7 +7,8 @@ use crate::ui::*;
 use crate::workspace::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::button::{Button, ButtonVariants};
+use gpui::Context;
+use gpui_component::button::Button;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_component::Sizable;
@@ -48,6 +49,8 @@ pub fn zoom(w: &mut Workspace, d: f32, cx: &mut Context<Workspace>) {
     });
     let size = w.state.read(cx).prefs.font_size;
     gpui_component::Theme::global_mut(cx).font_size = px(size - 0.5);
+    crate::ui::set_zoom(size);
+    w.feed.update(cx, |f, cx| f.relayout(cx));
     cx.refresh_windows();
 }
 
@@ -579,6 +582,12 @@ pub struct Palette {
     items: Vec<(String, String, Cmd)>,
     _subs: Vec<Subscription>,
 }
+impl Palette {
+    /// for UI tests: the query and the label of the selected item
+    pub fn probe_state(&self, cx: &App) -> serde_json::Value {
+        serde_json::json!({ "query": self.query.read(cx).value().to_string(), "selected": self.items.get(self.sel).map(|x| x.0.clone()) })
+    }
+}
 pub enum PaletteEvent {
     Run(Cmd),
 }
@@ -724,6 +733,7 @@ impl Palette {
 }
 impl Render for Palette {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::ui::set_state_extra("palette", self.probe_state(cx));
         let k = c(cx).clone();
         let mut list = div().id("pal-list").flex().flex_col().max_h(px(380.)).overflow_y_scroll().py(px(4.));
         for (n, (label, hint, cmd)) in self.items.iter().enumerate() {

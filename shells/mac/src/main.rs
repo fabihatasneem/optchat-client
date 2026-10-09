@@ -59,6 +59,7 @@ fn main() {
         let prefs: state::Prefs = std::fs::read_to_string(&prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         theme::init(cx, prefs.theme.clone(), prefs.follow_system, cx.window_appearance());
         gpui_component::Theme::global_mut(cx).font_size = px(prefs.font_size - 0.5);
+        crate::ui::set_zoom(prefs.font_size);
         workspace::bind(cx);
         composer::bind(cx);
         dialogs::bind(cx);

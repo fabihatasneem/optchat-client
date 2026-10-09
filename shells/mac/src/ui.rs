@@ -228,6 +228,13 @@ pub fn set_state_json(s: String) {
         *STATE_JSON.get_or_init(|| Mutex::new(String::new())).lock() = s;
     }
 }
+/// state published by views that render on their own (merged into the state file under its key)
+pub static STATE_EXTRA: OnceLock<Mutex<serde_json::Map<String, serde_json::Value>>> = OnceLock::new();
+pub fn set_state_extra(key: &str, v: serde_json::Value) {
+    if probes_on() {
+        STATE_EXTRA.get_or_init(Default::default).lock().insert(key.to_string(), v);
+    }
+}
 pub fn start_probe_writer() {
     let Ok(path) = std::env::var("OPTCHAT_PROBES") else { return };
     std::thread::spawn(move || loop {
@@ -238,7 +245,13 @@ pub fn start_probe_writer() {
             if std::fs::write(&tmp, s).is_ok() {
                 let _ = std::fs::rename(&tmp, &path);
             }
-            let st = STATE_JSON.get_or_init(|| Mutex::new(String::new())).lock().clone();
+            let mut st = STATE_JSON.get_or_init(|| Mutex::new(String::new())).lock().clone();
+            if let Ok(serde_json::Value::Object(mut o)) = serde_json::from_str::<serde_json::Value>(&st) {
+                for (k, v) in STATE_EXTRA.get_or_init(Default::default).lock().iter() {
+                    o.insert(k.clone(), v.clone());
+                }
+                st = serde_json::Value::Object(o).to_string();
+            }
             let sp = format!("{path}.state.json");
             if std::fs::write(format!("{sp}.tmp"), st).is_ok() {
                 let _ = std::fs::rename(format!("{sp}.tmp"), &sp);
@@ -316,4 +329,22 @@ pub fn rss_mb() -> f64 {
     let size = std::mem::size_of::<libc::proc_taskinfo>() as i32;
     let n = unsafe { libc::proc_pidinfo(std::process::id() as i32, libc::PROC_PIDTASKINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
     if n == size { info.pti_resident_size as f64 / (1024.0 * 1024.0) } else { 0.0 }
+}
+
+/// The scroll container of a sidebar panel (inside its cached view).
+pub fn scroll_body(id: &'static str, body: AnyElement) -> impl IntoElement {
+    div().id(SharedString::from(format!("scroll-{id}"))).size_full().overflow_y_scroll().child(body)
+}
+
+// ---- chat zoom (⌘= / ⌘- / ⌘⇧0): the feed's sizes are multiplied by font_size / 14, like a browser's zoom ----
+static ZOOM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f800000); // 1.0
+pub fn set_zoom(font_size: f32) {
+    ZOOM.store((font_size / 14.0).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+pub fn zoom() -> f32 {
+    f32::from_bits(ZOOM.load(std::sync::atomic::Ordering::Relaxed))
+}
+/// a feed size in points at the current zoom
+pub fn zx(v: f32) -> Pixels {
+    px(v * zoom())
 }

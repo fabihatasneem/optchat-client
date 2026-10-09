@@ -12,6 +12,7 @@ use crate::theme::c;
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui::Context;
 use gpui_component::input::{InputEvent, InputState};
 use optchat_engine::types::*;
 
@@ -167,6 +168,12 @@ impl Workspace {
                 cx.notify();
             }
         }));
+        // a closed menu or a removed element leaves nothing focused, and then no workspace key works:
+        // give focus back to the workspace (its keys, M to dictate)
+        subs.push(cx.on_focus_lost(window, |this: &mut Workspace, window, cx| {
+            window.focus(&this.focus);
+            cx.notify();
+        }));
         let focus = cx.focus_handle();
         Workspace {
             state,
@@ -321,7 +328,7 @@ impl Render for Workspace {
                 "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
                 "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
                 "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
@@ -430,16 +437,17 @@ impl Render for Workspace {
         // ---- body: rail · sidebar · editor
         let mut body = div().flex_1().min_h_0().flex().relative();
         body = body.child(self.rail(open, view, cx));
-        if open {
+        // the docked sidebar sits in the row; in a narrow window it floats over the editor (painted after it)
+        if open && !narrow {
             let side = self.sidebar(view, side_w, narrow, window, cx);
-            if narrow {
-                body = body.child(div().id("scrim").absolute().inset_0().left(px(48.)).bg(hsla(0., 0., 0., 0.35)).on_click(cx.listener(|w, _, _, cx| w.set_side_open(false, cx))));
-                body = body.child(div().absolute().top_0().bottom_0().left(px(48.)).w(px(side_w.min(f32::from(window.bounds().size.width) - 60.))).child(side));
-            } else {
-                body = body.child(side);
-            }
+            body = body.child(side);
         }
         body = body.child(self.editor(ended, window, cx));
+        if open && narrow {
+            let side = self.sidebar(view, side_w, narrow, window, cx);
+            body = body.child(div().id("scrim").absolute().inset_0().left(px(48.)).bg(hsla(0., 0., 0., 0.35)).on_click(cx.listener(|w, _, _, cx| w.set_side_open(false, cx))));
+            body = body.child(div().id("sheet").occlude().absolute().top_0().bottom_0().left(px(48.)).w(px(side_w.min(f32::from(window.bounds().size.width) - 60.))).child(side));
+        }
         root = root.child(body);
         root = root.child(statusbar::render(self, window, cx));
         root = root.child(frame_probe());
@@ -585,7 +593,7 @@ impl Workspace {
         }
         head = head.child(icon_btn("side-hide", "panel-left-close", 15., cx).tooltip(tooltip("hide the sidebar (⌘B)")).on_click(cx.listener(|w, _, _, cx| w.set_side_open(false, cx))));
         let loaded = s.cur.loaded;
-        let cached = |v: AnyView| v.cached(StyleRefinement::default().w_full()).into_any_element();
+        let cached = |v: AnyView| v.cached(StyleRefinement::default().size_full()).into_any_element();
         let body: AnyElement = match view {
             View::Tasks => cached(self.tasks_panel.clone().into()),
             _ if !loaded => div().p(px(12.)).child(skeleton_line(None, cx)).child(skeleton_line(Some(160.), cx)).into_any_element(),
@@ -622,7 +630,7 @@ impl Workspace {
             .border_color(k.line)
             .child(probe("sidebar"))
             .child(head)
-            .child(div().id("sidebody").flex_1().min_h_0().overflow_y_scroll().child(body))
+            .child(div().id("sidebody").flex_1().min_h_0().overflow_hidden().child(body))
             .when(!narrow, |d| d.child(resizer))
     }
 
@@ -636,7 +644,8 @@ impl Workspace {
         if ended {
             ed = ed.child(crate::tabs::endbar(self, cx));
         } else {
-            ed = ed.child(AnyView::from(self.composer.clone()).cached(StyleRefinement::default().w_full()));
+            // not cached: a cached view is laid out as a leaf, and the composer sizes to its content
+            ed = ed.child(self.composer.clone());
         }
         ed
     }

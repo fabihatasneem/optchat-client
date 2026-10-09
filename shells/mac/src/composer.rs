@@ -435,6 +435,9 @@ impl Render for Composer {
                             .on_action(cx.listener(|c, _: &StopDictation, _, cx| {
                                 if c.dictating(cx) {
                                     c.stop_dictation(cx);
+                                } else {
+                                    // not dictating: let the workspace close a sheet / overlay
+                                    cx.propagate();
                                 }
                             }))
                             .on_drop(cx.listener(|c, paths: &ExternalPaths, _, cx| {
