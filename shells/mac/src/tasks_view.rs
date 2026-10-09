@@ -5,11 +5,12 @@ use crate::theme::c;
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_component::menu::ContextMenuExt;
 use optchat_engine::engine::TaskInfo;
 
 pub enum TasksEvent {
     Open(i64),
+    Act(i64, &'static str),
 }
 /// The Tasks view as its own (cached) view: it re-renders only when the state changes, never while the feed scrolls.
 pub struct TasksPanel {
@@ -124,8 +125,8 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
     if t.status.as_str() != "idle" {
         meta = meta.child(div().text_color(st_col).child(status_word));
     }
-    let can_pause = !ended && t.status.as_str() != "paused" && t.status.as_str() != "pending";
-    let st = w.state.clone();
+    let me = cx.entity().downgrade();
+    let status = t.status;
     div()
         .id(SharedString::from(format!("trow-{id}")))
         .flex()
@@ -171,18 +172,10 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
         .when(x.running, |d| d.child(spinner(SharedString::from(format!("trs{id}")), 13., k.accent)))
         .on_click(cx.listener(move |_, _, _, cx| cx.emit(TasksEvent::Open(id))))
         .context_menu(move |m, _, _| {
-            let st1 = st.clone();
-            let st2 = st.clone();
-            let mut m = m.item(PopupMenuItem::new("Open").on_click({
-                let st = st.clone();
-                move |_, _, cx| st.update(cx, |s, cx| s.open_task(id, cx))
-            }));
-            if can_pause {
-                m = m.item(PopupMenuItem::new("Pause").on_click(move |_, _, cx| st1.update(cx, |s, cx| s.command(cx, true, move |h| h.pause(id, "")))));
-            }
-            if !ended {
-                m = m.item(PopupMenuItem::new("Cancel").on_click(move |_, _, cx| st2.update(cx, |s, cx| s.command(cx, true, move |h| h.cancel(id, "")))));
-            }
-            m.separator().item(PopupMenuItem::new(format!("Copy #{id}")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(format!("#{id}")))))
+            let me = me.clone();
+            let act: std::rc::Rc<dyn Fn(i64, &'static str, &mut Window, &mut App)> = std::rc::Rc::new(move |id, op, _, cx| {
+                let _ = me.update(cx, |_, cx| cx.emit(if op == "open" { TasksEvent::Open(id) } else { TasksEvent::Act(id, op) }));
+            });
+            crate::workspace::task_menu(m, id, status, act)
         })
 }

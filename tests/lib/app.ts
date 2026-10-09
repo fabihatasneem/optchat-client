@@ -147,12 +147,23 @@ export class App {
   }
   /** the app's stderr so far (engine log lines, OPTCHAT_TIMING output) */
   stderr(): string { try { return Deno.readTextFileSync(`${this.dir}/stderr.txt`); } catch { return ""; } }
+  /** child processes still alive after the last quit (claude, codex, bash): should always be empty */
+  orphans: string[] = [];
+  children(): string[] {
+    const pid = this.state()?.pid;
+    if (!pid) return [];
+    const r = new Deno.Command("pgrep", { args: ["-P", String(pid)] }).outputSync();
+    return new TextDecoder().decode(r.stdout).split("\n").filter(Boolean);
+  }
   async quit(o: { keep?: boolean } = {}) {
+    const kids = this.children();
     try { await this.cua.js(`await app.pressKey("cmd+q"); 1`); } catch { /* gone */ }
     // `open -W` returns once the app has exited; if it has not within 8 s, kill our own instance
     const exited = await Promise.race([this.proc!.status.then(() => true), sleep(8000).then(() => false)]);
     if (!exited) { console.log("app did not quit on cmd+q: killing it"); await killLeftovers(); await this.proc!.status; }
     this.cua.close();
+    await sleep(300);
+    this.orphans = kids.filter((p) => new Deno.Command("kill", { args: ["-0", p], stderr: "null" }).outputSync().success);
     // the database copy is ~1.6 GB: never leave it behind (OPTCHAT_KEEP_E2E=1 keeps it for debugging)
     if (!o.keep && !Deno.env.get("OPTCHAT_KEEP_E2E")) { try { Deno.removeSync(this.dir, { recursive: true }); } catch { /* gone */ } }
   }

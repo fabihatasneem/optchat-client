@@ -46,6 +46,12 @@ actions!(
         ZoomReset,
         NextTheme,
         ToggleFollowSystem,
+        About,
+        Minimize,
+        ZoomWindow,
+        ToggleFullScreen,
+        ShowShortcuts,
+        OpenDataFolder,
     ]
 );
 
@@ -150,8 +156,10 @@ impl Workspace {
             }
         }));
         subs.push(cx.subscribe_in(&tasks_panel, window, |this: &mut Workspace, _, ev: &tasks_view::TasksEvent, window, cx| {
-            let tasks_view::TasksEvent::Open(id) = ev;
-            this.open_task(*id, window, cx);
+            match ev {
+                tasks_view::TasksEvent::Open(id) => this.open_task(*id, window, cx),
+                tasks_view::TasksEvent::Act(id, op) => this.act(*id, op, window, cx),
+            }
         }));
         subs.push(cx.subscribe_in(&ask_input, window, |this: &mut Workspace, _, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { .. } = ev {
@@ -378,6 +386,16 @@ impl Workspace {
         self.set_side_open(true, cx);
     }
 
+    /// A task action from a context menu: open the task, then the same ask bar (or dialog) as its tab actions.
+    pub fn act(&mut self, id: i64, op: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_task(id, window, cx);
+        match op {
+            "new" => crate::dialogs::open_new_task(self, Some(("handoff".into(), None, id)), window, cx),
+            "pause" | "resume" | "close" | "cancel" => self.start_ask(op, window, cx),
+            _ => {}
+        }
+    }
+
     pub fn start_ask(&mut self, op: &str, window: &mut Window, cx: &mut Context<Self>) {
         let a = ask_of(op);
         self.ask_limit.set(if op == "close" { 280 } else { 2000 });
@@ -526,6 +544,25 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &ZoomOut, _, cx| dialogs::zoom(w, -1.0, cx)))
             .on_action(cx.listener(|w, _: &ZoomReset, _, cx| dialogs::zoom(w, 0.0, cx)))
             .on_action(cx.listener(|w, _: &NextTheme, _, cx| dialogs::next_theme(w, cx)))
+            .on_action(cx.listener(|_, _: &Minimize, window, _| window.minimize_window()))
+            .on_action(cx.listener(|_, _: &ZoomWindow, window, _| window.zoom_window()))
+            .on_action(cx.listener(|_, _: &ToggleFullScreen, window, _| window.toggle_fullscreen()))
+            .on_action(cx.listener(|w, _: &ShowShortcuts, window, cx| dialogs::open_palette(w, false, window, cx)))
+            .on_action(cx.listener(|_, _: &About, window, cx| {
+                let detail = format!(
+                    "Version {} (build {})\nA native client for OptChat's endless, task-tree chat, in Rust and GPUI.\nThemes from Zed (see THEMES.md).",
+                    optchat_engine::hub::VERSION,
+                    optchat_engine::hub::BUILD
+                );
+                let _ = window.prompt(PromptLevel::Info, "OptChat for Mac", Some(&detail), &["OK"], cx);
+            }))
+            .on_action(cx.listener(|w, _: &OpenDataFolder, _, cx| {
+                // the folder that holds this chat's database (and the app's prefs and logs)
+                let dir = std::path::Path::new(&w.state.read(cx).prefs_path).parent().map(|p| p.to_path_buf());
+                if let Some(d) = dir {
+                    cx.reveal_path(&d);
+                }
+            }))
             .on_action(cx.listener(|w, _: &Dismiss, window, cx| {
                 if w.state.read(cx).dict.state != "idle" {
                     // Esc stops dictation and keeps the text
@@ -686,7 +723,7 @@ impl Workspace {
             .on_click(cx.listener(move |w, _, _, cx| w.pick(v, cx)))
     }
 
-    fn sidebar(&mut self, view: View, w: f32, narrow: bool, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn sidebar(&mut self, view: View, w: f32, narrow: bool, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = c(cx).clone();
         let s = self.state.read(cx);
         let ended = s.info().map(|i| i.task.status.terminal()).unwrap_or(false);
@@ -786,4 +823,31 @@ impl Workspace {
         }
         ed
     }
+}
+
+/// The task context menu (task rows and tabs): the web app's task actions for that task's status, then Copy #id.
+pub fn task_menu(m: gpui_component::menu::PopupMenu, id: i64, status: TaskStatus, act: std::rc::Rc<dyn Fn(i64, &'static str, &mut Window, &mut App)>) -> gpui_component::menu::PopupMenu {
+    use gpui_component::menu::PopupMenuItem;
+    let term = status.terminal();
+    let mut m = m;
+    let item = |m: gpui_component::menu::PopupMenu, label: &str, op: &'static str| {
+        let act = act.clone();
+        m.item(PopupMenuItem::new(label.to_string()).on_click(move |_, window, cx| act(id, op, window, cx)))
+    };
+    m = item(m, "Open", "open");
+    if !term && status != TaskStatus::Paused && status != TaskStatus::Pending {
+        m = item(m, "Pause…", "pause");
+    }
+    if status == TaskStatus::Paused {
+        m = item(m, "Resume…", "resume");
+    }
+    if id != 0 && !term {
+        m = item(m, "Close as done…", "close");
+        m = item(m, "Cancel…", "cancel");
+    }
+    if !term {
+        m = m.separator();
+        m = item(m, "New subtask…", "new");
+    }
+    m.separator().item(PopupMenuItem::new(format!("Copy #{id}")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(format!("#{id}")))))
 }

@@ -33,7 +33,7 @@ impl AssetSource for Assets {
     }
 }
 
-actions!(app, [Quit, About]);
+actions!(app, [Quit, Hide, HideOthers, ShowAll]);
 
 fn default_db() -> String {
     if let Ok(p) = std::env::var("OPTCHAT_DB") {
@@ -64,7 +64,17 @@ fn main() {
         composer::bind(cx);
         dialogs::bind(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.on_action(|_: &Hide, cx| cx.hide());
+        cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+        cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-h", Hide, None),
+            KeyBinding::new("alt-cmd-h", HideOthers, None),
+            KeyBinding::new("cmd-m", workspace::Minimize, None),
+            KeyBinding::new("ctrl-cmd-f", workspace::ToggleFullScreen, None),
+            KeyBinding::new("cmd-/", workspace::ShowShortcuts, None),
+        ]);
         set_menus(cx);
 
         let state = state::new_state(cx, rt.handle().clone(), prefs_path.clone());
@@ -143,7 +153,22 @@ fn set_menus(cx: &mut App) {
     use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
     use workspace::*;
     cx.set_menus(vec![
-        Menu { name: "OptChat".into(), items: vec![MenuItem::action("Settings…", ShowSettings), MenuItem::separator(), MenuItem::os_submenu("Services", SystemMenuType::Services), MenuItem::separator(), MenuItem::action("Quit OptChat", Quit)] },
+        Menu {
+            name: "OptChat".into(),
+            items: vec![
+                MenuItem::action("About OptChat", About),
+                MenuItem::separator(),
+                MenuItem::action("Settings…", ShowSettings),
+                MenuItem::separator(),
+                MenuItem::os_submenu("Services", SystemMenuType::Services),
+                MenuItem::separator(),
+                MenuItem::action("Hide OptChat", Hide),
+                MenuItem::action("Hide Others", HideOthers),
+                MenuItem::action("Show All", ShowAll),
+                MenuItem::separator(),
+                MenuItem::action("Quit OptChat", Quit),
+            ],
+        },
         Menu { name: "File".into(), items: vec![MenuItem::action("New Task…", NewTask), MenuItem::action("Open Main Chat", OpenMainChat), MenuItem::action("Go to Task…", TaskSwitcher), MenuItem::separator(), MenuItem::action("Close Tab", CloseTab)] },
         Menu {
             name: "Edit".into(),
@@ -190,6 +215,21 @@ fn set_menus(cx: &mut App) {
                 MenuItem::action("Cancel…", CancelTask),
             ],
         },
-        Menu { name: "Window".into(), items: vec![] },
+        Menu {
+            name: "Window".into(),
+            items: vec![
+                MenuItem::action("Minimize", Minimize),
+                MenuItem::action("Zoom", ZoomWindow),
+                MenuItem::action("Enter Full Screen", ToggleFullScreen),
+                MenuItem::separator(),
+                MenuItem::action("Show Next Tab", NextTab),
+                MenuItem::action("Show Previous Tab", PrevTab),
+                MenuItem::action("Main Chat", OpenMainChat),
+            ],
+        },
+        Menu {
+            name: "Help".into(),
+            items: vec![MenuItem::action("Keyboard Shortcuts", ShowShortcuts), MenuItem::action("Commands…", CommandPalette), MenuItem::separator(), MenuItem::action("Show Data Folder", OpenDataFolder)],
+        },
     ]);
 }

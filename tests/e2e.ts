@@ -16,6 +16,7 @@
 //             mode cards, task row / tab context menus (existing history, no model calls)
 //   inputs    composer auto-grow cap, title ≤ 80, instruction box grows, close ≤ 280 / ask ≤ 2000, relaunch restores
 //             tabs, current task, placeholder, window size
+//   quit      ⌘Q leaves no child process behind (claude compactions, codex, bash)
 //   perf      launch, scrolling frame times on 1749 messages, task switch, memory (release build)
 import { ROOT } from "./lib/cua.ts";
 const ALL = [
@@ -23,6 +24,7 @@ const ALL = [
   { name: "features", models: false },
   { name: "chat", models: false },
   { name: "inputs", models: false },
+  { name: "quit", models: false },
   { name: "smoke", models: true },
   { name: "flow", models: true },
   { name: "perf", models: false },

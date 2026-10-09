@@ -10,11 +10,12 @@ use gpui::*;
 use gpui::Context;
 use gpui_component::input::Input;
 use gpui_component::Sizable;
-use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_component::menu::ContextMenuExt;
 use optchat_engine::types::*;
 
 pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) -> impl IntoElement {
     let k = c(cx).clone();
+    let ws = cx.entity().downgrade();
     let s = w.state.read(cx);
     let tabs = s.prefs.tabs.clone();
     let cur = s.current;
@@ -83,8 +84,16 @@ pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Works
                     w.state.update(cx, |s, cx| s.close_tab(id, cx));
                     w.update_title(window, cx);
                 }))
-                .context_menu(move |m, _, _| {
-                    m.item(PopupMenuItem::new(format!("Copy #{id}")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(format!("#{id}")))))
+                .context_menu({
+                    let ws = ws.clone();
+                    let status = x.as_ref().map(|x| x.task.status).unwrap_or(TaskStatus::Idle);
+                    move |m, _, _| {
+                        let ws = ws.clone();
+                        let act: std::rc::Rc<dyn Fn(i64, &'static str, &mut Window, &mut App)> = std::rc::Rc::new(move |id, op, window, cx| {
+                            let _ = ws.update(cx, |w, cx| if op == "open" { w.open_task(id, window, cx) } else { w.act(id, op, window, cx) });
+                        });
+                        crate::workspace::task_menu(m, id, status, act)
+                    }
                 }),
         );
     }
