@@ -120,6 +120,11 @@ fn main() {
         cx.spawn(async move |cx| {
             match hrx.await {
                 Ok(Ok(hub)) => {
+                    // tests (quit.ts): a bash tool process group from the start, without driving the UI
+                    if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && std::env::var("OPTCHAT_TEST_BASH").is_ok() {
+                        let _guard = rt.enter(); // test_bash spawns on the engine's tokio runtime
+                        hub.test_bash();
+                    }
                     let _ = st3.update(cx, |s, cx| {
                         s.stats.launch_ms = LAUNCH.get().unwrap().elapsed().as_secs_f64() * 1000.0;
                         s.attach(hub, rx, cx)
