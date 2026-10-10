@@ -24,6 +24,7 @@ mod app {
     enum Screen { Connect, Tasks, Chat }
 
     struct TaskRow { id: i64, title: String, status: String, parent: Option<i64> }
+    #[derive(Clone)]
     struct Entry { kind: String, text: String }
 
     gpui::actions!(optchat, [SendMessage]);
@@ -47,17 +48,26 @@ mod app {
         composer: Entity<TextInput>,
         kb_from: f32, kb_to: f32, kb_now: f32, kb_t0: std::time::Instant,
         version: String,
+        /// debug builds only: OPTCHAT_AUTOTEST="<task id>|<message>" opens the task and sends once (simulator e2e)
+        autotest: Option<(i64, String, u8)>,
+        /// the chat feed: a bottom-aligned list (stays pinned to the newest entry as messages arrive)
+        feed: gpui::ListState,
+        feed_items: std::rc::Rc<std::cell::RefCell<Vec<Entry>>>,
     }
 
     impl OptChat {
         fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
             let mk = |cx: &mut Context<Self>, p: &str| cx.new(|cx| TextInput::new(cx, p));
+            let mk_secret = |cx: &mut Context<Self>, p: &str| cx.new(|cx| { let mut i = TextInput::new(cx, p); i.masked = true; i });
             let s = OptChat {
                 cfg: None, screen: Screen::Connect, conn: "not connected".into(), tasks: vec![], current: 0, log: vec![],
                 live: String::new(), running: false, error: None, cmd: None, events: None,
-                endpoint: mk(cx, "https://chat.tunnel.reframe.sh"), workspace: mk(cx, "workspace"), token: mk(cx, "client token"),
-                tunnel_key: mk(cx, "tunnel access key (tunnel only)"), composer: mk(cx, "Message"),
+                endpoint: mk(cx, "https://chat.tunnel.reframe.sh"), workspace: mk(cx, "workspace"), token: mk_secret(cx, "client token"),
+                tunnel_key: mk_secret(cx, "tunnel access key (tunnel only)"), composer: mk(cx, "Message"),
                 kb_from: 0., kb_to: 0., kb_now: 0., kb_t0: std::time::Instant::now(), version: bundle_version(),
+                feed: gpui::ListState::new(0, gpui::ListAlignment::Bottom, px(600.)),
+                feed_items: Default::default(),
+                autotest: if cfg!(debug_assertions) { std::env::var("OPTCHAT_AUTOTEST").ok().and_then(|v| { let (t, m) = v.split_once('|')?; Some((t.parse().ok()?, m.to_string(), 0)) }) } else { None },
             };
             // the saved connection (Keychain), or a dev seed passed at launch (written to the Keychain, never logged)
             let seed = std::env::var("OPTCHAT_SEED").ok().and_then(|b| {
@@ -68,10 +78,16 @@ mod app {
             cx.spawn_in(window, async move |this, cx| {
                 let saved = match seed {
                     Some(c) => {
-                        let _ = this.update(cx, |_, cx| cx.write_credentials(CRED_URL, "engine", c.to_json().as_bytes())).ok();
+                        // detach: dropping a GPUI Task cancels it
+                        let w = this.update(cx, |_, cx| cx.write_credentials(CRED_URL, "engine", c.to_json().as_bytes()));
+                        if let Ok(w) = w { let r = w.await; diag(&format!("keychain write: {}", if r.is_ok() { "ok".to_string() } else { format!("{:?}", r.err()) })); }
                         Some(c)
                     }
-                    None => read.await.ok().flatten().and_then(|(_, b)| String::from_utf8(b).ok()).and_then(|s| Config::from_json(&s)),
+                    None => {
+                        let r = read.await;
+                        diag(&format!("keychain read: {}", match &r { Ok(Some(_)) => "found".to_string(), Ok(None) => "none".to_string(), Err(e) => format!("error {e}") }));
+                        r.ok().flatten().and_then(|(_, b)| String::from_utf8(b).ok()).and_then(|s| Config::from_json(&s))
+                    }
                 };
                 if let Some(c) = saved { let _ = this.update(cx, |me, cx| me.connect(c, cx)); }
             }).detach();
@@ -108,6 +124,7 @@ mod app {
 
         fn open_task(&mut self, id: i64, cx: &mut Context<Self>) {
             self.current = id; self.log.clear(); self.live.clear();
+            self.feed_items.borrow_mut().clear(); self.feed.reset(0);
             self.send(json!({"type": "open", "task": id}));
             self.screen = Screen::Chat;
             cx.notify();
@@ -131,7 +148,18 @@ mod app {
                     Event::Message(m) => self.apply(m),
                 }
             }
-            if changed { cx.notify() }
+            if changed { self.autotest_step(cx); cx.notify() }
+        }
+
+        fn autotest_step(&mut self, cx: &mut Context<Self>) {
+            let Some((task, msg, stage)) = self.autotest.clone() else { return };
+            if stage == 0 && !self.tasks.is_empty() {
+                self.autotest = Some((task, msg, 1));
+                self.open_task(task, cx);
+            } else if stage == 1 && self.current == task && !self.log.is_empty() {
+                self.autotest = Some((task, msg.clone(), 2));
+                if !msg.is_empty() { self.send(json!({"type": "send", "task": task, "text": msg, "run": true})); }
+            }
         }
 
         fn apply(&mut self, m: Value) {
@@ -208,16 +236,28 @@ mod app {
 
         fn chat_view(&self, back: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
             let title = self.tasks.iter().find(|t| t.id == self.current).map(|t| if t.parent.is_none() { "main chat".to_string() } else { format!("#{} {}", t.id, t.title) }).unwrap_or_else(|| format!("#{}", self.current));
-            let entries = self.log.iter().rev().take(80).rev().map(|e| entry_view(e)).collect::<Vec<_>>();
+            // feed items = the log + the streaming reply; the list is re-measured when they change
+            let mut items: Vec<Entry> = self.log.clone();
+            if !self.live.is_empty() { items.push(Entry { kind: "talk".into(), text: self.live.clone() }); }
+            let changed = { let cur = self.feed_items.borrow(); cur.len() != items.len() || cur.last().map(|e| &e.text) != items.last().map(|e| &e.text) };
+            if changed {
+                let n = items.len();
+                let old = self.feed_items.borrow().len();
+                *self.feed_items.borrow_mut() = items;
+                if n >= old && old > 0 { self.feed.splice(old.saturating_sub(1)..old, n - old + 1) } else { self.feed.reset(n) }
+            }
+            let shared = self.feed_items.clone();
+            let feed = gpui::list(self.feed.clone(), move |ix, _, _| {
+                let items = shared.borrow();
+                div().px(px(16.)).py(px(4.)).child(entry_view(&items[ix])).into_any_element()
+            });
             div().flex().flex_col().size_full()
                 .child(div().flex().items_center().gap(px(10.)).px(px(16.)).py(px(10.)).border_b_1().border_color(rgb(0x1f1f1f))
                     .children(back.then(|| button("back", "‹ Tasks").on_click(cx.listener(|me, _, _, cx| { me.screen = Screen::Tasks; cx.notify() }))))
                     .child(div().text_size(px(17.)).font_weight(FontWeight::BOLD).child(title))
                     .children(self.running.then(|| div().text_size(px(12.)).text_color(rgb(0x8a8a8a)).child("working…"))))
-                .child(div().id("feed").flex().flex_col().flex_grow(1.).gap(px(8.)).px(px(16.)).py(px(8.)).overflow_y_scroll()
-                    .children(entries)
-                    .children((!self.live.is_empty()).then(|| div().text_size(px(15.)).child(self.live.clone())))
-                    .children(self.error.clone().map(|e| div().text_color(rgb(0xff6b6b)).child(e))))
+                .child(feed.flex_grow(1.).w_full())
+                .children(self.error.clone().map(|e| div().px(px(16.)).text_color(rgb(0xff6b6b)).child(e)))
                 .child(div().flex().items_center().gap(px(8.)).px(px(12.)).py(px(8.)).bg(rgb(0x0f0f0f))
                     .child(div().flex_1().min_w(px(0.)).child(self.composer.clone()))
                     .child(button("send", "Send").on_click(cx.listener(|me, _, window, cx| me.send_message(window, cx)))))
@@ -268,6 +308,14 @@ mod app {
                 .size_full().flex().flex_col().bg(rgb(0x000000)).text_color(rgb(0xebebeb))
                 .pt(insets.safe_area.top).pb(px(self.kb_now)).pl(insets.safe_area.left).pr(insets.safe_area.right)
                 .child(body)
+        }
+    }
+
+    /// a line in Documents/creds.log (outcomes only, never values)
+    fn diag(line: &str) {
+        if let Ok(home) = std::env::var("HOME") {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(std::path::Path::new(&home).join("Documents/creds.log")) { let _ = writeln!(f, "{line}"); }
         }
     }
 

@@ -22,9 +22,25 @@ if [ "$MODE" = xcode ]; then
   [ "${PLATFORM_NAME:-}" = iphoneos ] && TARGET=aarch64-apple-ios
   [ "${CONFIGURATION:-Release}" = Debug ] && PROFILE=dev
 fi
+# Simulator: entitlements live in the binary's __TEXT,__entitlements section (Xcode's linker adds it for Swift apps;
+# our binary is linked by cargo), without which the Keychain fails with errSecMissingEntitlement (-34018).
+LINKARGS=""
+if [ "$TARGET" = aarch64-apple-ios-sim ]; then
+  ENT="$HERE/target/simulated.xcent"; mkdir -p "$HERE/target"
+  APPID="${DEVELOPMENT_TEAM:-<TEAM_ID>}.${PRODUCT_BUNDLE_IDENTIFIER:-com.reframe.optchat}"
+  cat > "$ENT" <<XC
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>application-identifier</key><string>$APPID</string>
+<key>keychain-access-groups</key><array><string>$APPID</string></array>
+</dict></plist>
+XC
+  LINKARGS="-C link-arg=-Wl,-sectcreate,__TEXT,__entitlements,$ENT"
+fi
 OUTJSON="$(mktemp)"
 ( cd "$HERE" && env -i HOME="$HOME" PATH="$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin" ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} \
-    IPHONEOS_DEPLOYMENT_TARGET=18.0 RUSTUP_TOOLCHAIN="$(cat "$ZED/rust-toolchain.toml" | sed -n 's/^channel = "\(.*\)"/\1/p')" \
+    IPHONEOS_DEPLOYMENT_TARGET=18.0 ${LINKARGS:+RUSTFLAGS="$LINKARGS"} RUSTUP_TOOLCHAIN="$(cat "$ZED/rust-toolchain.toml" | sed -n 's/^channel = "\(.*\)"/\1/p')" \
     cargo build --profile $PROFILE --target $TARGET --message-format=json-render-diagnostics > "$OUTJSON" )
 EXE="$(python3 -c "import json,sys;print([e['executable'] for e in map(json.loads,open(sys.argv[1])) if e.get('reason')=='compiler-artifact' and e.get('target',{}).get('name')=='optchat-ios' and e.get('executable')][0])" "$OUTJSON")"
 rm -f "$OUTJSON"

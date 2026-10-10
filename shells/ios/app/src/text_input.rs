@@ -13,7 +13,7 @@ actions!(text_input, [Backspace, Delete, Left, Right, SelectLeft, SelectRight, S
 
 impl TextInput {
     pub fn new(cx: &mut Context<Self>, placeholder: &str) -> Self {
-        TextInput { focus_handle: cx.focus_handle(), content: "".into(), placeholder: placeholder.to_string().into(),
+        TextInput { focus_handle: cx.focus_handle(), content: "".into(), placeholder: placeholder.to_string().into(), masked: false,
             selected_range: 0..0, selection_reversed: false, marked_range: None, last_layout: None, last_bounds: None, is_selecting: false }
     }
 }
@@ -21,6 +21,8 @@ pub struct TextInput {
     pub focus_handle: FocusHandle,
     pub content: SharedString,
     placeholder: SharedString,
+    /// secrets: drawn as one `*` per byte (keeps the byte offsets the cursor and selection use)
+    pub masked: bool,
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
@@ -137,6 +139,7 @@ impl TextInput {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.masked { return } // never put a secret on the pasteboard
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -144,6 +147,7 @@ impl TextInput {
         }
     }
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+        if self.masked { return }
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -499,7 +503,9 @@ impl Element for TextElement {
         let style = window.text_style();
 
         let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), hsla(0., 0., 0., 0.2))
+            (input.placeholder.clone(), hsla(0., 0., 1., 0.35))
+        } else if input.masked {
+            (SharedString::from("*".repeat(content.len())), style.color)
         } else {
             (content, style.color)
         };
