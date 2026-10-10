@@ -27,7 +27,9 @@ mod shell {
         let Ok(endpoint) = client::EngineCfg::normalize(endpoint) else { return };
         let mut prefs: state::Prefs = std::fs::read_to_string(prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         if !prefs.engines.iter().any(|e| e.endpoint == endpoint) {
-            prefs.engines.push(client::EngineCfg { endpoint: endpoint.clone(), name: endpoint.split("://").nth(1).unwrap_or("engine").to_string() });
+            // via serde: works whatever optional fields EngineCfg gains (they default)
+            let name = endpoint.split("://").nth(1).unwrap_or("engine").to_string();
+            if let Ok(e) = serde_json::from_value::<client::EngineCfg>(serde_json::json!({ "endpoint": endpoint, "name": name })) { prefs.engines.push(e); }
         }
         let c = state::ConnPref { endpoint: endpoint.clone(), ws: ws.to_string() };
         let ok = tokens::set(&c.key(), token).is_ok();

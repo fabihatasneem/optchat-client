@@ -17,8 +17,8 @@ path = "src/main.rs"
 gpui = { path = "../vendor/zed/crates/gpui" }
 gpui_platform = { path = "../vendor/zed/crates/gpui_platform" }
 gpui_ios = { path = "../vendor/zed/crates/gpui_ios" }
-optchat-client = { path = "../../optchat-mac-gpui/crates/client" }
-optchat-ui = { path = "../../optchat-mac-gpui/crates/ui" }
+optchat-client = { path = "../vendor/optchat-shared/crates/client" }
+optchat-ui = { path = "../vendor/optchat-shared/crates/ui" }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 base64 = "0.22"
