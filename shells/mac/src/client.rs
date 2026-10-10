@@ -324,7 +324,7 @@ pub async fn list_workspaces(cfg: &EngineCfg) -> Result<Vec<WsEntry>, String> {
 pub struct Client {
     pub conn: Arc<EngineConn>,
     pub ws: String,
-    token: String,
+    token: Mutex<String>,
     task: AtomicI64,
     dict: Mutex<Option<Arc<DictSession>>>,
 }
@@ -332,11 +332,20 @@ pub struct Client {
 impl Client {
     pub fn new(conn: Arc<EngineConn>, ws: &str, task: i64, token: &str) -> Arc<Client> {
         conn.connect_ws(ws, task, token);
-        Arc::new(Client { conn, ws: ws.to_string(), token: token.to_string(), task: AtomicI64::new(task), dict: Mutex::new(None) })
+        Arc::new(Client { conn, ws: ws.to_string(), token: Mutex::new(token.to_string()), task: AtomicI64::new(task), dict: Mutex::new(None) })
     }
     /// connect again (after a refusal or the engine dropped it), same token
     pub fn resubscribe(&self) {
-        self.conn.connect_ws(&self.ws, self.current_task(), &self.token);
+        let t = self.token.lock().clone();
+        self.conn.connect_ws(&self.ws, self.current_task(), &t);
+    }
+    /// connect again with another token (the local engine's token was rotated)
+    pub fn retoken(&self, token: &str) {
+        *self.token.lock() = token.to_string();
+        self.resubscribe();
+    }
+    pub fn uses_token(&self, token: &str) -> bool {
+        *self.token.lock() == token
     }
     fn emit(&self, e: HubEvent) {
         self.conn.emit(Some(&self.ws), e);
@@ -485,6 +494,11 @@ impl Client {
         self.control_msg(json!({ "type": "settings", "task": task, "patch": patch })).await.map(|r| r.0)
     }
     pub fn update_global(&self, max_turns: Option<u32>, dictation: Option<DictationService>) {
+        // test runs (OPTCHAT_TEST_NO_GLOBAL) never change engine-wide settings on a real engine; a local fake one is fine
+        if std::env::var("OPTCHAT_TEST_NO_GLOBAL").is_ok() && !self.conn.cfg.endpoint.starts_with("http://127.0.0.1:") {
+            self.emit(HubEvent::Notice { ok: false, message: "test run: engine-wide settings are not changed on a real engine".into(), spawned: None });
+            return;
+        }
         let mut patch = json!({});
         if let Some(m) = max_turns {
             patch["maxTurns"] = json!(m);
@@ -602,7 +616,8 @@ impl Client {
     /// an image from the hub's database (GET /blob/<sha>)
     pub async fn blob(&self, sha: &str) -> Result<(String, Vec<u8>), String> {
         let url = format!("{}/engine/blob/{sha}?ws={}", self.conn.cfg.endpoint, self.ws);
-        let r = self.conn.http.get(url).header("Origin", self.conn.cfg.origin()).bearer_auth(&self.token).send().await.map_err(|e| e.to_string())?;
+        let tok = self.token.lock().clone();
+        let r = self.conn.http.get(url).header("Origin", self.conn.cfg.origin()).bearer_auth(tok).send().await.map_err(|e| e.to_string())?;
         if !r.status().is_success() {
             return Err(format!("blob {sha}: {}", r.status()));
         }
@@ -691,7 +706,8 @@ impl DictSession {
         let me = s.clone();
         tokio::spawn(async move {
             let url = format!("{}/engine/stt?ws={}&task={task}", client.conn.cfg.ws_base(), client.ws);
-            let ws = match client.conn.connect_with(&url, Some(&client.token)).await {
+            let tok = client.token.lock().clone();
+            let ws = match client.conn.connect_with(&url, Some(&tok)).await {
                 Ok(ws) => ws,
                 Err(e) => {
                     emit(DictEvent::Error(format!("dictation could not connect: {e}")));

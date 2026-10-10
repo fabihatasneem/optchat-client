@@ -36,7 +36,8 @@ export class App {
     const conn = o.bare ? {} : { OPTCHAT_ENGINE: HUB, OPTCHAT_ENGINE_NAME: "reframe.dev", OPTCHAT_CONNECT: [me.db, ...(o.also ?? [])].join(",") };
     const hl = o.headless || Deno.env.get("OPTCHAT_E2E_HEADLESS") ? { OPTCHAT_HEADLESS: "1", OPTCHAT_TEST_HOOKS: "1" } : {};
     // never the engine's real local client token: a test names its own file (or none)
-    const env = { ...hl, OPTCHAT_LOCAL_TOKEN_FILE: `${me.dir}/no-local-token`, OPTCHAT_PROBES: me.probes, OPTCHAT_PREFS_DIR: me.dir, OPTCHAT_TOKEN_DIR: me.dir, OPTCHAT_TEST_TOKENS: TOKENS, ...conn, ...(o.env ?? {}) };
+    // never engine-wide settings (turns at once, dictation service) on the real engine: the app refuses them in tests
+    const env = { ...hl, OPTCHAT_TEST_NO_GLOBAL: "1", OPTCHAT_LOCAL_TOKEN_FILE: `${me.dir}/no-local-token`, OPTCHAT_PROBES: me.probes, OPTCHAT_PREFS_DIR: me.dir, OPTCHAT_TOKEN_DIR: me.dir, OPTCHAT_TEST_TOKENS: TOKENS, ...conn, ...(o.env ?? {}) };
     const args = ["-n", "-W", "--stderr", `${me.dir}/stderr.txt`];
     for (const [k, v] of Object.entries(env)) args.push("--env", `${k}=${v}`);
     args.push(`${ROOT}/dist/OptChat.app`);

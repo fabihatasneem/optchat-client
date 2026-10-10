@@ -51,7 +51,10 @@ export class Peer {
     };
     return this.waitFor(() => this.snapshot, 60_000, "peer snapshot");
   }
-  send(m: Record<string, unknown>) { this.ws.send(JSON.stringify({ ...m, ws: this.db })); }
+  send(m: Record<string, unknown>) {
+    if (m.type === "global") throw new Error("tests never change engine-wide settings on the real engine");
+    this.ws.send(JSON.stringify({ ...m, ws: this.db }));
+  }
   rpc(method: string, params: Record<string, unknown> = {}): Promise<any> {
     const id = this.#next++;
     return new Promise((resolve, reject) => {

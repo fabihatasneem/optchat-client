@@ -159,45 +159,13 @@ try {
   });
 
   await step("slot", async () => {
+    // turns at once is ENGINE-wide: tests never change it on the real engine (it once blocked the user's chat).
+    // Read-only here: the Workspace tab shows the engine's value; "waiting for a slot" is not re-run against it.
     await a.key("cmd+6");
     await a.waitFor(() => st().view === "settings", 3000, "settings");
-    await a.click("settings.workspace"); // turns at once is a workspace setting (phase 4)
-    await a.waitFor(() => st().settingsGlobal === false, 3000, "workspace tab");
-    await sleep(300);
-    const p = await a.waitProbe("picker.maxturns");
-    await a.clickAt(p[0] + 20, p[1] + p[3] / 2);
-    await sleep(500);
-    await a.key("Down");
-    await a.key("Return");
-    await a.waitFor(() => st().ws?.maxTurns === 1, 5000, "one turn at once");
-    check(true, "Settings: turns at once = 1");
-    await a.key("cmd+0");
-    await a.waitFor(() => st().current === 0, 5000, "main");
-    const b = await spawn("write sentences", "Write 40 numbered sentences, one per line, each about a different city. Nothing else.");
-    await a.key("cmd+0");
-    await a.waitFor(() => st().current === 0, 5000, "main");
-    const c = await spawn("slot", "Reply with exactly: slot-ok");
-    await a.waitFor(() => (st().statusSeen ?? []).includes("waiting for a slot"), 30000, "waiting for a slot").catch(() => {});
-    const working = st().statusbar?.working ?? 0;
-    // a message to the waiting task waits in its inbox: "1 queued"
-    await send("Also add: queued-ok");
-    await a.waitFor(() => (st().queuedSeen ?? []).length > 0, 8000, "queued").catch(() => {});
-    await a.shot("live-02-queued");
-    check((st().queuedSeen ?? []).length > 0, `a message to a task that waits for its turn shows ${JSON.stringify(st().queuedSeen)}`);
-    await a.shot("live-08-slot");
-    check((st().statusSeen ?? []).includes("waiting for a slot") && (st().ws?.waiting ?? []).includes(c), `#${c} waits while #${b} runs: status "waiting for a slot"`);
-    check(working >= 1, `status bar: ${working} working`);
-    await a.waitFor(() => /slot-ok/.test(st().lastTalk ?? ""), 240000, "slot reply");
-    check(true, `#${c} ran once the slot was free`);
-    // back to 4
-    await a.key("cmd+6");
-    await a.waitFor(() => st().view === "settings", 3000, "settings");
-    const p2 = await a.waitProbe("picker.maxturns");
-    await a.clickAt(p2[0] + 20, p2[1] + p2[3] / 2);
-    await sleep(500);
-    for (let i = 0; i < 4; i++) await a.key("Down");
-    await a.key("Return");
-    await a.waitFor(() => st().ws?.maxTurns === 4, 5000, "four").catch(() => {});
+    await a.click("settings.workspace");
+    await a.waitFor(() => st().settingsGlobal === false && !!a.probe("picker.maxturns"), 3000, "workspace tab");
+    check(st().ws?.maxTurns >= 1, `Settings › Workspace shows turns at once (${st().ws?.maxTurns}), read only in tests`);
   });
 } catch (e) { check(false, String(e).slice(0, 400)); await a.shot("live-fail"); } finally { peer.close(); await a.quit(); }
 Deno.exit(failed() ? 1 : 0);

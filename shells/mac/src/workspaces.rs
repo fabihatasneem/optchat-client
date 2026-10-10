@@ -38,6 +38,8 @@ pub struct WorkspacesPanel {
     pub endpoint: Entity<InputState>,
     pub name: Entity<InputState>,
     err: Option<String>,
+    /// (workspace key, local token) pairs already tried: a refused one asks for a token instead of trying again
+    tried_local: std::collections::HashSet<(String, String)>,
     _subs: Vec<Subscription>,
 }
 
@@ -59,7 +61,7 @@ impl WorkspacesPanel {
                 }
             }));
         }
-        WorkspacesPanel { state, disabled_open: Default::default(), connecting: None, token, adding: false, endpoint, name, err: None, _subs: subs }
+        WorkspacesPanel { state, disabled_open: Default::default(), connecting: None, token, adding: false, endpoint, name, err: None, tried_local: Default::default(), _subs: subs }
     }
     pub fn start_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.adding = true;
@@ -70,7 +72,9 @@ impl WorkspacesPanel {
     }
     /// Connect…: on the local engine with its local client token, at once (no field); else the token field inline
     pub fn connect_or_ask(&mut self, endpoint: &str, ws: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if crate::tokens::local_token(endpoint).is_some() {
+        let key = ws_key(endpoint, ws);
+        if let Some(t) = crate::tokens::local_token(endpoint).filter(|t| !self.tried_local.contains(&(key.clone(), t.clone()))) {
+            self.tried_local.insert((key, t));
             let (ep, w) = (endpoint.to_string(), ws.to_string());
             match self.state.update(cx, |s, cx| s.connect_ws(&ep, &w, "", cx)) {
                 Ok(()) => {
@@ -173,6 +177,8 @@ impl Render for WorkspacesPanel {
         let s = self.state.read(cx);
         let engines = s.engines.clone();
         let meta: Vec<WsMeta> = s.meta.values().cloned().collect();
+        // a local token that got a workspace connected may be tried again later (after a refusal of another one)
+        self.tried_local.retain(|(k, _)| !meta.iter().any(|m| ws_key(&m.endpoint, &m.ws) == *k && m.conn == Conn::Open));
         let active = s.active.clone();
         let mut col = div().flex().flex_col().pb(px(16.));
         let mut rows_state = vec![];
@@ -250,7 +256,7 @@ impl Render for WorkspacesPanel {
                             p.state.update(cx, |s, cx| s.switch_ws(&key, cx));
                             // no token, or the engine refused it: the field to give one
                             if needs_token {
-                                p.start_connect(&ep4, &ws4, window, cx);
+                                p.connect_or_ask(&ep4, &ws4, window, cx);
                             }
                         })),
                 );

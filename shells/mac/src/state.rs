@@ -651,6 +651,18 @@ impl AppState {
             return;
         };
         let key = ws_key(&endpoint, &ws);
+        // refused while on the local engine's token, which was rotated since: connect again with the new one
+        if let HubEvent::Refused(_) = &e {
+            if crate::tokens::get(&key).is_none() {
+                if let Some(t) = crate::tokens::local_token(&endpoint) {
+                    let h = if key == self.active { self.hub.clone() } else { self.bg.get(&key).and_then(|d| d.hub.clone()) };
+                    if let Some(h) = h.filter(|h| !h.uses_token(&t)) {
+                        h.retoken(&t);
+                        return;
+                    }
+                }
+            }
+        }
         if let Some(m) = self.meta.get_mut(&key) {
             match &e {
                 HubEvent::Notices { unread, .. } => m.unread = *unread,

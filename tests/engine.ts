@@ -49,7 +49,8 @@ try {
   await a.cmd({ op: "switch", ws: "test-gpui-c" });
   await a.waitFor(() => ws() === "test-gpui-c", 2000, "a on screen");
   const w0 = (unreadOf("test-gpui-d").warn ?? 0) + (unreadOf("test-gpui-d").error ?? 0);
-  await a.waitFor(() => st().bgAlert && (unreadOf("test-gpui-d").warn ?? 0) + (unreadOf("test-gpui-d").error ?? 0) > 0, 180000, "background warning");
+  // a new warning (earlier runs may have left unread ones)
+  await a.waitFor(() => st().bgAlert && (unreadOf("test-gpui-d").warn ?? 0) + (unreadOf("test-gpui-d").error ?? 0) > w0, 180000, "background warning");
   check(true, `b's #${child} warned while a was on screen: the workspace icon's dot is on (b unread ${JSON.stringify(unreadOf("test-gpui-d"))}, was ${w0})`);
 
   // on screen, the notices: list from the engine, read one (opens its task), read all
@@ -62,6 +63,7 @@ try {
   await a.cmd({ op: "view", view: "notifications" }, { op: "loadNotices" });
   await a.waitFor(() => st().noticesLoaded && (st().noticesTop ?? []).length > 0, 8000, "notices loaded");
   const warn = (st().noticesTop as any[]).find((n) => (n.level === "warn" || n.level === "error") && n.task === child && !n.read);
+  if (!warn) console.log("noticesTop:", JSON.stringify((st().noticesTop as any[]).slice(0, 6).map((n) => [n.level, n.task, n.read, n.text.slice(0, 60)])));
   check(!!warn, `the Notifications view: "${warn?.text}"`);
   const before = st().unread.warn + st().unread.error;
   await a.cmd({ op: "readNotice", id: warn.id });

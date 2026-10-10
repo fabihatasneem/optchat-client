@@ -25,6 +25,14 @@ size. Code: client.rs (EngineConn + per-workspace Client), state.rs (WsData swap
   in shots/e2e-results-headless.txt. AX menu-bar checks need Computer Use.
 - One socket per engine since engine build 2026-10-10.21-connect-tokens: each `connect` carries its workspace's token;
   refused / revoked tokens drop only that workspace ("token refused" in the panel).
+- Tests never change engine-wide settings (turns at once, dictation service) on a real engine: live.ts's "slot" step
+  used to set turns at once to 1 and back to 4 (engine-wide; it blocked the user's chat once) and is now read-only;
+  the app refuses `global` under OPTCHAT_TEST_NO_GLOBAL (set by the harness) unless the engine is a local fake
+  (127.0.0.1); the Peer test client throws on `global`. Rates and hidden models are per workspace (test ones only).
+- Local engine client token: on chat.reframe.dev / localhost / 127.0.0.1 a workspace with no token of its own connects
+  with ~/.reframe/data/workspaces/local-client-token (read by the app only, never logged or stored; tests point
+  OPTCHAT_LOCAL_TOKEN_FILE at their own file); refused → its row asks for a token; a rotated file is picked up.
+  tests/localtoken.ts 7/7 (c through a test file holding c's token, d refused then its own token).
 - Workspaces panel (rail view, user decision; replaced the popup menu and dialogs): workspaces.rs. tests/panel.ts runs
   it against tests/lib/fake-engine.ts (127.0.0.1, names from argv; no real workspace), 16/16 headless.
 - Test workspaces test-gpui-a/b are purged: engine.ts / workspaces.ts (and the suites on a real workspace) need new

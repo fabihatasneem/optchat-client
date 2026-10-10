@@ -36,6 +36,16 @@ try {
   check(true, "its own token connects it");
   const store = JSON.parse(Deno.readTextFileSync(`${dir}/tokens.json`));
   check(Object.keys(store).length === 1 && Object.keys(store)[0].endsWith("|test-gpui-d"), `the token store holds only the typed token (${Object.keys(store).map((k) => k.split("|")[1])})`);
+  // the local token rotated: a stale one is refused; once the file has the new one, a click on the row connects
+  await a.click("wsp.disc.test-gpui-c");
+  await a.waitFor(() => row("test-gpui-c")?.kind === "available", 4000, "c off");
+  Deno.writeTextFileSync(local, "oct_stale_token_for_the_test\n");
+  await a.click("wsp.connect.test-gpui-c");
+  await a.waitFor(() => row("test-gpui-c")?.state === "token refused", 10000, "stale refused");
+  Deno.writeTextFileSync(local, toks["test-gpui-c"] + "\n");
+  await a.click("wsp.ws.test-gpui-c");
+  await a.waitFor(() => row("test-gpui-c")?.kind === "connected" && row("test-gpui-c")?.state == null && st().workspace === "test-gpui-c", 15000, "rotated token");
+  check(panel().connecting == null, "a rotated local token: the stale one is refused, a click on the row connects with the new file, no field");
   await a.quit({ keep: true });
   a = await App.launch({ bare: true, dir, env });
   await a.waitFor(() => (st().connected ?? []).length === 2 && (st().connected as any[]).every((c) => c.conn === "open"), 20000, "relaunch");

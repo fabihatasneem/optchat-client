@@ -67,6 +67,7 @@ try {
   check(st().loaded, "switched to test-gpui-c: its chat is there at once (no loading)");
   const ms = (st().wsSwitches ?? []).slice(before);
   check(ms.length > 0 && ms.every((m: number) => m < 16), `the switch took ${ms.map((m: number) => m.toFixed(2)).join(", ")} ms (state swap, < 1 frame)`);
+  await a.key("cmd+1"); // ⇧⌘O on the shown panel hides it, like any rail item
   await a.key("cmd+shift+o");
   await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu by key");
   await a.click("wsp.ws.test-gpui-d");
@@ -74,6 +75,7 @@ try {
   check(true, "⇧⌘O opens the menu");
 
   // ---- a Haiku turn in the background workspace: a child with a tiny budget in b (it pauses: a warning), seen from a
+  const w0 = (conn("test-gpui-d")?.unread?.warn ?? 0) + (conn("test-gpui-d")?.unread?.error ?? 0); // earlier runs may have left some
   await a.key("cmd+n");
   await a.waitFor(() => st().overlay === "newtask", 5000, "new task dialog");
   await a.type("say hi (budget test)");
@@ -88,7 +90,7 @@ try {
   await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu");
   await a.click("wsp.ws.test-gpui-c");
   await a.waitFor(() => wsActive() === "test-gpui-c", 3000, "a on screen while b works");
-  await a.waitFor(() => st().bgAlert && (conn("test-gpui-d")?.unread?.warn ?? 0) + (conn("test-gpui-d")?.unread?.error ?? 0) > 0, 180000, "background warning");
+  await a.waitFor(() => st().bgAlert && (conn("test-gpui-d")?.unread?.warn ?? 0) + (conn("test-gpui-d")?.unread?.error ?? 0) > w0, 180000, "background warning");
   check(!!a.probe("logo.dot"), `b's #${child} paused on its budget while a is on screen: a dot on the workspace icon (b unread ${JSON.stringify(conn("test-gpui-d").unread)})`);
   await jpg("ws-05-background-dot");
   if (!(st().view === "workspaces" && st().sideOpen)) await a.click("logo");
