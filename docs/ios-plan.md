@@ -434,7 +434,18 @@ preferred.
     `CADisableMinimumFrameDurationOnPhone`.
   - Thermal behaviour, real touch-to-photon latency, and real launch costs (dyld from flash, precompiled shaders).
   - CPU percentages here are the Mac's cores, so only relative numbers carry over.
-- **Device run** (needs an Apple Developer team; the harness is ready):
+- **Device run (ready): `bench/run-device.sh <udid> [N]`.**
+- Signing uses `.secrets/asc.json` (App Store Connect API key; `-allowProvisioningUpdates
+  -allowProvisioningDeviceRegistration -authenticationKey…`).
+- It builds and signs both bench apps and the bench's own XCUITest runner, then installs with `devicectl`.
+- Per app and run: a traced run (launch with `-delay 8`, xctrace Power Profiler + Hitches + GPU attached for 55 s),
+  then a scenario + keyboard run via XCUITest. Results are pulled from `Documents/bench.json`.
+- Then launch-only (6× each: uikit, gpui, gpui-lazy), `bench/trace_summary.py` and `bench/summarize.py`.
+- The device must stay unlocked (Auto-Lock: Never); the script checks first.
+- The GPUI app is wrapped in `bench/gpui/xcode/OptBenchGPUI.xcodeproj`: a script phase runs cargo (`build.sh
+  xcode`), so Xcode's automatic signing and provisioning apply as for any app.
+
+The manual steps it replaces, for reference:
   1. **UIKit:** `xcodebuild -project bench/uikit/OptBenchUIKit.xcodeproj -scheme OptBenchUIKit -configuration Release
      -destination 'generic/platform=iOS' DEVELOPMENT_TEAM=<team> -allowProvisioningUpdates`.
   2. **GPUI:**
@@ -497,6 +508,33 @@ How to read it:
   and battery, which only a device can measure (§12, device run, steps 5–6). The simulator also runs at 60 Hz, so
   120 Hz ProMotion headroom is untested for both.
 
+### Launch, re-measured (Metal Toolchain installed, shaders precompiled)
+
+`bench/launch-sim.sh <udid> 8`: each variant is reinstalled, then launched 8 times with `simctl launch`. That is
+plain launches, without the XCUITest overhead that flattened the earlier launch row to ~2.6 s for both apps.
+The table shows the first launch after install / the warm median, process creation → first frame with the long task
+(`bench/results/launch-sim.txt`):
+
+| variant | iPhone 18 Pro sim | iPad Pro 13" sim |
+|---|---|---|
+| UIKit | 1,689 / **647 ms** | 859 / **479 ms** |
+| GPUI, upstream as pinned, precompiled shaders | 5,115 / 2,052 ms | 2,494 / 2,038 ms |
+| GPUI, shaders compiled at launch (`SHADERS=runtime`) | 3,421 / 1,997 ms | 3,823 / 2,216 ms |
+| **GPUI + lazy SafariServices** (`LAZY_SAFARI=1`) | 928 / **424 ms** | 957 / **493 ms** |
+
+Where GPUI's time went (`launch_breakdown_ms` in the results):
+- **The process reached `main` only 1.8–2.1 s after creation**, against UIKit's `didFinishLaunching` at ~0.32 s.
+- `simctl spawn` of the bare binary with an exit at `main` took 2.7–3.9 s (`/usr/bin/true`: 0.44 s).
+- dyld loaded **1,468 images** before `main`, against **553** for the whole UIKit app. The cause:
+  `gpui_ios/src/ios/platform.rs` hard-links `SafariServices` (for `SFSafariViewController` in `open_url`), which
+  pulls WebKit and ~900 more images into every launch.
+- From `main` to first frame GPUI is fast: ~180 ms (app ready +70 ms, window and view +45 ms, fixture +4 ms,
+  first frame +60 ms).
+- `bench/gpui/patches/gpui_ios-lazy-safariservices.patch` (57 lines) `dlopen`s SafariServices on the first in-app
+  browser open instead. With it, **GPUI launches as fast as UIKit** (−34% on iPhone, +3% on iPad). It is a candidate
+  to upstream to zed#63068.
+- Precompiled shaders matter mainly for the first launch after install; the warm difference is small.
+
 ### Recommendation from the numbers
 
 On everything the simulator can measure, **GPUI on iOS is at least as fast as UIKit and leaner in memory**. It wins
@@ -504,7 +542,17 @@ on smoothness, task switching, input latency and memory, and costs more CPU only
 points of one core). Nothing measured rules it out. So **the numbers favour GPUI provisionally**, which replaces §1's
 UIKit recommendation (§1 weighed sharing and effort, which are now out of scope).
 
-The choice is final only after a device run. Decision rule, set before seeing device numbers:
+**Devices are 60 Hz** (iPad mini A17 Pro, iPadOS 26.1; iPhone 13 mini, iOS 26.5.2), so the rule below drops the
+120 Hz criterion and compares relative energy, CPU, GPU, hitches and launch at 60 Hz:
+- **Keep GPUI if**, on the iPad mini (A17 Pro) over the same scenario:
+  - (a) energy (Power Profiler: the whole traced scenario, and the stream phases) is ≤ 1.15× UIKit's;
+  - (b) render-server hitches (Hitches instrument) are ≤ UIKit's, and the in-app p99 frame interval is no worse;
+  - (c) warm launch is ≤ UIKit's + 150 ms, with the lazy-SafariServices patch (upstream as pinned is reported too);
+  - (d) GPU busy (GPU instrument) during stream and scroll is ≤ 1.5× UIKit's (GPUI redraws the window; CA composites).
+- **Otherwise UIKit.**
+- The iPhone 13 mini run follows when it is plugged in.
+
+The original rule, written for a 120 Hz iPhone 15 Pro or later:
 - **Keep GPUI if**, on an iPhone 15 Pro or later at 120 Hz, over the same scenario:
   - (a) energy (Power Profiler, whole scenario and the stream phase) is ≤ 1.15× UIKit's;
   - (b) the render-server hitch ratio (Animation Hitches) is ≤ UIKit's;
