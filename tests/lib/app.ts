@@ -1,5 +1,5 @@
 // The app under test: dist/OptChat.app as a client of the OptChat engine, connected to TEST workspaces only
-// (test-gpui-a / test-gpui-b, scoped tokens from data/test-tokens.json; never the live chat), with its prefs and its
+// (test-gpui-c / test-gpui-d, scoped tokens from data/test-tokens.json; never the live chat), with its prefs and its
 // token store in a temp folder; driven through Computer Use with coordinates from the app's probe
 // file, observed through its state file and screenshots.
 import { BUNDLE, Cua, ROOT, sleep } from "./cua.ts";
@@ -9,7 +9,7 @@ export const SHOTS = `${ROOT}/shots`;
 const TITLEBAR = 32; // points above the content area
 const SCALE = 2; // screenshot pixels per point (Retina)
 
-/** the test workspace a suite uses: OPTCHAT_TEST_DB, else `fallback` (test-gpui-a / test-gpui-b only) */
+/** the test workspace a suite uses: OPTCHAT_TEST_DB, else `fallback` (test-gpui-c / test-gpui-d only) */
 export function testDb(fallback: string): string {
   const db = Deno.env.get("OPTCHAT_TEST_DB") ?? fallback;
   checkTestDb(db);
@@ -28,14 +28,15 @@ export class App {
   static async launch(o: { db?: string; also?: string[]; env?: Record<string, string>; dir?: string; bare?: boolean; headless?: boolean } = {}): Promise<App> {
     const me = new App();
     me.dir = o.dir ?? await Deno.makeTempDir({ prefix: "optchat-e2e-" });
-    me.db = o.db ?? testDb("test-gpui-a"); // a copy of the main chat on the engine (never the live chat)
+    me.db = o.db ?? testDb("test-gpui-c"); // a copy of the main chat on the engine (never the live chat)
     checkTestDb(me.db);
     for (const w of o.also ?? []) checkTestDb(w);
     try { Deno.removeSync(me.probes); } catch { /* none */ }
     try { Deno.removeSync(`${me.probes}.state.json`); } catch { /* none */ }
     const conn = o.bare ? {} : { OPTCHAT_ENGINE: HUB, OPTCHAT_ENGINE_NAME: "reframe.dev", OPTCHAT_CONNECT: [me.db, ...(o.also ?? [])].join(",") };
     const hl = o.headless || Deno.env.get("OPTCHAT_E2E_HEADLESS") ? { OPTCHAT_HEADLESS: "1", OPTCHAT_TEST_HOOKS: "1" } : {};
-    const env = { ...hl, OPTCHAT_PROBES: me.probes, OPTCHAT_PREFS_DIR: me.dir, OPTCHAT_TOKEN_DIR: me.dir, OPTCHAT_TEST_TOKENS: TOKENS, ...conn, ...(o.env ?? {}) };
+    // never the engine's real local client token: a test names its own file (or none)
+    const env = { ...hl, OPTCHAT_LOCAL_TOKEN_FILE: `${me.dir}/no-local-token`, OPTCHAT_PROBES: me.probes, OPTCHAT_PREFS_DIR: me.dir, OPTCHAT_TOKEN_DIR: me.dir, OPTCHAT_TEST_TOKENS: TOKENS, ...conn, ...(o.env ?? {}) };
     const args = ["-n", "-W", "--stderr", `${me.dir}/stderr.txt`];
     for (const [k, v] of Object.entries(env)) args.push("--env", `${k}=${v}`);
     args.push(`${ROOT}/dist/OptChat.app`);

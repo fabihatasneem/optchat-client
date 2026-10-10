@@ -390,7 +390,8 @@ impl AppState {
         for c in self.prefs.connections.clone() {
             let key = c.key();
             let wp = if Some(&key) == active.as_ref() { wp_active.clone() } else { self.prefs.ws.get(&key).cloned().unwrap_or_default() };
-            self.attach_ws(&c.endpoint, &c.ws, wp, crate::tokens::get(&key), cx);
+            let token = crate::tokens::get(&key).or_else(|| crate::tokens::local_token(&c.endpoint));
+            self.attach_ws(&c.endpoint, &c.ws, wp, token, cx);
         }
         if let Some(a) = active.filter(|a| self.bg.contains_key(a)) {
             self.switch_ws(&a, cx);
@@ -492,17 +493,19 @@ impl AppState {
     }
 
     /// Connect a workspace of an engine with its client token (kept in the Keychain); it shows at once.
+    /// `token` empty: the local engine's own client token (tokens::local_token), when there is one
     pub fn connect_ws(&mut self, endpoint: &str, ws: &str, token: &str, cx: &mut Context<Self>) -> Result<(), String> {
-        let token = token.trim();
-        if token.is_empty() {
-            return Err("a client token is needed".into());
-        }
         let key = ws_key(endpoint, ws);
-        crate::tokens::set(&key, token)?;
+        let typed = token.trim().to_string();
+        let token = if typed.is_empty() { crate::tokens::local_token(endpoint).ok_or_else(|| "a client token is needed".to_string())? } else { typed.clone() };
         if self.meta.contains_key(&key) {
-            // reconnect with a new token
+            // reconnect with a new token (after a refusal)
             self.disconnect_ws(&key, cx);
         }
+        if !typed.is_empty() {
+            crate::tokens::set(&key, &typed)?;
+        }
+        let token = token.as_str();
         let c = ConnPref { endpoint: endpoint.into(), ws: ws.into() };
         if !self.prefs.connections.contains(&c) {
             self.prefs.connections.push(c);

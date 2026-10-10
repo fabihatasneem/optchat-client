@@ -58,3 +58,16 @@ mod tests {
         assert_eq!(super::get(&k), None);
     }
 }
+
+/// The local engine's client token (scope: every workspace), for an engine on this machine: chat.reframe.dev (the local
+/// edge), localhost or 127.0.0.1. The file is the engine's (~/.reframe/data/workspaces/local-client-token, 0600); only
+/// that one file is read, never logged or stored elsewhere. OPTCHAT_LOCAL_TOKEN_FILE points tests at their own file.
+pub fn local_token(endpoint: &str) -> Option<String> {
+    let host = endpoint.split("://").nth(1).unwrap_or(endpoint).split(['/', ':']).next().unwrap_or("");
+    if !matches!(host, "chat.reframe.dev" | "localhost" | "127.0.0.1") {
+        return None;
+    }
+    let path = std::env::var("OPTCHAT_LOCAL_TOKEN_FILE").unwrap_or_else(|_| format!("{}/.reframe/data/workspaces/local-client-token", std::env::var("HOME").unwrap_or_default()));
+    let t = std::fs::read_to_string(path).ok()?.trim().to_string();
+    (!t.is_empty()).then_some(t)
+}

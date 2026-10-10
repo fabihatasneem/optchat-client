@@ -68,6 +68,22 @@ impl WorkspacesPanel {
         self.endpoint.update(cx, |i, cx| i.focus(window, cx));
         cx.notify();
     }
+    /// Connect…: on the local engine with its local client token, at once (no field); else the token field inline
+    pub fn connect_or_ask(&mut self, endpoint: &str, ws: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if crate::tokens::local_token(endpoint).is_some() {
+            let (ep, w) = (endpoint.to_string(), ws.to_string());
+            match self.state.update(cx, |s, cx| s.connect_ws(&ep, &w, "", cx)) {
+                Ok(()) => {
+                    self.connecting = None;
+                    self.err = None;
+                    cx.notify();
+                    return;
+                }
+                Err(e) => self.err = Some(e),
+            }
+        }
+        self.start_connect(endpoint, ws, window, cx);
+    }
     pub fn start_connect(&mut self, endpoint: &str, ws: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.connecting = Some((endpoint.to_string(), ws.to_string()));
         self.adding = false;
@@ -119,6 +135,29 @@ impl WorkspacesPanel {
         self.adding = false;
         self.err = None;
         cx.notify();
+    }
+
+    /// the token field, inline under the workspace being connected
+    fn token_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let k = c(cx).clone();
+        div()
+            .mx(px(6.))
+            .ml(px(34.))
+            .mb(px(6.))
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(div().child(Input::new(&self.token).small()).child(probe("wsp.token")))
+            .child(div().text_size(px(11.)).text_color(k.faint).child("a client token for this workspace (from its admin page); kept in the Keychain"))
+            .when_some(self.err.clone(), |d, e| d.child(div().text_size(px(11.5)).text_color(k.red).child(e)))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(6.))
+                    .child(btn_small("wsp-go", "Connect", Tone::Primary, cx).child(probe("wsp.go")).on_click(cx.listener(|p, _, _, cx| p.connect(cx))))
+                    .child(btn_small("wsp-cancel", "Cancel", Tone::Ghost, cx).on_click(cx.listener(|p, _, _, cx| p.cancel(cx)))),
+            )
+            .into_any_element()
     }
 
     fn row_base(id: SharedString, cx: &App) -> Stateful<Div> {
@@ -184,6 +223,9 @@ impl Render for WorkspacesPanel {
                 };
                 rows_state.push(serde_json::json!({ "ws": m.ws, "engine": ei, "kind": "connected", "on": on, "alert": alert, "state": state }));
                 let (key2, key3, name) = (key.clone(), key.clone(), m.ws.clone());
+                let needs_token = m.refused.is_some() || m.no_token;
+                let (ep4, ws4) = (m.endpoint.clone(), m.ws.clone());
+                let asking = self.connecting.as_ref().is_some_and(|(ep, w)| *ep == m.endpoint && *w == m.ws);
                 col = col.child(
                     Self::row_base(SharedString::from(format!("wsp-{key}")), cx)
                         .cursor_pointer()
@@ -203,11 +245,18 @@ impl Render for WorkspacesPanel {
                                 })),
                         )
                         .child(probe(format!("wsp.ws.{}", m.ws)))
-                        .on_click(cx.listener(move |p, _, _, cx| {
+                        .on_click(cx.listener(move |p, _, window, cx| {
                             let key = key2.clone();
                             p.state.update(cx, |s, cx| s.switch_ws(&key, cx));
+                            // no token, or the engine refused it: the field to give one
+                            if needs_token {
+                                p.start_connect(&ep4, &ws4, window, cx);
+                            }
                         })),
                 );
+                if asking {
+                    col = col.child(self.token_row(cx));
+                }
             }
             let avail: Vec<String> = e.workspaces.iter().filter(|w| w.running && !connected.iter().any(|m| m.ws == w.name)).map(|w| w.name.clone()).collect();
             let disabled: Vec<String> = e.workspaces.iter().filter(|w| !w.running && !connected.iter().any(|m| m.ws == w.name)).map(|w| w.name.clone()).collect();
@@ -223,30 +272,11 @@ impl Render for WorkspacesPanel {
                         .when(!open, |d| d.child(div().text_size(px(11.5)).text_color(if online { k.accent } else { k.faint }).child("Connect…")))
                         .child(probe(format!("wsp.connect.{n}")))
                         .when(online && !open, |d| {
-                            d.on_click(cx.listener(move |p, _, window, cx| p.start_connect(&ep, &name, window, cx)))
+                            d.on_click(cx.listener(move |p, _, window, cx| p.connect_or_ask(&ep, &name, window, cx)))
                         }),
                 );
                 if open {
-                    // the token, inline under its workspace
-                    col = col.child(
-                        div()
-                            .mx(px(6.))
-                            .ml(px(34.))
-                            .mb(px(6.))
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.))
-                            .child(div().child(Input::new(&self.token).small()).child(probe("wsp.token")))
-                            .child(div().text_size(px(11.)).text_color(k.faint).child("a client token for this workspace (from its admin page); kept in the Keychain"))
-                            .when_some(self.err.clone(), |d, e| d.child(div().text_size(px(11.5)).text_color(k.red).child(e)))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(px(6.))
-                                    .child(btn_small("wsp-go", "Connect", Tone::Primary, cx).child(probe("wsp.go")).on_click(cx.listener(|p, _, _, cx| p.connect(cx))))
-                                    .child(btn_small("wsp-cancel", "Cancel", Tone::Ghost, cx).on_click(cx.listener(|p, _, _, cx| p.cancel(cx)))),
-                            ),
-                    );
+                    col = col.child(self.token_row(cx));
                 }
             }
             if !disabled.is_empty() {

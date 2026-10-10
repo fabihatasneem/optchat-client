@@ -1,5 +1,5 @@
 // The whole UI suite against dist/OptChat.app, a client of the OptChat hub on TEST instances only (OPTCHAT_TEST_DB,
-// default test-gpui-a, a copy of the main chat; sync.ts and the background checks use test-gpui-b) (build it first: scripts/bundle.sh release).
+// default test-gpui-c, a copy of the main chat; sync.ts and the background checks use test-gpui-d) (build it first: scripts/bundle.sh release).
 //   deno run -A tests/e2e.ts            all suites (model turns use Claude Haiku and Codex GPT-6-Luna only)
 //   deno run -A tests/e2e.ts --offline  skip the suites that call models
 //   deno run -A tests/e2e.ts panels     only the named suites
@@ -46,6 +46,8 @@ const ALL = [
   { name: "sync", models: true },
   { name: "engine", models: true },
   { name: "panel", models: false },
+  { name: "workspaces", models: true },
+  { name: "localtoken", models: false },
 ];
 const args = Deno.args.filter((x) => !x.startsWith("--"));
 const offline = Deno.args.includes("--offline");
@@ -54,7 +56,7 @@ const out: string[] = [`e2e ${new Date().toISOString()}`];
 let bad = 0;
 const run = async (name: string) => {
   // the hub's edge certificate comes from the macOS trust store; history suites use the live-sized test copy
-  const env = { DENO_TLS_CA_STORE: "system", OPTCHAT_TEST_DB: Deno.env.get("OPTCHAT_TEST_DB") ?? "test-gpui-a" };
+  const env = { DENO_TLS_CA_STORE: "system", OPTCHAT_TEST_DB: Deno.env.get("OPTCHAT_TEST_DB") ?? "test-gpui-c" };
   const p = new Deno.Command("deno", { args: ["run", "-A", `${ROOT}/tests/${name}.ts`], env, stdout: "piped", stderr: "piped" }).spawn();
   const r = await p.output();
   const text = new TextDecoder().decode(r.stdout) + new TextDecoder().decode(r.stderr);
