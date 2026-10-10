@@ -448,7 +448,9 @@ impl AppState {
             let Ok((rt, cfgs)) = this.update(cx, |s, _| (s.rt.clone(), s.engines.iter().filter(|e| !s.conns.iter().any(|c| c.cfg.endpoint == e.cfg.endpoint && c.has_subs())).map(|e| e.cfg.clone()).collect::<Vec<_>>())) else { break };
             for cfg in cfgs {
                 let c2 = cfg.clone();
-                let r = rt.spawn(async move { crate::client::list_workspaces(&c2).await }).await.unwrap_or_else(|e| Err(e.to_string()));
+                // a token-scoped engine is asked with its token: only the token's workspaces (no token: every public name)
+                let tok = if c2.auto { crate::tokens::get(&engine_token_key(&c2.endpoint)) } else { None };
+                let r = rt.spawn(async move { crate::client::list_workspaces_with(&c2, tok.as_deref()).await }).await.unwrap_or_else(|e| Err(e.to_string()));
                 let _ = this.update(cx, |s, cx| {
                     if let Some(e) = s.engines.iter_mut().find(|e| e.cfg.endpoint == cfg.endpoint) {
                         match r {

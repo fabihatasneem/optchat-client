@@ -43,8 +43,7 @@ try {
   check(e0.endpoint === `http://127.0.0.1:${PORT}` && e0.name === `127.0.0.1:${PORT}` && e0.auto, `the first address that answers wins (${e0.endpoint}); the name is its host (${e0.name})`);
   check(!row("gamma") && !panel().adding, "every workspace in the token's scope connected by itself (alpha, beta); gamma (out of scope) is not shown; no per-workspace step");
   check(st().engineSockets === 1, `one socket for the engine (${st().engineSockets})`);
-  await a.click("wsp.disabled.0");
-  await a.waitFor(() => row("delta")?.kind === "disabled", 3000, "disabled expanded");
+  check(!a.probe("wsp.disabled.0") || !rows().some((r) => r.kind === "disabled"), "a token's engine shows only the token's scope: no disabled row (delta is disabled on the engine)");
   // live scope changes
   await scope("alpha,gamma");
   await a.waitFor(() => !row("beta") && row("gamma")?.kind === "connected", 8000, "scope changed");

@@ -215,7 +215,10 @@ impl Render for WorkspacesPanel {
             if connected.is_empty() && online && e.online.is_some() {
                 col = col.child(div().pl(px(38.)).py(px(4.)).text_size(px(12.)).text_color(k.faint).child(if e.cfg.auto { "no workspace in this token's scope" } else { "no workspace connected" }));
             }
-            let disabled: Vec<String> = e.workspaces.iter().filter(|w| !w.running && !connected.iter().any(|m| m.ws == w.name)).map(|w| w.name.clone()).collect();
+            // a token's engine shows only the token's scope: disabled workspaces only where the scope is everything
+            // (an engine by address, or the local one through its local token)
+            let scoped = e.cfg.auto && crate::tokens::get(&crate::state::engine_token_key(&e.cfg.endpoint)).is_some();
+            let disabled: Vec<String> = if scoped { vec![] } else { e.workspaces.iter().filter(|w| !w.running && !connected.iter().any(|m| m.ws == w.name)).map(|w| w.name.clone()).collect() };
             if !disabled.is_empty() {
                 let open = self.disabled_open.contains(&e.cfg.endpoint);
                 let ep = e.cfg.endpoint.clone();
