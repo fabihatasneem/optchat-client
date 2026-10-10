@@ -608,3 +608,47 @@ Decision: GPUI. 105 MB on the device is accepted: it doesn't grow with task swit
   → Security.framework).
 - **First build:** 0.1.0 (2610101509), uploaded 2026-10-10, VALID, `usesNonExemptEncryption: false`,
   `APP_STORE_ELIGIBLE`.
+
+## 14. State on 2026-10-11 (shared crates at 5f13111; TestFlight 0.1.0 (2610102002))
+
+**Layout of the app now:**
+- **Shared UI:** the app is the shared optchat-client/optchat-ui crates inside the iOS shell (`app/src/main.rs`).
+  The crates come from `vendor/optchat-shared`, a clone of optchat-mac-gpui pinned at 5f13111, so the builder's
+  uncommitted work can't break the build. §13's placeholder UI and `engine.rs` are gone.
+- **QR hook:** the shell installs the iOS `optchat_ui::platform` hook. `app/native/qr_scanner.m` is compiled by
+  `app/build.rs`. The scanner:
+  - is a full-screen AVCaptureSession camera view with a 44 pt close button (`qr-close`);
+  - accepts only whole `oc1.` tokens that pass the client's own parser (`optchat_qr_valid`); any other code shows a
+    hint and scanning goes on;
+  - reports a camera only on devices with one (the simulators have none, so they show no camera button);
+  - has `NSCameraUsageDescription` in `Info.plist`.
+- **Test hooks:**
+  - `OPTCHAT_SEED_OC1` (base64 of an oc1 token) adds the engine through `add_engine_token`, the panel's own path.
+  - `OPTCHAT_RESET=1` (Debug builds only) starts from empty settings.
+  - `PhoneScriptTests` walks scripted taps and takes a screenshot after each. It stops on any system prompt without
+    tapping it.
+
+**Verified on the iPhone 13 mini** (at 3f7f864; `docs/shots/jpg/phone-oc1-ws`, `phone-keyboard-up-3f7f864`,
+`phone-qr-scan`):
+- **oc1 token:** from empty settings the oc1 token (scope test-ios) connects test-ios by itself through
+  chat.tunnel.reframe.sh.
+- **Double-tap send** with the keyboard up: #29 → #30 "pong".
+- **Long-press with the keyboard up:** shows "Listening". The first ✕ gives "Finishing…", the second ✕ ends it and
+  the mic indicator goes off.
+- **Camera button:** opens the scanner, and the system camera prompt appears with our usage text. The prompt was left
+  unanswered.
+
+**Verified in the simulators** (at 5f13111; `docs/shots/jpg/sim-oc1-5f13111`, `sim-ipad-oc1-5f13111`):
+- **iPhone 18 Pro:** from empty settings the oc1 token connects test-ios. On the Mac the token's local address
+  answers, so it connects via chat.reframe.dev. The Workspaces panel shows only test-ios: the "1 disabled" flicker
+  seen on the device at 3f7f864 is gone. Add engine opens the token form (no camera button, as there's no camera).
+- **iPad Pro 13":** the same seed connects test-ios in the landscape layout.
+
+**Pending on a device:**
+- **Scanner close button:** blocked by the unanswered camera prompt; also the denied-camera hint.
+- **Paste with text on the clipboard:** the Paste pill shows only when the clipboard has text. In the last device
+  run it didn't appear, the clipboard most likely being empty. The iOS paste prompt did not appear.
+- **5f13111's scope fix** on the device itself.
+
+**TestFlight:** 2610101923 (3f7f864 + scanner) and 2610102002 (5f13111), both uploaded 2026-10-11. Release links
+need no `@available` in the Objective-C (`__isPlatformVersionAtLeast` isn't linked).
