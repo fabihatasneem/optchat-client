@@ -540,3 +540,12 @@ pub fn register_fonts(cx: &mut App, files: &[(&str, &'static [u8])]) {
         eprintln!("fonts: {e}");
     }
 }
+
+// the window's height, set by the root each frame (dialogs size against it)
+thread_local!(static VIEW_H: std::cell::Cell<f32> = const { std::cell::Cell::new(800.) });
+pub fn set_viewport_h(h: f32) {
+    VIEW_H.with(|v| v.set(h));
+}
+pub fn viewport_h() -> f32 {
+    VIEW_H.with(|v| v.get())
+}

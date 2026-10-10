@@ -1,7 +1,7 @@
 // Phase 4 (spec-workspaces §4) without input: the same steps as tests/workspaces.ts, run through the app's own
 // handlers by the test channel (crate::testcmd) and checked on its state file. For runs where nothing can reach the
 // window (a locked screen); tests/workspaces.ts does it with Computer Use and screenshots. Test workspaces only
-// (test-gpui-e / test-gpui-f; tokens from data/test-tokens.json, never printed). Haiku only (the workspaces' default).
+// (test-gpui-g / test-gpui-h; tokens from data/test-tokens.json, never printed). Haiku only (the workspaces' default).
 import { App, check, failed } from "./lib/app.ts";
 import { ROOT, sleep } from "./lib/cua.ts";
 import { HUB, Peer } from "./lib/hub.ts";
@@ -20,19 +20,19 @@ try {
   await a.cmd({ op: "addEngine", endpoint: HUB.replace(/^https:\/\//, ""), name: "reframe.dev" });
   await a.waitFor(() => st().engines?.[0]?.online === true && st().engines[0].workspaces.length > 0, 12000, "engine listed");
   const listed = (st().engines[0].workspaces as any[]).map((w) => [w.name, w.running] as [string, boolean]);
-  check(listed.some(([n, r]) => n === "test-gpui-e" && r) && listed.some(([n, r]) => n === "test-gpui-f" && r), `Add engine: online, ${listed.length} workspaces listed (${listed.filter(([, r]) => !r).length} disabled)`);
+  check(listed.some(([n, r]) => n === "test-gpui-g" && r) && listed.some(([n, r]) => n === "test-gpui-h" && r), `Add engine: online, ${listed.length} workspaces listed (${listed.filter(([, r]) => !r).length} disabled)`);
   check(st().view === "workspaces" && st().sideOpen && st().overlay === null, "adding happens in the Workspaces panel (no popup)");
 
-  await a.cmd({ op: "connect", ws: "test-gpui-e" });
-  await a.waitFor(() => ws() === "test-gpui-e" && st().loaded && st().ready, 20000, "a on screen");
-  check(st().tasks > 50 && conn("test-gpui-e").conn === "open", `Connect test-gpui-e (token from the test file into the token store): ${st().tasks} tasks`);
-  await a.cmd({ op: "connect", ws: "test-gpui-f" });
-  await a.waitFor(() => ws() === "test-gpui-f" && st().loaded, 20000, "b on screen");
-  check(conn("test-gpui-e")?.conn === "open", "Connect test-gpui-f: it comes on screen, test-gpui-e stays subscribed in the background");
+  await a.cmd({ op: "connect", ws: "test-gpui-g" });
+  await a.waitFor(() => ws() === "test-gpui-g" && st().loaded && st().ready, 20000, "a on screen");
+  check(st().tasks > 50 && conn("test-gpui-g").conn === "open", `Connect test-gpui-g (token from the test file into the token store): ${st().tasks} tasks`);
+  await a.cmd({ op: "connect", ws: "test-gpui-h" });
+  await a.waitFor(() => ws() === "test-gpui-h" && st().loaded, 20000, "b on screen");
+  check(conn("test-gpui-g")?.conn === "open", "Connect test-gpui-h: it comes on screen, test-gpui-g stays subscribed in the background");
 
   // switching: a swap of state
   const n0 = (st().wsSwitches ?? []).length;
-  for (const w of ["test-gpui-e", "test-gpui-f", "test-gpui-e", "test-gpui-f"]) {
+  for (const w of ["test-gpui-g", "test-gpui-h", "test-gpui-g", "test-gpui-h"]) {
     await a.cmd({ op: "switch", ws: w });
     await a.waitFor(() => ws() === w && st().loaded, 2000, `switch to ${w}`);
   }
@@ -45,20 +45,20 @@ try {
   await a.cmd({ op: "spawn", title: "say hi (budget test)", instruction: "Reply with exactly one word: hi", usd: 0.0001 });
   await a.waitFor(() => st().current !== t0, 10000, "child opened in b");
   const child = st().current;
-  check(st().tabs.includes(child), `spawned #${child} in test-gpui-f (Haiku low, budget $0.0001)`);
-  await a.cmd({ op: "switch", ws: "test-gpui-e" });
-  await a.waitFor(() => ws() === "test-gpui-e", 2000, "a on screen");
-  const w0 = (unreadOf("test-gpui-f").warn ?? 0) + (unreadOf("test-gpui-f").error ?? 0);
+  check(st().tabs.includes(child), `spawned #${child} in test-gpui-h (Haiku low, budget $0.0001)`);
+  await a.cmd({ op: "switch", ws: "test-gpui-g" });
+  await a.waitFor(() => ws() === "test-gpui-g", 2000, "a on screen");
+  const w0 = (unreadOf("test-gpui-h").warn ?? 0) + (unreadOf("test-gpui-h").error ?? 0);
   // a new warning (earlier runs may have left unread ones)
-  await a.waitFor(() => st().bgAlert && (unreadOf("test-gpui-f").warn ?? 0) + (unreadOf("test-gpui-f").error ?? 0) > w0, 180000, "background warning");
-  check(true, `b's #${child} warned while a was on screen: the workspace icon's dot is on (b unread ${JSON.stringify(unreadOf("test-gpui-f"))}, was ${w0})`);
+  await a.waitFor(() => st().bgAlert && (unreadOf("test-gpui-h").warn ?? 0) + (unreadOf("test-gpui-h").error ?? 0) > w0, 180000, "background warning");
+  check(true, `b's #${child} warned while a was on screen: the workspace icon's dot is on (b unread ${JSON.stringify(unreadOf("test-gpui-h"))}, was ${w0})`);
 
   // on screen, the notices: list from the engine, read one (opens its task), read all
-  await a.cmd({ op: "switch", ws: "test-gpui-f" });
+  await a.cmd({ op: "switch", ws: "test-gpui-h" });
   // on screen, d's notices are in the status bar; the icon dot is only for the others (c may have its own unread ones)
-  await a.waitFor(() => ws() === "test-gpui-f", 2000, "b on screen");
-  const cAlert = (unreadOf("test-gpui-e").warn ?? 0) + (unreadOf("test-gpui-e").error ?? 0) > 0;
-  check(st().bgAlert === cAlert, `the icon dot follows the background workspace only (c unread ${JSON.stringify(unreadOf("test-gpui-e"))}, dot ${st().bgAlert})`);
+  await a.waitFor(() => ws() === "test-gpui-h", 2000, "b on screen");
+  const cAlert = (unreadOf("test-gpui-g").warn ?? 0) + (unreadOf("test-gpui-g").error ?? 0) > 0;
+  check(st().bgAlert === cAlert, `the icon dot follows the background workspace only (c unread ${JSON.stringify(unreadOf("test-gpui-g"))}, dot ${st().bgAlert})`);
   check(JSON.stringify(st().tabs) !== "[]" && st().tabs.includes(child) && tabsB.every((t: number) => st().tabs.includes(t)), "b kept its tabs (per-workspace tabs)");
   await a.cmd({ op: "view", view: "notifications" }, { op: "loadNotices" });
   await a.waitFor(() => st().noticesLoaded && (st().noticesTop ?? []).length > 0, 8000, "notices loaded");
@@ -70,7 +70,7 @@ try {
   await a.waitFor(() => st().unread.warn + st().unread.error < before && st().current === child, 8000, "read + opened");
   check(true, `a click opens #${child} and marks it read on the engine (${before} → ${st().unread.warn + st().unread.error})`);
   // another client sees the read state (it is on the engine)
-  peer = await Peer.connect("test-gpui-f");
+  peer = await Peer.connect("test-gpui-h");
   const list = await peer.rpc("notices", { limit: 50 });
   check(list.some((n: any) => n.id === warn.id && n.readAt), "another client sees it read (read state is on the engine)");
   await a.cmd({ op: "readAll" });
@@ -82,16 +82,16 @@ try {
   // relaunch: connections and the workspace on screen come back (tokens from the store)
   await a.quit({ keep: true });
   a = await App.launch({ bare: true, headless: true, dir, env });
-  await a.waitFor(() => (st().connected ?? []).length === 2 && ws() === "test-gpui-f" && st().loaded, 20000, "relaunch restores");
-  check(true, "relaunch: both connections back (tokens from the store), test-gpui-f on screen");
+  await a.waitFor(() => (st().connected ?? []).length === 2 && ws() === "test-gpui-h" && st().loaded, 20000, "relaunch restores");
+  check(true, "relaunch: both connections back (tokens from the store), test-gpui-h on screen");
   const prefs = Deno.readTextFileSync(`${dir}/prefs.json`);
   const toks = Object.values(JSON.parse(Deno.readTextFileSync(`${ROOT}/data/test-tokens.json`))) as string[];
   check(!toks.some((t) => prefs.includes(t)) && !toks.some((t) => a.stderr().includes(t)), "no token in the prefs or the log");
 
-  await a.cmd({ op: "disconnect", ws: "test-gpui-e" });
-  await a.waitFor(() => !conn("test-gpui-e"), 4000, "a disconnected");
-  check(ws() === "test-gpui-f" && st().engines[0].workspaces.some((w: any) => w.name === "test-gpui-e"), "Disconnect test-gpui-e: gone from the app (available again), b stays");
-  await a.cmd({ op: "disconnect", ws: "test-gpui-f" });
+  await a.cmd({ op: "disconnect", ws: "test-gpui-g" });
+  await a.waitFor(() => !conn("test-gpui-g"), 4000, "a disconnected");
+  check(ws() === "test-gpui-h" && st().engines[0].workspaces.some((w: any) => w.name === "test-gpui-g"), "Disconnect test-gpui-g: gone from the app (available again), b stays");
+  await a.cmd({ op: "disconnect", ws: "test-gpui-h" });
   await a.waitFor(() => (st().connected ?? []).length === 0 && st().ready === false, 4000, "none");
   check(true, "Disconnect the last one: the empty state");
   await a.quit();
@@ -109,7 +109,7 @@ const relay = () => new Deno.Command("deno", { args: ["run", "-A", `${ROOT}/test
 let r = relay();
 await sleep(1500);
 try {
-  a = await App.launch({ db: "test-gpui-e", headless: true, env: { ...env, OPTCHAT_ENGINE: `http://127.0.0.1:${PORT}`, OPTCHAT_ENGINE_NAME: "local relay" } });
+  a = await App.launch({ db: "test-gpui-g", headless: true, env: { ...env, OPTCHAT_ENGINE: `http://127.0.0.1:${PORT}`, OPTCHAT_ENGINE_NAME: "local relay" } });
   dir = a.dir;
   check(st().engines?.[0]?.online === true && st().conn === "open", "through the local relay: connected");
   for (let round = 1; round <= 2; round++) {

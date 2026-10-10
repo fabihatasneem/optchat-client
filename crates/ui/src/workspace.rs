@@ -558,6 +558,7 @@ impl Focusable for Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::ui::frame_begin();
+        crate::ui::set_viewport_h(f32::from(window.viewport_size().height));
         crate::ui::anim::area(crate::ui::anim::WORKSPACE);
         if self._ticker.is_none() {
             self.start_ticker(window, cx);

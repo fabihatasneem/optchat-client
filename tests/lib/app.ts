@@ -1,5 +1,5 @@
 // The app under test: dist-dev/OptChat Dev.app (never the user's dist/OptChat.app) as a client of the OptChat engine, connected to TEST workspaces only
-// (test-gpui-e / test-gpui-f, scoped tokens from data/test-tokens.json; never the live chat), with its prefs and its
+// (test-gpui-g / test-gpui-h, scoped tokens from data/test-tokens.json; never the live chat), with its prefs and its
 // token store in a temp folder; driven through Computer Use with coordinates from the app's probe
 // file, observed through its state file and screenshots.
 import { BUNDLE, Cua, ROOT, sleep } from "./cua.ts";
@@ -9,7 +9,7 @@ export const SHOTS = `${ROOT}/shots`;
 const TITLEBAR = 32; // points above the content area
 const SCALE = 2; // screenshot pixels per point (Retina)
 
-/** the test workspace a suite uses: OPTCHAT_TEST_DB, else `fallback` (test-gpui-e / test-gpui-f only) */
+/** the test workspace a suite uses: OPTCHAT_TEST_DB, else `fallback` (test-gpui-g / test-gpui-h only) */
 export function testDb(fallback: string): string {
   const db = Deno.env.get("OPTCHAT_TEST_DB") ?? fallback;
   checkTestDb(db);
@@ -28,7 +28,7 @@ export class App {
   static async launch(o: { db?: string; also?: string[]; env?: Record<string, string>; dir?: string; bare?: boolean; headless?: boolean } = {}): Promise<App> {
     const me = new App();
     me.dir = o.dir ?? await Deno.makeTempDir({ prefix: "optchat-e2e-" });
-    me.db = o.db ?? testDb("test-gpui-e"); // a copy of the main chat on the engine (never the live chat)
+    me.db = o.db ?? testDb("test-gpui-g"); // a copy of the main chat on the engine (never the live chat)
     checkTestDb(me.db);
     for (const w of o.also ?? []) checkTestDb(w);
     try { Deno.removeSync(me.probes); } catch { /* none */ }

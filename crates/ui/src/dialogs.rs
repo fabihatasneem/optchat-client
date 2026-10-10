@@ -82,7 +82,8 @@ pub(crate) fn dialog_box(cx: &App, w: f32) -> Div {
     div()
         .w(px(w))
         .max_w(relative(0.94))
-        .max_h(relative(0.92))
+        // a fixed share of the window: a percentage of the overlay's auto-height wrapper resolves too small
+        .max_h(px(crate::ui::viewport_h() * 0.92))
         .bg(k.panel)
         .border_1()
         .border_color(k.line2)
