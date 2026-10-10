@@ -61,6 +61,8 @@ pub struct Feed {
     fetching_older: bool,
     /// the user scrolled away from the bottom: new text no longer pulls the view down (follow mode off)
     pub scrolled_up: bool,
+    /// the phone / narrow layout: one quiet line per turn foot and tool call (tap to expand), code wraps
+    pub compact: bool,
     /// UI tests: the most live text / thinking seen in this task's running turn (chars)
     live_max: (usize, usize),
 }
@@ -102,6 +104,7 @@ impl Feed {
             loading_more: false,
             fetching_older: false,
             scrolled_up: false,
+            compact: false,
             live_max: (0, 0),
         };
         f.sync(cx);
@@ -498,11 +501,12 @@ const MAXW: f32 = 860.0;
 
 impl Feed {
     fn wrap(&self, el: impl IntoElement) -> AnyElement {
-        div().w_full().flex().justify_center().px(zx(26.)).child(div().w_full().max_w(zx(MAXW)).child(el)).into_any_element()
+        div().w_full().flex().justify_center().px(zx(if self.compact { 16. } else { 26. })).child(div().w_full().max_w(zx(MAXW)).child(el)).into_any_element()
     }
 
     fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(row) = self.rows.get(ix).cloned() else { return div().into_any_element() };
+        crate::markdown::set_compact(self.compact);
         let first = ix == 0;
         let last = ix + 1 == self.rows.len();
         let el = match row {
@@ -1082,6 +1086,9 @@ impl Feed {
         let k = c(cx).clone();
         let key = format!("t{}", e.i);
         let open = self.open.contains(&key);
+        if self.compact && !open {
+            return self.tool_line(e, echo, &key, cx);
+        }
         let name = e.meta_str("name").map(String::from).unwrap_or_else(|| e.text.split(' ').next().unwrap_or("").to_string());
         let cid = e.meta_str("callId").unwrap_or("").to_string();
         let st: Option<ToolState> = self.state.read(cx).cur.tools.get(&cid).cloned();
@@ -1341,7 +1348,120 @@ impl Feed {
         d.into_any_element()
     }
 
+    /// compact: "Opus 5.5 · $0.035 · 8.8s ›", tap for the turn's numbers
+    fn foot_compact(&mut self, turn_id: &str, cx: &mut Context<Self>) -> AnyElement {
+        let k = c(cx).clone();
+        let s = self.state.read(cx);
+        let Some(turn) = s.cur.turns.get(turn_id).cloned() else { return div().into_any_element() };
+        let model_label = s.model(&turn.model).map(|m| m.label.replace("Claude ", "")).unwrap_or(turn.model.clone());
+        let nreq = s.cur.requests.values().filter(|r| r.turn_id.as_deref() == Some(turn_id)).count();
+        let last_req = s.cur.requests.values().filter(|r| r.turn_id.as_deref() == Some(turn_id)).max_by(|a, b| a.started_at.cmp(&b.started_at)).map(|r| r.id.clone());
+        let key = format!("foot{turn_id}");
+        let open = self.open.contains(&key);
+        let dur = turn.done_at.as_ref().map(|d| fmt::dur(Some(&turn.started_at), Some(d)));
+        let mut line = format!("{model_label} · {}", fmt::cost(Some(&turn.cost)));
+        if let Some(d) = &dur {
+            line.push_str(&format!(" · {d}"));
+        }
+        if turn.status == "cancelled" {
+            line.push_str(" · stopped");
+        }
+        let mut d = div().flex().flex_col().mt(zx(6.)).mb(zx(14.));
+        if let Some(err) = &turn.error {
+            d = d.child(div().text_size(zx(13.)).text_color(k.red).my(zx(6.)).child(format!("⚠ {err}")).child(probe(format!("foot.err.{turn_id}"))));
+        }
+        d = d.child(
+            div()
+                .id(ElementId::Name(format!("fc{turn_id}").into()))
+                .flex()
+                .items_center()
+                .gap(zx(4.))
+                .text_size(zx(12.5))
+                .text_color(k.muted)
+                .cursor_pointer()
+                .child(line)
+                .child(chevron(format!("fcc{turn_id}"), 11., k.faint, open))
+                .child(probe(format!("foot.line.{turn_id}")))
+                .on_click(cx.listener({
+                    let key = key.clone();
+                    move |f, _, _, cx| f.toggle(&key, cx)
+                })),
+        );
+        if open {
+            let u = &turn.usage;
+            let kv = |a: &str, b: String| div().flex().gap(zx(10.)).child(div().w(zx(96.)).flex_none().text_color(k.muted).child(a.to_string())).child(div().flex_1().min_w_0().text_color(k.text2).child(b));
+            let mut t = div().mt(zx(6.)).flex().flex_col().gap(zx(3.)).text_size(zx(12.5));
+            t = t.child(kv("model", format!("{model_label}{}", turn.effort.as_ref().map(|e| format!(", {e} effort")).unwrap_or_default())));
+            t = t.child(kv("steps", nreq.max(1).to_string()));
+            t = t.child(kv("input", format!("{} tokens, {}% cached", fmt::tokens(u.input), fmt::cache_pct(Some(u)))));
+            t = t.child(kv("output", format!("{} tokens", fmt::tokens(u.output))));
+            t = t.child(kv("cost · time", format!("{}{}", fmt::cost(Some(&turn.cost)), dur.map(|d| format!(" · {d}")).unwrap_or_default())));
+            if let Some(rid) = last_req {
+                t = t.child(div().id(ElementId::Name(format!("fctx{turn_id}").into())).ml(zx(106.)).text_color(k.accent).cursor_pointer().child("Open the context ›").on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::SelectRequest(rid.clone())))));
+            }
+            d = d.child(t);
+        }
+        d.into_any_element()
+    }
+
+    /// compact: one quiet line per tool call ("⁘ bash ls -la … 4.2s ■"), tap to expand
+    fn tool_line(&mut self, e: &Arc<LogEntry>, echo: Option<&Arc<LogEntry>>, key: &str, cx: &mut Context<Self>) -> AnyElement {
+        let k = c(cx).clone();
+        let name = e.meta_str("name").map(String::from).unwrap_or_else(|| e.text.split(' ').next().unwrap_or("").to_string());
+        let cid = e.meta_str("callId").unwrap_or("").to_string();
+        let st = self.state.read(cx).cur.tools.get(&cid).cloned();
+        let running = echo.is_none() && st.as_ref().map(|s| s.running).unwrap_or(false);
+        let err = echo.map(|x| x.meta_bool("isError")).unwrap_or(false) || st.as_ref().and_then(|s| s.result.as_ref()).map(|r| r.is_error).unwrap_or(false);
+        let rest = e.text.splitn(2, ' ').nth(1).unwrap_or("").to_string();
+        let summary = match serde_json::from_str::<serde_json::Value>(&rest) {
+            Ok(serde_json::Value::Object(o)) => o.values().find_map(|v| v.as_str().map(String::from)).unwrap_or(rest.clone()),
+            _ => rest.clone(),
+        };
+        let summary: String = summary.replace('\n', " ").chars().take(160).collect();
+        let time = st.as_ref().and_then(|s| s.started_at.clone()).filter(|_| running).map(|t| fmt::elapsed(&t));
+        let key = key.to_string();
+        let state_e = self.state.clone();
+        div()
+            .id(ElementId::Name(format!("tl{}", e.i).into()))
+            .flex()
+            .items_center()
+            .gap(zx(7.))
+            .my(zx(5.))
+            .text_size(zx(12.5))
+            .text_color(k.muted)
+            .cursor_pointer()
+            .child(if running { spinner(ElementId::Name(format!("tls{}", e.i).into()), 12., k.muted).into_any_element() } else { dot(if err { k.red } else { k.faint }, 6.).into_any_element() })
+            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(format!("{name} {summary}")))
+            .when_some(time, |d, t| d.child(div().flex_none().text_color(k.accent).child(t)))
+            .when(running, |d| {
+                let cid = cid.clone();
+                d.child(
+                    div()
+                        .id(ElementId::Name(format!("tlx{}", e.i).into()))
+                        .flex_none()
+                        .size(zx(22.))
+                        .rounded_full()
+                        .bg(k.red_bg)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().size(zx(7.)).rounded(zx(1.5)).bg(k.red))
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            let cid = cid.clone();
+                            state_e.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.stop_tool(&cid); Ok(String::new()) }));
+                        }),
+                )
+            })
+            .child(probe(format!("tool.{}", e.i)))
+            .on_click(cx.listener(move |f, _, _, cx| f.toggle(&key, cx)))
+            .into_any_element()
+    }
+
     fn foot(&mut self, turn_id: &str, cx: &mut Context<Self>) -> AnyElement {
+        if self.compact {
+            return self.foot_compact(turn_id, cx);
+        }
         let k = c(cx).clone();
         let s = self.state.read(cx);
         let Some(turn) = s.cur.turns.get(turn_id).cloned() else { return div().into_any_element() };

@@ -1,6 +1,18 @@
 # PROGRESS — OptChat for Mac (GPUI)
 
-## Engines and workspaces (current, phase 4)
+## GPUI upgrade, shared crates, phone layout (current)
+- GPUI at zed 97dc71d (the iOS backend's revision), Rust 1.98.1; gpui-component replaced by `optchat-ui::kit`; fonts
+  bundled (IBM Plex Sans, Lilex) + `font-kit` on macOS (without it no text is drawn).
+- Crates: `optchat-proto`, `optchat-client` (connections, state, rpc, tokens, mic; no UI), `optchat-ui` (all views),
+  `crates/app` (the macOS shell). `cargo check --target aarch64-apple-ios-sim` passes for proto + client + ui.
+- Dev builds: `dist-dev/OptChat Dev.app` (com.reframe.optchat.gpui.dev); the user's `dist/OptChat.app` only with
+  `SHIP=1 scripts/bundle.sh`.
+- Phone / narrow layout (`optchat-ui::phone`, design variation A + status option 1): chosen at the root for narrow
+  (< 760 pt) or portrait windows. tests/phone.ts (fake engine, headless, 400×860): 18/18; shots/phone-*.jpg,
+  shots/phone-vs-design.jpg.
+- Offline perf probe: tests/perf-fake.ts (fake engine fixture), before/after in shots/perf-*.json.
+
+## Engines and workspaces (phase 4)
 The app connects to OptChat engines: one websocket per engine (and client token) to `/engine/ws`, carrying every
 connected workspace (`connect` / `disconnect`, `ws` on every message). Engines and connections are app settings
 (`~/Library/Application Support/com.reframe.optchat.gpui/prefs.json`), tokens in the Keychain. Background workspaces

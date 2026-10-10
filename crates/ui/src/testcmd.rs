@@ -29,7 +29,7 @@ pub fn is_input(c: &Value) -> bool {
     matches!(c["op"].as_str(), Some("key" | "type"))
 }
 pub fn is_mouse(c: &Value) -> bool {
-    matches!(c["op"].as_str(), Some("click" | "scroll" | "drag" | "move"))
+    matches!(c["op"].as_str(), Some("click" | "scroll" | "drag" | "move" | "down" | "up"))
 }
 /// our window's NSView (as an address, to use outside the app's update: AppKit hands the events to GPUI, which must
 /// not be borrowed then)
@@ -203,9 +203,9 @@ mod native {
         }
     }
     /// a pixel-precise scroll at (x, y): a CGEvent made into an NSEvent whose location is that point in the window
-    pub fn scroll(view: *mut Object, x: f32, y: f32, dy: f32) {
+    pub fn scroll(view: *mut Object, x: f32, y: f32, dx: f32, dy: f32) {
         unsafe {
-            let ev = CGEventCreateScrollWheelEvent2(std::ptr::null_mut(), 0 /* pixel */, 1, dy as i32, 0, 0);
+            let ev = CGEventCreateScrollWheelEvent2(std::ptr::null_mut(), 0 /* pixel */, 2, dy as i32, dx as i32, 0);
             if ev.is_null() {
                 return;
             }
@@ -281,9 +281,15 @@ pub fn mouse_input(c: &Value, view: usize) {
         "scroll" => {
             {
                 native::mouse(v, 5, f("x"), f("y"), 0);
-                native::scroll(v, f("x"), f("y"), f("dy"));
+                native::scroll(v, f("x"), f("y"), f("dx"), f("dy"));
             }
         }
+        // a press and a release on their own (holds, long-presses)
+        "down" => {
+            native::mouse(v, 5, f("x"), f("y"), 0);
+            native::mouse(v, 1, f("x"), f("y"), 1);
+        }
+        "up" => native::mouse(v, 2, f("x"), f("y"), 1),
         _ => {}
     }
     crate::ui::set_state_extra("lastCmd", serde_json::json!({ "op": c["op"], "ok": true }));
@@ -387,6 +393,7 @@ pub fn run(w: &mut Workspace, c: &Value, window: &mut Window, cx: &mut Context<W
         }
         "close" => w.close_overlay(window, cx),
         "quit" => cx.quit(),
+        "resize" => window.resize(size(px(c["w"].as_f64().unwrap_or(400.) as f32), px(c["h"].as_f64().unwrap_or(860.) as f32))),
         "nudge" => {
             // a 1-pt resize and back: AppKit draws (and presents) a resized window at once, even when it is covered
             let sz = window.viewport_size();

@@ -131,6 +131,8 @@ pub struct Workspace {
     pub notices_panel: Entity<crate::notices_view::NoticesPanel>,
     /// engines whose disabled workspaces are expanded in the workspace menu
     pub ws_panel: Entity<crate::workspaces::WorkspacesPanel>,
+    /// the narrow / phone layout's state (crate::phone)
+    pub phone: crate::phone::Phone,
     resizing: Option<(f32, f32)>,
     pub metrics_open: bool,
     pub narrow: bool,
@@ -276,6 +278,7 @@ impl Workspace {
             tasks_panel,
             notices_panel,
             ws_panel,
+            phone: Default::default(),
             resizing: None,
             metrics_open: false,
             narrow: narrow_layout(window),
@@ -743,6 +746,21 @@ impl Render for Workspace {
                 }
             }));
 
+        if self.feed.read(cx).compact != narrow {
+            self.feed.update(cx, |f, cx| {
+                f.compact = narrow;
+                f.relayout(cx);
+            });
+        }
+        if narrow {
+            // the phone layout: one bottom bar, full-screen panels (crate::phone)
+            root = root.child(crate::phone::render(self, window, cx));
+            if let Some((menu, pos, _)) = &self.task_menu {
+                root = root.child(deferred(anchored().position(*pos).snap_to_window_with_margin(px(8.)).child(menu.clone())).with_priority(2));
+            }
+            root = root.child(frame_probe());
+            return self.overlays(root, window, cx);
+        }
         // ---- body: rail · sidebar · editor
         let mut body = div().flex_1().min_h_0().flex().relative();
         body = body.child(self.rail(open, view, cx));
@@ -764,6 +782,12 @@ impl Render for Workspace {
         }
         root = root.child(frame_probe());
 
+        self.overlays(root, window, cx)
+    }
+}
+
+impl Workspace {
+    fn overlays(&mut self, mut root: Stateful<Div>, window: &mut Window, cx: &mut Context<Self>) -> Stateful<Div> {
         // ---- overlays
         if let Some(o) = self.overlay.clone() {
             // dialogs and popovers fade in (120 ms); the state goes with the overlay, so each opening plays it
@@ -780,6 +804,8 @@ impl Render for Workspace {
         if let Some(a) = self.state.read(cx).approvals.first().cloned() {
             root = root.child(dialogs::approval(self, a, cx));
         }
+        // the open popup / context menu (kit::menu), above everything
+        root = root.children(crate::kit::menu::layer(cx));
         root
     }
 }

@@ -471,7 +471,7 @@ pub fn code_block(id: &str, lang: &str, text: &str, k: &C, _cx: &App) -> Statefu
         .child(
             div()
                 .id(ElementId::Name(format!("{id}.pre").into()))
-                .overflow_x_scroll()
+                .when(!compact(), |d| d.overflow_x_scroll())
                 .px(zx(14.))
                 .py(zx(10.))
                 .font_family(crate::ui::MONO)
@@ -561,4 +561,13 @@ mod tests {
         assert!(matches!(&d[4], Block::Table { head, rows } if head.len() == 2 && rows.len() == 1));
         assert!(matches!(&d[5], Block::Quote(_)));
     }
+}
+
+// the phone / narrow layout: code wraps instead of scrolling sideways (set while the feed draws its rows)
+thread_local!(static COMPACT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+pub fn set_compact(on: bool) {
+    COMPACT.with(|c| c.set(on));
+}
+pub fn compact() -> bool {
+    COMPACT.with(|c| c.get())
 }
