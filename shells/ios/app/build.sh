@@ -31,6 +31,10 @@ rm -f "$OUTJSON"
 if [ "$MODE" = xcode ]; then
   R="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"; mkdir -p "$R"
   cp "$EXE" "$TARGET_BUILD_DIR/$EXECUTABLE_PATH"
+  # archives: a dSYM for crash symbolication (the release profile keeps line tables)
+  if [ "${ACTION:-}" = install ] && [ -n "${DWARF_DSYM_FOLDER_PATH:-}" ]; then
+    mkdir -p "$DWARF_DSYM_FOLDER_PATH"; dsymutil "$EXE" -o "$DWARF_DSYM_FOLDER_PATH/$DWARF_DSYM_FILE_NAME"
+  fi
   cp "$ZED/assets/fonts/lilex/Lilex-Regular.ttf" "$R/" # OFL
   if [ "${CONFIGURATION:-Release}" = Debug ]; then cp "$ROOT/legacy-swiftui/OptChat/Resources/dev-root-ca.der" "$R/"; else rm -f "$R/dev-root-ca.der"; fi
   echo "placed $TARGET ($PROFILE) at $TARGET_BUILD_DIR/$EXECUTABLE_PATH"
