@@ -42,7 +42,7 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 - [x] B15 Property tests: tiling, no inherited merge past cut, Taelin push order equals reference `due` rule (view-tasks equivalents) — crates/engine/tests/view_props.rs: c (2000 random pushes over fork chains, no inherited part past its cut), d1 (Taelin push = due rule, 20001 steps), d2 (fork-of-fork reference, 20000)
 
 ## C. Compactor (optchat.ts #build / #compact, prompts.ts)
-- [~] C1 Shared pool of 8 jobs across all tasks; settle-waiting tasks first; first 8 unbuilt per task; ready merges; wanted — memory_compactor::c1_pool_of_8_settle_waiters_first (pool of 8, settle waiters first, first 8 unbuilt); the order of ready merges vs wanted parents is not asserted
+- [x] C1 Shared pool of 8 jobs across all tasks; settle-waiting tasks first; first 8 unbuilt per task; ready merges; wanted — memory_compactor::c1_pool_of_8_settle_waiters_first, c1_ready_merges_before_wanted; queues keep insertion order like the TS Sets (engine OrderedSet)
 - [x] C2 Level 0: message ≤ 512 B (report lines 280 B) and not an image → its own text, no call — memory_compactor::c2_level0_limits_512_and_280
 - [x] C3 Merge: halves joined if ≤ 512 B, else a model call — tasks_offline asserts 0:1:0 built from halves
 - [x] C4 Compaction input: builder's cview lines up to the node (stops at first unbuilt), blocks + cache mark, step text (compactMessageTask / compactMergeTask with 512-dash ruler), image attached for image leaves — memory_compactor::c4_c5_c13_the_compaction_request, c4_merge_request_cache_mark_and_image_leaf
@@ -54,7 +54,7 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 - [x] C10 Failed node → `failed` map, retried at the next message, or after 5 s when a turn waits — memory_compactor::c10_failed_map_retries
 - [x] C11 Prefix-writing lock: a call whose marked prefix another call is writing waits for its first response (≤ 90 s) — memory_compactor::c11_prefix_writing_lock
 - [x] C12 Node record {l,i,text,size,requestId,tries,by}; `by` when a child builds a parent's node; node event to every task whose timeline holds the tree — memory_compactor::b9_c12_want_builds_the_inherited_parent (`by`, node events to holders)
-- [~] C13 Compactor model/effort from the builder's settings (default Haiku 5.5, xhigh) — memory_compactor::c4_c5_c13_the_compaction_request (builder's compactor model/effort); the hub default (Haiku 5.5, xhigh) is not asserted
+- [x] C13 Compactor model/effort from the builder's settings (default Haiku 5.5, xhigh) — memory_compactor::c4_c5_c13_the_compaction_request (builder's settings), c13_default_compactor_settings (Haiku 5.5, xhigh)
 - [x] C14 Imported v2 tasks named once (titleTask JSON) with TITLE_VERSION — memory_compactor::c14_imported_tasks_titled_once
 
 ## D. Tasks engine (spec-tasks, optchat.ts Engine)
