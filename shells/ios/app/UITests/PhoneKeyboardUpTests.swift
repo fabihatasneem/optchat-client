@@ -45,6 +45,8 @@ final class PhoneKeyboardUpTests: XCTestCase {
         let chatUp2 = app.keyboards.count > 0 ? at(f.width / 2, f.height * 0.537) : chat
         chatUp2.press(forDuration: 0.6); sleep(1); shot("23-long-press-up")
         chat.tap(); sleep(1); shot("24-after-cancel") // ✕ in the chat button's place
+        chat.tap(); sleep(3); shot("24b-after-second-x") // a second ✕ always ends it (Finishing… meanwhile)
+        if env["SKIP_HOLD"] == "1" { feed.tap(); sleep(1); return }
         // 3. hold-to-talk with the keyboard up (short), then clear whatever it heard
         chat.tap(); sleep(2)
         let chatUp3 = app.keyboards.count > 0 ? at(f.width / 2, f.height * 0.537) : chat
