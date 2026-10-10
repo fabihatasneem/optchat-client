@@ -175,11 +175,12 @@ impl InputState {
     pub fn value(&self) -> SharedString {
         SharedString::from(self.content.clone())
     }
-    pub fn set_value(&mut self, v: impl Into<SharedString>, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_value(&mut self, v: impl Into<SharedString>, window: &mut Window, cx: &mut Context<Self>) {
         let v = v.into().to_string();
         if v == self.content {
             return;
         }
+        window.notify_text_input_changed(&self.focus_handle);
         self.content = v;
         self.selected = self.content.len()..self.content.len();
         self.reversed = false;
@@ -194,6 +195,8 @@ impl InputState {
     }
     pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle, cx);
+        // iOS: the on-screen keyboard (a no-op on the desktop)
+        window.request_virtual_keyboard();
         self.want_focus = true;
         cx.notify();
     }
@@ -246,6 +249,7 @@ impl InputState {
         self.reversed = false;
         self.marked = None;
         self.goal_x = None;
+        _window.notify_text_input_changed(&self.focus_handle);
         cx.emit(InputEvent::Change);
         cx.notify();
         true
@@ -550,6 +554,7 @@ impl InputState {
 
     fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle, cx);
+        window.request_virtual_keyboard();
         let Some(l) = self.layout.as_ref() else { return };
         let local = point(e.position.x - l.bounds.left(), e.position.y - l.bounds.top() + self.scroll_y);
         let o = self.offset_for(local);
@@ -637,6 +642,40 @@ impl EntityInputHandler for InputState {
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
         self.marked.as_ref().map(|r| self.range_to_utf16(r))
     }
+    fn text_length_utf16(&mut self, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        Some(self.content.encode_utf16().count())
+    }
+    fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
+        !self.disabled
+    }
+    fn set_selected_text_range(&mut self, r: Range<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected = self.range_from_utf16(&r);
+        self.reversed = false;
+        window.notify_text_selection_changed(&self.focus_handle);
+        cx.notify();
+    }
+    fn text_input_configuration(&mut self, _: &mut Window, _: &mut Context<Self>) -> TextInputConfiguration {
+        // tokens: no autocorrect or suggestions; prose: the keyboard's usual help
+        TextInputConfiguration { autocorrect: !self.masked, suggestions: !self.masked, autocapitalize: if self.masked || !self.multi_line { Autocapitalize::None } else { Autocapitalize::Sentences }, ..Default::default() }
+    }
+    fn selection_bounds_for_range(&mut self, r: Range<usize>, bounds: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Vec<Bounds<Pixels>> {
+        // one rectangle per visual row the range covers
+        let r = self.range_from_utf16(&r);
+        let Some(lh) = self.layout.as_ref().map(|l| l.line_height) else { return vec![] };
+        let (Some(a), Some(b)) = (self.point_for(r.start), self.point_for(r.end)) else { return vec![] };
+        let off = point(bounds.left(), bounds.top() - self.scroll_y);
+        let w = bounds.size.width;
+        let rect = |x0: Pixels, y0: Pixels, x1: Pixels, y1: Pixels| Bounds::from_corners(point(off.x + x0, off.y + y0), point(off.x + x1, off.y + y1));
+        if (a.y - b.y).abs() < px(1.) {
+            return vec![rect(a.x, a.y, b.x.max(a.x + px(1.)), a.y + lh)];
+        }
+        let mut v = vec![rect(a.x, a.y, w, a.y + lh)];
+        if b.y - a.y > lh + px(0.5) {
+            v.push(rect(px(0.), a.y + lh, w, b.y));
+        }
+        v.push(rect(px(0.), b.y, b.x, b.y + lh));
+        v
+    }
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.marked = None;
         cx.notify();
@@ -659,7 +698,7 @@ impl EntityInputHandler for InputState {
         let n = text.encode_utf16().count();
         self.selected = sel.map(|s| self.range_from_utf16(&(base + s.start.min(n)..base + s.end.min(n)))).unwrap_or(start + text.len()..start + text.len());
         self.reversed = false;
-        let _ = w;
+        w.notify_text_input_changed(&self.focus_handle);
         cx.emit(InputEvent::Change);
         cx.notify();
     }
