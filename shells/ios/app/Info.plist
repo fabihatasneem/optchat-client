@@ -35,6 +35,8 @@
 	<key>UIStatusBarStyle</key><string>UIStatusBarStyleLightContent</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key><true/>
 	<!-- only the system's TLS (Security.framework via native-tls): exempt from export compliance documentation -->
+	<key>NSCameraUsageDescription</key>
+	<string>OptChat uses the camera only to scan an engine token's QR code.</string>
 	<key>NSMicrophoneUsageDescription</key><string>OptChat records your voice while you dictate a message.</string>
 	<key>ITSAppUsesNonExemptEncryption</key><false/>
 </dict>

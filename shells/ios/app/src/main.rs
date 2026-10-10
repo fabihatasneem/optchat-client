@@ -39,6 +39,51 @@ mod shell {
         diag(&format!("seed: prefs written, token stored: {ok}"));
     }
 
+    /// the QR hook (optchat_ui::platform): native/qr_scanner.m presents the camera; only oc1 engine tokens end a scan
+    mod qr {
+        use gpui::{App, AppContext, Window};
+        use optchat_ui::platform::{Platform, ScanDone};
+        use std::ffi::{c_char, c_void, CStr};
+        type Tx = tokio::sync::oneshot::Sender<Option<String>>;
+        unsafe extern "C" {
+            fn optchat_can_scan_qr() -> bool;
+            fn optchat_scan_qr(cb: extern "C" fn(*const c_char, *mut c_void), ctx: *mut c_void) -> bool;
+        }
+        /// what the scanner accepts: a whole oc1 token (protocol-tokens-v1: 3 parts, base64url JSON header, v 1)
+        #[unsafe(no_mangle)]
+        pub extern "C" fn optchat_qr_valid(s: *const c_char) -> bool {
+            if s.is_null() { return false; }
+            let Ok(t) = unsafe { CStr::from_ptr(s) }.to_str() else { return false };
+            t.starts_with("oc1.") && t.split('.').count() == 3 && optchat_client::client::parse_engine_token(t).is_ok()
+        }
+        extern "C" fn on_done(s: *const c_char, ctx: *mut c_void) {
+            let tx = unsafe { Box::from_raw(ctx as *mut Tx) };
+            let text = (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned());
+            super::diag(&format!("qr: {}", if text.is_some() { "scanned a token" } else { "closed" }));
+            let _ = tx.send(text);
+        }
+        pub struct Ios;
+        impl Platform for Ios {
+            fn can_scan_qr(&self) -> bool {
+                unsafe { optchat_can_scan_qr() }
+            }
+            fn scan_qr(&self, window: &mut Window, cx: &mut App, done: ScanDone) {
+                let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+                let ctx = Box::into_raw(Box::new(tx)) as *mut c_void;
+                if !unsafe { optchat_scan_qr(on_done, ctx) } {
+                    drop(unsafe { Box::from_raw(ctx as *mut Tx) });
+                    return done(None, window, cx);
+                }
+                let handle = window.window_handle();
+                cx.spawn(async move |cx| {
+                    let text = rx.await.ok().flatten();
+                    let _ = cx.update_window(handle, move |_, window, cx| done(text, window, cx));
+                })
+                .detach();
+            }
+        }
+    }
+
     /// a line in Documents/diag.log (outcomes only, never values)
     pub fn diag(line: &str) {
         if let Ok(home) = std::env::var("HOME") {
@@ -100,12 +145,18 @@ mod shell {
     pub fn main() {
         LAUNCH.get_or_init(std::time::Instant::now);
         let prefs_path = prefs_path();
+        // OPTCHAT_RESET=1 (debug builds, tests): start from no prefs, as a fresh install would
+        if cfg!(debug_assertions) && std::env::var("OPTCHAT_RESET").is_ok_and(|v| v == "1") {
+            let _ = std::fs::remove_file(&prefs_path);
+            diag("reset: prefs removed");
+        }
         seed(&prefs_path);
         let rt: &'static tokio::runtime::Runtime = Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("optchat-client").enable_all().build().expect("tokio runtime")));
 
         gpui_platform::application().with_assets(Assets).run(move |cx: &mut App| {
             kit::init(cx);
             ui::register_fonts(cx, assets::ASSETS);
+            optchat_ui::platform::install(cx, std::rc::Rc::new(qr::Ios));
             ui::set_executor(cx.background_executor().clone());
             let prefs: state::Prefs = std::fs::read_to_string(&prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
             theme::init(cx, prefs.theme.clone(), prefs.follow_system, cx.window_appearance());
@@ -132,6 +183,14 @@ mod shell {
                 s.stats.launch_ms = LAUNCH.get().unwrap().elapsed().as_secs_f64() * 1000.0;
                 s.start(tx, rx, cx)
             });
+            // OPTCHAT_SEED_OC1 (base64 of an oc1 engine token; tests): added as the Add engine panel would
+            if let Some(tok) = std::env::var("OPTCHAT_SEED_OC1").ok().and_then(|b| {
+                use base64::Engine;
+                String::from_utf8(base64::engine::general_purpose::STANDARD.decode(b.trim()).ok()?).ok()
+            }) {
+                state.update(cx, |s, cx| s.add_engine_token("", &tok, cx));
+                diag("seed: oc1 engine token added");
+            }
         });
     }
 }

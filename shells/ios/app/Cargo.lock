@@ -3659,6 +3659,7 @@ name = "optchat-ios"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "cc",
  "gpui",
  "gpui_ios",
  "gpui_platform",
