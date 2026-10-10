@@ -5,6 +5,10 @@ and against the hub. Screenshots are in `docs/shots/` (§11).
 
 ## 1. Recommendation
 
+> **Superseded by §12 (2026-10-10).** The user asked for the decision to rest on measured performance and efficiency
+> only. The bake-off in §12 favours **GPUI on iOS provisionally**, to be confirmed by a device run with a pre-set
+> decision rule. The text below is the first evaluation, which also weighed code sharing and effort.
+
 **A native SwiftUI app, with UIKit where it matters (the chat feed and the composer), and its own small Swift
 protocol layer (`OptChatKit`).** The wire contract is shared with the desktop client through golden JSON fixtures
 run by both test suites, not through shared code.
@@ -367,3 +371,152 @@ Screenshots (`docs/shots/`):
 | `ipad-narrow-window.png` | iPad window resized to 375 pt: phone layout |
 | `gpui-ios-probe.png`, `gpui-probe-strip.png` | GPUI on iOS (zed#63068): launch, flicks, typing |
 | `jpg/*.jpg` | phone-legible copies (~1000 px), one device per image |
+
+## 12. Bake-off: SwiftUI/UIKit vs GPUI on iOS, measured
+
+The user's rule: decide on measured performance and efficiency only (frame times, CPU, energy, memory, launch,
+input latency), not on code sharing or effort. GPUI may be upgraded; the latest upstream with the iOS backend is
+preferred.
+
+**The two prototypes, with the same scope and the same data:**
+
+- **UIKit** (`bench/uikit`, the stack PLAN §4 recommends for the feed):
+  - `UICollectionView` (compositional list, self-sizing cells), one TextKit `UILabel` per entry, attributed strings
+    built lazily and cached.
+  - Composer bar pinned to `view.keyboardLayoutGuide`; the list keeps its end pinned when the keyboard moves it.
+- **GPUI** (`bench/gpui`, built by `bench/gpui/build.sh` into the zed checkout):
+  - Upstream zed `gpui-ios-platform` = zed#63068 at 97dc71d (2026-10-09), i.e. current GPUI + the `gpui_ios`
+    backend.
+  - A bottom-aligned `list`, one element tree per entry, `StyledText` with highlights cached per item. GPUI's own
+    `TextInput` (examples/input.rs, IME marked text) as the composer.
+  - **Keyboard avoidance implemented:** the backend reports the keyboard as `window.insets().ime`. The root pads its
+    bottom by `insets().effective().bottom`, animated over 250 ms with an ease-out cubic, and the bottom-aligned list
+    keeps its end pinned. The check after each keyboard animation (last entry inside the viewport, composer above the
+    keyboard) passes, as it does for UIKit.
+  - Built with `runtime_shaders`: Metal shaders compile at launch, because the offline Metal Toolchain is a separate
+    download not taken here (see the launch caveat below).
+- **Fixture:** `bench/make_fixture.py` turns a one-time export from the `test-ios` workspace
+  (`tools/probe -export`, read-only `log.range`) into `blocks.json`.
+  - Markdown-lite is parsed once there, so the apps differ only in their UI stack.
+  - The long task (main chat + #67 + #53) has 2,151 entries: 177 user, 337 assistant markdown, 712 tool cards,
+    724 tool outputs, 201 report cards; 1,469 code blocks, 2,352 list items.
+  - The four other tasks have 64–202 entries.
+  - The fixture holds the user's real chat text, so it is gitignored; regenerate it with the two commands above.
+
+**Scenario** (both apps run it themselves from first frame; `bench/run.sh` drives the keyboard part via XCUITest):
+
+| phase | what |
+|---|---|
+| launch | process creation (`kinfo_proc` / `proc_pidinfo` start time) → first frame with the long task on screen |
+| idle | 5 s, nothing changing (our frame callbacks off; GPUI pauses its display link by itself) |
+| scroll | 8 s programmatic scroll up through the long task at 2,000 pt/s (identical, repeatable; not a touch fling) |
+| stream | 8 s, a live reply growing at 30 tokens/s at the bottom (pinned) |
+| stream + scroll | 8 s, streaming continues while scrolling up at 1,000 pt/s |
+| task switch | B C D E A, three rounds: request → first frame showing the task |
+| keyboard (iPhone) | XCUITest taps the composer (coordinates, same for both), types 30 characters; the app dismisses the keyboard 2.5 s after the last key; show and hide animations recorded for 0.8 s each |
+
+**Metrics** (identical definitions in `Metrics.swift` and `metrics.rs`):
+- **Frame interval:** the time between frame callbacks. UIKit: its CADisplayLink. GPUI: `on_next_frame`, which runs
+  right after each rendered frame.
+- **Hitch:** an interval over 1.5× the screen's frame time.
+- **Main-thread busy per frame:** a CFRunLoop observer sums AfterWaiting → BeforeWaiting spans.
+- **CPU:** `getrusage` for the process, `thread_info` for the main thread, as % of one core over the phase.
+- **Memory:** `phys_footprint`.
+- **Keystroke → frame:** input → the frame that carries it. UIKit: the Core Animation commit, via a one-shot
+  observer after CA's commit observer. GPUI: its next rendered frame. Both then wait for the same vsync.
+
+**What the simulator can't tell us, and how to measure it on a device:**
+- **Not measurable in the simulator:**
+  - Energy. "The Power Profiler instrument is not supported on the Simulator" (xctrace, verified).
+  - GPU time and render-server hitches. The simulator renders through the Mac's GPU, and the Animation Hitches
+    template needs a device.
+  - 120 Hz. The simulator runs at 60 Hz, so ProMotion behaviour is unknown; both apps set
+    `CADisableMinimumFrameDurationOnPhone`.
+  - Thermal behaviour, real touch-to-photon latency, and real launch costs (dyld from flash, precompiled shaders).
+  - CPU percentages here are the Mac's cores, so only relative numbers carry over.
+- **Device run** (needs an Apple Developer team; the harness is ready):
+  1. **UIKit:** `xcodebuild -project bench/uikit/OptBenchUIKit.xcodeproj -scheme OptBenchUIKit -configuration Release
+     -destination 'generic/platform=iOS' DEVELOPMENT_TEAM=<team> -allowProvisioningUpdates`.
+  2. **GPUI:**
+     - Build with `DEVICE=1 bench/gpui/build.sh`.
+     - For a fair launch, first fetch the Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`) and drop
+       `--features gpui_platform/runtime_shaders` from the script.
+     - Embed a provisioning profile and sign: `cp <profile> OptBenchGPUI.app/embedded.mobileprovision; codesign -f -s
+       "Apple Development: …" --entitlements <ent.plist> OptBenchGPUI.app`.
+  3. **Install and run:** `xcrun devicectl device install app --device <udid> <app>`, then `xcrun devicectl device
+     process launch --device <udid> <bundle id>`. After ~45 s, fetch the results with `xcrun devicectl device copy
+     from --device <udid> --domain-type appDataContainer --domain-identifier <bundle id> --source Documents/bench.json
+     --destination bench/results/raw/<app>-<device>-<n>.json`, then run `python3 bench/summarize.py`.
+  4. **Keyboard + keystrokes:** run `testBenchKeyboard` on the device. It polls a host file in the simulator; on a
+     device, drop `BENCH_OUT` and wait a fixed 60 s. iPad keyboard phases need a real iPad (see below).
+  5. **Energy:** `xcrun xctrace record --template 'Power Profiler' --device <udid> --attach <pid> --time-limit 60s`
+     during a run.
+     - Phases start at fixed offsets from the first frame: idle +1 s, scroll +6 s, stream +14.5 s,
+       stream + scroll +22.5 s, switches +31 s.
+     - For battery drain, loop stream + scroll for 30 min at fixed brightness on battery, once per app, and compare
+       battery level (and MetricKit `MXCPUMetric`/`MXGPUMetric` from TestFlight builds).
+  6. **Hitches as the render server sees them:** the `Animation Hitches` template, the same 60 s window.
+
+### Results (simulator: iPhone 18 Pro and iPad Pro 13" M5, iOS 27.0, 60 Hz, 3 runs per app per device, medians)
+
+Full table: `bench/results/summary.md`; raw per-run JSON: `bench/results/raw/`. The UIKit streaming path was tuned
+once, so it is the path a competent UIKit engineer would write: update the visible cell in place and let iOS 16+
+self-sizing invalidation resize it. The first version, which re-applied the 2,152-item snapshot per token, cost 23%
+CPU while streaming; it is kept in `bench/results/uikit-v1/`.
+
+| metric (iPhone · iPad) | UIKit | GPUI | better |
+|---|---|---|---|
+| scroll 2000 pt/s: hitches in 8 s | 6 · 10 | 1 · 2 | GPUI |
+| scroll: frame interval p99 (ms) | 27.3 · 32.8 | 18.0 · 17.1 | GPUI |
+| scroll: main-thread busy p50 / p99 (ms) | 0.8 / 8.5 · 0.9 / 22.6 | 1.6 / 12.2 · 2.6 / 13.4 | mixed (UIKit typical, GPUI worst case on iPad) |
+| scroll: CPU, process (% of a core) | 9.8 · 12.1 | 14.8 · 19.7 | UIKit |
+| stream 30 tok/s: CPU, process | 15.7 · 11.6 | 9.6 · 15.2 | split |
+| stream + scroll: CPU, process / hitches | 19.0 / 2 · 16.5 / 2 | 17.1 / 0 · 21.9 / 0 | split CPU; GPUI on hitches |
+| idle: main thread (% of a core) | 0.37 · 0.63 | 0.94 · 1.21 | UIKit (both small) |
+| memory after launch / after 15 switches (MB) | 46 / 76 · 41 / 90 | 24 / 56 · 25 / 53 | GPUI (−25 to −40%) |
+| task switch p50 / max (ms) | 15.6 / 64 · 22.2 / 81 | 13.6 / 13.7 · 13.6 / 15.1 | GPUI |
+| keystroke → frame p50 / p95 (ms, iPhone) | 2.8 / 4.2 | 0.35 / 0.56 | GPUI |
+| keyboard show: hitches / busy p99 (ms, iPhone) | 2 / 26.3 | 1 / 13.7 | GPUI |
+| keyboard: last entry + composer visible | yes | yes (after the fix above) | tie |
+| launch → first frame (ms) | 2,659 · 3,529 | 2,596 · 2,551 | tie / GPUI (simulator launch is noisy; GPUI still compiles shaders at launch here) |
+
+How to read it:
+- **GPUI was smoother in every animated phase.** It had fewer hitches and a tighter p99. UIKit's hitches come from
+  first-time self-sizing of long attributed-text cells (main-thread spikes of 8–23 ms); GPUI's list measures
+  lazily per frame.
+- **GPUI used less memory everywhere,** 25–40% less. Core Animation keeps a backing store per cell layer; GPUI keeps
+  glyph atlases and draws everything each frame.
+- **Task switches are flat in GPUI** (~13.6 ms every time). UIKit spikes to 64–81 ms on the switch back to the
+  2,151-entry task (`reloadData` plus `scrollToItem` across estimated sizes).
+- **UIKit used less main-thread and process CPU while scrolling and idle.** Part of that is structural: UIKit hands
+  rasterization and compositing to the render server, outside the app's process, so the app's CPU numbers
+  understate its total. GPUI renders in-process and through its own Metal pipeline. Streaming CPU split by device.
+- **The simulator cannot see the decisive cost: GPU and energy.** GPUI redraws the whole window on every change.
+  That is 30 full-window redraws a second while a reply streams, and every frame while scrolling. Core Animation
+  re-renders only the changed layer and composites cached bitmaps. On a phone that difference shows up as GPU power
+  and battery, which only a device can measure (§12, device run, steps 5–6). The simulator also runs at 60 Hz, so
+  120 Hz ProMotion headroom is untested for both.
+
+### Recommendation from the numbers
+
+On everything the simulator can measure, **GPUI on iOS is at least as fast as UIKit and leaner in memory**. It wins
+on smoothness, task switching, input latency and memory, and costs more CPU only while scrolling and idle (≤ +8
+points of one core). Nothing measured rules it out. So **the numbers favour GPUI provisionally**, which replaces §1's
+UIKit recommendation (§1 weighed sharing and effort, which are now out of scope).
+
+The choice is final only after a device run. Decision rule, set before seeing device numbers:
+- **Keep GPUI if**, on an iPhone 15 Pro or later at 120 Hz, over the same scenario:
+  - (a) energy (Power Profiler, whole scenario and the stream phase) is ≤ 1.15× UIKit's;
+  - (b) the render-server hitch ratio (Animation Hitches) is ≤ UIKit's;
+  - (c) launch with precompiled shaders is ≤ UIKit's + 150 ms;
+  - (d) a 30-minute stream + scroll battery loop drains ≤ 1.15× UIKit's.
+- **Otherwise UIKit.** The SwiftUI shell, protocol layer and layout rule from this repo carry over either way.
+
+What GPUI on iOS still needs for the product (not performance, listed so the device run tests a realistic build):
+- keyboard avoidance as done here, or upstreamed into the backend;
+- precompiled shaders (the Metal Toolchain download);
+- the backend is unmerged (zed#63068); the alternative is Zedra's fork;
+- system dictation through the input view, edit menus and selection handles, which still need checking on a device.
+
+Accessibility is not a requirement (user decision), so the backend's near-empty accessibility tree no longer
+counts against it.
