@@ -3,11 +3,15 @@
 import { App, check, failed } from "./lib/app.ts";
 import { sleep } from "./lib/cua.ts";
 const a = await App.launch({ env: { OPTCHAT_TEST_HOOKS: "1" } });
-try { await a.palette("Test: run a bash tool"); } catch (e) { check(false, String(e).slice(0, 300)); } // a tool process group, like a turn's bash call
+let stalled = "";
+try { await a.palette("Test: run a bash tool"); } catch (e) { // a tool process group, like a turn's bash call
+  check(false, String(e).slice(0, 300));
+  if (String(e).includes("window not drawing")) stalled = " [window not drawing: the hook never ran]";
+}
 let kids: string[] = [];
 for (let i = 0; i < 60 && kids.length === 0; i++) { await sleep(500); kids = a.children(); }
 const names = kids.map((p) => new TextDecoder().decode(new Deno.Command("ps", { args: ["-o", "comm=", "-p", p] }).outputSync().stdout).trim().split("/").pop());
-check(kids.length > 0, `the app runs child processes before quitting (${kids.length}: ${names.join(", ")})`);
+check(kids.length > 0, `the app runs child processes before quitting (${kids.length}: ${names.join(", ")})${kids.length ? "" : stalled}`);
 let log = "";
 try { log = Deno.readTextFileSync(`${a.dir}/optchat-gpui/engine.log`); } catch { /* none */ }
 check(/database .* build /.test(log), `the engine log file is written (${log.split("\n").filter(Boolean).length} lines in optchat-gpui/engine.log)`);
