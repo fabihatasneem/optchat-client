@@ -22,5 +22,8 @@ try {
   await a.shot("smoke-01-launch");
   await turn("Claude Haiku", "claude-haiku-5-5", "pong-gpui-1");
   await turn("GPT-6-Luna", "gpt-6-luna", "pong-gpui-2");
+  // the shared test workspace back on its default (Haiku low)
+  await a.palette("Model: Claude Haiku");
+  await a.waitFor(() => st().model === "claude-haiku-5-5", 8000, "model back to Haiku");
 } catch (e) { check(false, String(e).slice(0, 400)); await a.shot("smoke-fail"); } finally { await a.quit(); }
 Deno.exit(failed() ? 1 : 0);

@@ -113,7 +113,7 @@ try {
     await a.waitFor(() => st().settingsGlobal === false, 3000, "task tab");
     await sleep(500);
     await a.shot("panels-13-settings-task");
-    check(true, "settings Global and Task tabs");
+    check(true, "settings App and Workspace tabs");
   });
   await step("narrow", async () => {
     await a.key("cmd+1");

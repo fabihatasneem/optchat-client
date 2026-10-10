@@ -44,6 +44,7 @@ const ALL = [
   { name: "parity", models: false },
   { name: "live", models: true },
   { name: "sync", models: true },
+  { name: "engine", models: true },
 ];
 const args = Deno.args.filter((x) => !x.startsWith("--"));
 const offline = Deno.args.includes("--offline");
@@ -83,6 +84,9 @@ for (const s of suites) {
   out.push(`\n== ${s.name}: ${r.lines.length - fl.length} ok, ${r.fails} failed, ${Math.round((performance.now() - t0) / 1000)} s${note}`, ...r.lines);
 }
 out.push(`\nTOTAL: ${bad ? `${bad} failed` : "all passed"}`);
-Deno.writeTextFileSync(`${ROOT}/shots/e2e-results.txt`, out.join("\n") + "\n");
-console.log(`\n${bad ? `${bad} failed` : "all passed"} (shots/e2e-results.txt)`);
+// OPTCHAT_E2E_HEADLESS: input through the app's test channel, no Computer Use, no screenshots (a locked screen)
+const file = Deno.env.get("OPTCHAT_E2E_HEADLESS") ? "e2e-results-headless.txt" : "e2e-results.txt";
+if (Deno.env.get("OPTCHAT_E2E_HEADLESS")) out.splice(1, 0, "headless: input through the test channel (native events to the app's own view), frames laid out by the app, no screenshots");
+Deno.writeTextFileSync(`${ROOT}/shots/${file}`, out.join("\n") + "\n");
+console.log(`\n${bad ? `${bad} failed` : "all passed"} (shots/${file})`);
 Deno.exit(bad ? 1 : 0);

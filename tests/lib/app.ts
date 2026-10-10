@@ -34,13 +34,16 @@ export class App {
     try { Deno.removeSync(me.probes); } catch { /* none */ }
     try { Deno.removeSync(`${me.probes}.state.json`); } catch { /* none */ }
     const conn = o.bare ? {} : { OPTCHAT_ENGINE: HUB, OPTCHAT_ENGINE_NAME: "reframe.dev", OPTCHAT_CONNECT: [me.db, ...(o.also ?? [])].join(",") };
-    const env = { OPTCHAT_PROBES: me.probes, OPTCHAT_PREFS_DIR: me.dir, OPTCHAT_TOKEN_DIR: me.dir, OPTCHAT_TEST_TOKENS: TOKENS, ...conn, ...(o.env ?? {}) };
+    const hl = o.headless || Deno.env.get("OPTCHAT_E2E_HEADLESS") ? { OPTCHAT_HEADLESS: "1", OPTCHAT_TEST_HOOKS: "1" } : {};
+    const env = { ...hl, OPTCHAT_PROBES: me.probes, OPTCHAT_PREFS_DIR: me.dir, OPTCHAT_TOKEN_DIR: me.dir, OPTCHAT_TEST_TOKENS: TOKENS, ...conn, ...(o.env ?? {}) };
     const args = ["-n", "-W", "--stderr", `${me.dir}/stderr.txt`];
     for (const [k, v] of Object.entries(env)) args.push("--env", `${k}=${v}`);
     args.push(`${ROOT}/dist/OptChat.app`);
     await killLeftovers();
     me.proc = new Deno.Command("open", { args, stdout: "null", stderr: "null" }).spawn(); // -W: returns when the app quits
-    me.headless = !!o.headless;
+    // OPTCHAT_E2E_HEADLESS=1: every suite without Computer Use (a locked screen): input through the app's test
+    // channel (native events to its own view), frames laid out by the app itself, no screenshots
+    me.headless = !!o.headless || !!Deno.env.get("OPTCHAT_E2E_HEADLESS");
     if (!me.headless) me.cua = await Cua.start();
     if (o.bare) await me.waitFor(() => me.state()?.pid, 30_000, "app up");
     else await me.waitFor(() => me.state()?.ready && me.state()?.loaded, 30_000, "app ready");
@@ -52,7 +55,8 @@ export class App {
   async cmd(...cmds: Record<string, unknown>[]) {
     const p = `${this.probes}.cmd`;
     for (let i = 0; i < 40; i++) { try { Deno.statSync(p); await sleep(100); } catch { break; } }
-    Deno.writeTextFileSync(p, JSON.stringify(cmds));
+    Deno.writeTextFileSync(`${p}.tmp`, JSON.stringify(cmds));
+    Deno.renameSync(`${p}.tmp`, p);
     for (let i = 0; i < 40; i++) { try { Deno.statSync(p); await sleep(100); } catch { break; } }
     await sleep(150);
   }
@@ -82,6 +86,7 @@ export class App {
   }
   /** run a Computer Use action; if the session lost the app, attach again (getApp + fresh state) and retry once */
   async act(code: string): Promise<{ text: string; images: string[] }> {
+    if (this.headless) return await this.#actHeadless(code);
     for (let attempt = 0; ; attempt++) {
       const r = await this.cua.js(code);
       if (!r.isError) return r;
@@ -91,8 +96,24 @@ export class App {
       await sleep(300);
     }
   }
+  /** the few raw Computer Use calls the suites make, as test-channel input (screen pixels → points) */
+  async #actHeadless(code: string): Promise<{ text: string; images: string[] }> {
+    const pt = (a: string, b: string) => [Number(a) / SCALE, Number(b) / SCALE - TITLEBAR];
+    let m = code.match(/app\.click\(\[(\d+), (\d+)\](?:, \{ mouseButton: "(\w+)" \})?\)/);
+    if (m) { const [x, y] = pt(m[1], m[2]); await this.cmd({ op: "click", x, y, button: m[3] ?? "left" }); return { text: "", images: [] }; }
+    m = code.match(/app\.drag\(\[(\d+), (\d+)\], \[(\d+), (\d+)\]\)/);
+    if (m) { const [x0, y0] = pt(m[1], m[2]); const [x1, y1] = pt(m[3], m[4]); await this.cmd({ op: "drag", x0, y0, x1, y1 }); return { text: "", images: [] }; }
+    if (/pressKey\("Escape"\)/.test(code)) { await this.cmd({ op: "key", keys: "Escape" }); return { text: "", images: [] }; }
+    throw new Error(`headless: not available without Computer Use: ${code.slice(0, 80)}`);
+  }
   px(x: number, y: number): [number, number] { return [Math.round(x * SCALE), Math.round((y + TITLEBAR) * SCALE)]; }
   async clickAt(x: number, y: number, opts = "") {
+    if (this.headless) {
+      const button = /right/.test(opts) ? "right" : /middle/.test(opts) ? "middle" : "left";
+      await this.cmd({ op: "click", x, y, button });
+      await sleep(150);
+      return;
+    }
     const [a, b] = this.px(x, y);
     await this.act(`await app.click([${a}, ${b}]${opts ? `, ${opts}` : ""}); 1`);
     await sleep(250);
@@ -102,23 +123,33 @@ export class App {
     const p = await this.waitProbe(name, o.wait ?? 5000);
     await this.clickAt(p[0] + (o.dx ?? p[2] / 2), p[1] + (o.dy ?? p[3] / 2), o.right ? `{ mouseButton: "right" }` : "");
   }
-  async type(text: string) { await this.ensureActive(); await this.act(`await app.typeText(${JSON.stringify(text)}); 1`); await sleep(150); }
+  async type(text: string) {
+    if (this.headless) { await this.cmd({ op: "type", text }); return; }
+    await this.ensureActive(); await this.act(`await app.typeText(${JSON.stringify(text)}); 1`); await sleep(150); }
   /** keys reach only the key window: if another app took the focus, click a neutral spot (the status text) first */
   async ensureActive() {
-    if (this.state()?.active !== false) return;
+    if (this.headless || this.state()?.active !== false) return;
     console.log("  (window inactive: clicking the status bar to activate it)");
     const p = this.probe("status.text") ?? this.probe("statusbar");
     if (p) await this.clickAt(p[0] + Math.min(p[2] / 2, 30), p[1] + p[3] / 2);
     await this.waitFor(() => this.state()?.active !== false, 3000, "window active").catch(() => {});
   }
-  async key(k: string) { await this.ensureActive(); await this.act(`await app.pressKey(${JSON.stringify(k)}); 1`); await sleep(200); }
+  async key(k: string) {
+    if (this.headless) { await this.cmd({ op: "key", keys: k }); await sleep(100); return; }
+    await this.ensureActive(); await this.act(`await app.pressKey(${JSON.stringify(k)}); 1`); await sleep(200); }
   async scroll(name: string, dir: "up" | "down", pages = 3) {
     const p = await this.waitProbe(name);
+    if (this.headless) {
+      await this.cmd({ op: "scroll", x: p[0] + p[2] / 2, y: p[1] + p[3] / 2, dy: (dir === "up" ? 1 : -1) * 120 * pages });
+      await sleep(300);
+      return;
+    }
     const [a, b] = this.px(p[0] + p[2] / 2, p[1] + p[3] / 2);
     await this.act(`await app.scroll([${a}, ${b}], "${dir}", ${pages}); 1`);
     await sleep(300);
   }
   async shot(name: string): Promise<string> {
+    if (this.headless) return `${SHOTS}/${name}.jpg (headless: none)`;
     const r = await this.act(`await app.getScreenshot()`);
     const path = `${SHOTS}/${name}.jpg`;
     if (r.images[0]) Deno.writeFileSync(path, Uint8Array.from(atob(r.images[0]), (ch) => ch.charCodeAt(0)));

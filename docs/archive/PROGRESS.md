@@ -1,6 +1,30 @@
 # PROGRESS — OptChat for Mac (GPUI)
 
-## Client mode (current)
+## Engines and workspaces (current, phase 4)
+The app connects to OptChat engines: one websocket per engine (and client token) to `/engine/ws`, carrying every
+connected workspace (`connect` / `disconnect`, `ws` on every message). Engines and connections are app settings
+(`~/Library/Application Support/com.reframe.optchat.gpui/prefs.json`), tokens in the Keychain. Background workspaces
+stay subscribed; a switch swaps their state in (0.003 ms + one frame). Workspace menu under the top-left icon,
+Notifications rail view, notice dots in the status bar, no toasts, Settings Workspace / App, root layout by window
+size. Code: client.rs (EngineConn + per-workspace Client), state.rs (WsData swap, route, notices), workspaces.rs
+(menu, dialogs), notices_view.rs, tokens.rs, testcmd.rs (test channel).
+- Tests: only `test-gpui-a` / `test-gpui-b` (tokens in data/test-tokens.json, git-ignored, never printed). App env
+  for tests: OPTCHAT_ENGINE (+ _NAME), OPTCHAT_CONNECT, OPTCHAT_TEST_TOKENS, OPTCHAT_TOKEN_DIR (file token store
+  instead of the Keychain: a rebuilt ad hoc binary would make the Keychain ask, and tests answer no system dialog).
+- tests/engine.ts: phase 4 end to end through the app's own handlers (22/22): add engine, connect a + b, switch,
+  a Haiku child with a tiny budget in b → warning → dot on the icon, notifications read (seen read by another client),
+  relaunch restores, disconnect, local relay killed twice → offline in 154 / 458 ms, back in 3.8 / 3.5 s.
+- tests/workspaces.ts: the same with Computer Use and screenshots (menu, notifications, status bar, + ~1000 px JPEG
+  copies). **Not yet run**: the screen was locked during this session (Computer Use: cgWindowNotFound; macOS draws
+  nothing). Run `deno run -A tests/workspaces.ts` (DENO_TLS_CA_STORE=system) with the screen unlocked.
+- Headless mode (OPTCHAT_E2E_HEADLESS=1): every suite without Computer Use — input through the test channel
+  (keystrokes via Window::dispatch_keystroke, mouse/scroll as NSEvents handed to our own view: GPUI's real input
+  path), frames laid out by the app itself every 100 ms (Window::draw, nothing presented), no screenshots; results
+  in shots/e2e-results-headless.txt. AX menu-bar checks need Computer Use.
+- Protocol note: a client token authenticates the whole socket, so two connections with different tokens to one
+  engine need two sockets; a token per `connect` would allow one socket per engine as the spec intends.
+
+## Client mode (hub era)
 The app is a pure client of the web app's hub (https://chat.reframe.dev): one websocket like the browser's page
 (snapshot on connect / open, events, commands, rpc; reconnect with backoff + resnapshot; offline state in the status
 bar), images from /blob, dictation over /stt, the microphone in the app. `crates/proto` holds the wire types; the app

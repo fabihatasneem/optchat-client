@@ -323,13 +323,30 @@ impl Workspace {
         use crate::ui::anim;
         if probes_on() {
             // the state every 250 ms; with OPTCHAT_TEST_HOOKS, the test channel's commands too (crate::testcmd)
+            let headless = crate::testcmd::headless();
             cx.spawn_in(window, async move |this, cx| loop {
-                Timer::after(std::time::Duration::from_millis(250)).await;
-                let ok = this.update_in(cx, |w, window, cx| {
-                    crate::testcmd::poll(w, window, cx);
-                    w.publish_state(cx)
-                });
-                if ok.is_err() {
+                Timer::after(std::time::Duration::from_millis(if headless { 100 } else { 250 })).await;
+                for c in crate::testcmd::take() {
+                    if crate::testcmd::is_mouse(&c) {
+                        if let Ok(Some(v)) = cx.update(|window, _| crate::testcmd::view_of(window)) {
+                            crate::testcmd::mouse_input(&c, v);
+                        }
+                    } else if crate::testcmd::is_input(&c) {
+                        // synthetic input goes through the window's dispatch (never inside an entity update)
+                        let _ = cx.update(|window, cx| crate::testcmd::input(&c, window, cx));
+                    } else {
+                        let _ = this.update_in(cx, |w, window, cx| crate::testcmd::run(w, &c, window, cx));
+                    }
+                    if headless {
+                        let _ = cx.update(|window, cx| window.draw(cx).clear());
+                    }
+                }
+                if headless {
+                    // macOS draws nothing while the screen is locked: lay the frame out ourselves (hitboxes, focus,
+                    // probes), nothing is presented
+                    let _ = cx.update(|window, cx| window.draw(cx).clear());
+                }
+                if this.update(cx, |w, cx| w.publish_state(cx)).is_err() {
                     break;
                 }
             })

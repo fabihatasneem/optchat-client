@@ -188,17 +188,21 @@ try {
     await a.waitFor(() => st().followSystem === true, 3000, "follow again");
   });
 
-  await step("toasts", async () => {
-    await pal("Test: toast ok");
-    await a.waitFor(() => st().toast?.ok === true, 3000, "ok toast");
-    await a.shot("parity-12-toast");
-    await a.waitFor(() => st().toastGone?.ok === true, 6000, "ok toast gone");
-    const okMs = st().toastGone.lifeMs;
-    await pal("Test: toast error");
-    await a.waitFor(() => st().toast?.ok === false, 3000, "error toast");
-    await a.waitFor(() => st().toastGone?.ok === false, 10000, "error toast gone");
-    const errMs = st().toastGone.lifeMs;
-    check(okMs >= 2600 && okMs < 2900 && errMs >= 6000 && errMs < 6300, `toasts: ok taken down after ${okMs} ms (2.6 s), error after ${errMs} ms (6 s)`);
+  await step("notices (no toasts)", async () => {
+    // phase 4: no toasts; a command's outcome is a notice of the workspace (status bar dot, Notifications view)
+    const u0 = st().unread;
+    await pal("Test: notice ok");
+    await a.waitFor(() => st().unread.ok === u0.ok + 1, 3000, "ok notice");
+    await pal("Test: notice error");
+    await a.waitFor(() => st().unread.error === u0.error + 1, 3000, "error notice");
+    await a.waitFor(() => !!a.probe("status.notice.error") && !!a.probe("status.notice.ok"), 3000, "status bar dots");
+    await a.shot("parity-12-notices");
+    check(st().toast === undefined && (st().noticesTop ?? []).some((n: any) => n.text === "test notice: it failed" && n.level === "error"), "no toast: the outcomes are notices, with a dot per level in the status bar");
+    await a.click("status.notices");
+    await a.waitFor(() => st().view === "notifications", 3000, "notifications view");
+    await a.click("notif.readAll");
+    await a.waitFor(() => st().unread.ok === 0 && st().unread.error === 0, 8000, "read");
+    check(!a.probe("status.notice.error"), "Mark all read clears them");
   });
 
   await step("errors", async () => {

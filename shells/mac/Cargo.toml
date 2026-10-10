@@ -30,3 +30,5 @@ uuid.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 cpal = "0.16"
 security-framework = "3"
+objc = "0.2"
+raw-window-handle = "0.6"

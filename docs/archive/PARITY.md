@@ -6,6 +6,12 @@ Definition of done. Derived from `optchat-src` (readme.md, spec-tasks.md, spec-m
 
 Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partial (reason given)
 
+**Engines and workspaces (2026-10-10, spec-workspaces §4).** The app connects to engines (`/engine/ws`, one socket
+per engine and client token, carrying every connected workspace); section Z. Tests use the test workspaces
+`test-gpui-a` / `test-gpui-b` only (scoped tokens, never printed); the `?db=` test instances are gone. Toasts are
+gone (J11 → notices). Section Y's hub-era evidence stays for the record; Y1/Y6/Y7/Y9/Y11 now run over the engine
+protocol (see Z).
+
 **Client mode (2026-10-10).** The app is now a pure client of the web app's hub (https://chat.reframe.dev, one
 websocket, like the browser and the phone). Sections A–H, the hub's half of I and W6 are **served by the hub**
 (optchat-src lib/*.ts): the app no longer links an engine. Their evidence below is the in-process Rust engine's
@@ -174,7 +180,7 @@ test window being covered (macOS stops drawing it) and are listed as such in sho
 - [x] J8 Task bar ask mode: label, input (autofocus, max 280 for close), "and its subtree" hint, confirm button (danger for cancel), Esc; Enter confirms, Esc cancels; required result for close — inputs.ts: close result stops at 280, other ask inputs up to 2000
 - [x] J9 Remembered per-user prefs: view, sidebar open/width, task scope, show ended, settings tab, theme (local prefs file) — inputs.ts relaunch (prefs file restored)
 - [x] J10 Open tasks persisted across launches (better than web: reopen last tabs) — inputs.ts: relaunch reopens the tabs and the current task
-- [x] J11 Toast notices (controlDone ok 2.6 s / error 6 s) — parity::toasts (notice events through the hub event path): ok toast taken down after 2630 ms, error after 6028 ms (toastGone.lifeMs); shots/parity-12-toast.jpg
+- [x] J11 ~~Toast notices~~ → removed in phase 4: command outcomes are notices of the workspace (status-bar dot per level, Notifications view); settings outcomes come from the engine as info notices (now · next turn · saved) — parity::notices (no toasts), engine.ts (Z8–Z10)
 - [x] J12 Approval dialog (computer use): message, task, tool params, Deny / Allow once / Allow this session / Always allow; queue of approvals — features.ts approval dialog (allow this session)
 - [x] J13 Lightbox for images (click to enlarge, click/Esc to close) — chat.ts lightbox opens and Esc closes
 - [x] J14 Skeletons until a task's data is loaded; never the empty state for the root — parity::launch: skeleton rows drawn while the chat loads (feedSkeletons), the root's empty state never drawn on the real chat (feedEmpty)
@@ -265,7 +271,7 @@ test window being covered (macOS stops drawing it) and are listed as such in sho
 - [x] S3 Edit rate (fields, Anthropic ratios auto-filled from base input, note) → new manual row; history table; hide/show from pickers (pickers update) — panels.ts rate edit saved to the database (asserted in the DB)
 
 ## T. Settings (panels.tsx SettingsPanel)
-- [x] T1 Two tabs: Global and the task's ("Main chat" / "Task #N"); last tab remembered — panels.ts settings Global / Task tabs
+- [x] T1 Two tabs: **Workspace** (the workspace's settings: turns at once, dictation, then the main chat's / task's settings, server log) and **App** (engines and workspaces, theme, follow system, text size, performance); engine settings stay on its admin page; last tab remembered — panels.ts settings tabs (probes settings.workspace / settings.app)
 - [x] T2 Global: turns at once (1,2,3,4,6,8,12,16), dictation service Claude/Codex, server log, build id — turns, dictation service, server log, build (panels-12)
 - [x] T3 Global (GPUI addition): theme picker (+ follow system appearance), font size — parity::settings-font: Settings text size + / − (14 → 15 → 14); theme picker / follow in features + parity::appearance
 - [x] T4 Task: instructions (saved on blur), depth select (0..parent−1, "(no task tools)"), compactor model + effort, tools toggles (core, computer with availability text, reframe MCP), computer approvals ask/always, tool list by group, working directory, view budget (≥ 2000) — task settings (panels-13)
@@ -315,3 +321,20 @@ test window being covered (macOS stops drawing it) and are listed as such in sho
 - [x] Y10 Two clients in sync on one test instance: messages sent from either stream into both; spawn / pause / resume / effort / rate edits from one show in the other — sync.ts 9/9 (tgpuisync)
 - [x] Y11 Per-window state stays local: tabs, current task, sidebar, window bounds, drafts, theme in `~/Library/Application Support/com.reframe.optchat.gpui/prefs-<instance>.json` — inputs.ts relaunch
 - [x] Y12 Measured against the in-process engine (release, live-sized test copy, shots/perf.json): launch first frame 157 ms (was 200), chat loaded 384 ms (was 850); task switch shown p50 33 / p90 51 ms (main chat 50 / 56; was 14–34), with its turns + requests p50 49 / p90 109 ms (the two rpcs ≈ 26 ms p50); scroll work per frame p50 3.7 / p95 4.0 / max 4.3 ms (was 3.2 / 4.7 / 5.6); RSS 142 MB (was 185) — perf.ts
+
+## Z. Engines and workspaces (spec-workspaces §4)
+- [x] Z1 Engines and connections are client settings (prefs.json: endpoint + name; per connection the workspace), each connection's client token in the macOS Keychain (service com.reframe.optchat.gpui, account `<endpoint>|<workspace>`; tests: OPTCHAT_TOKEN_DIR, a 0600 file) — tokens::tests::keychain_round_trip; engine.ts "no token in the prefs or the log"
+- [x] Z2 One socket per engine (`wss://<engine>/engine/ws`, `Authorization: Bearer`, Origin of the engine) multiplexing its connected workspaces: `connect {ws, task}` → hello + snapshot (with turns, requests, unread notices), `disconnect`, `disabled`, `workspaces`, `ws` on every message; blobs `GET /engine/blob/<sha>?ws=`, dictation `/engine/stt?ws=&task=`. A token is per socket: connections with different tokens to one engine get a socket each (protocol note for the orchestrator) — engine.ts (connect a, b; both open)
+- [x] Z3 Background workspaces stay subscribed (their events applied quietly to their own state); switching swaps the state in: instant — engine.ts: 4 switches 0.003 ms each (state swap; the frame after it is the usual render)
+- [x] Z4 Per-workspace tabs, task on screen, sidebar view, settings tab and composer drafts; app-level theme, zoom, window, sidebar width — engine.ts "b kept its tabs"; relaunch restores the workspace on screen
+- [x] Z5 Top-left icon → workspace menu: engines → connected workspaces (check on the current one, dot for unread errors/warnings, state: connecting / offline / disabled / no token, × disconnect), available ones → Connect asks the token, disabled ones collapsed (click to show), offline engine greyed "offline · retrying"; Add engine…; ⇧⌘O — workspaces.ts (Computer Use; shots ws-02/04/12) [visual run pending an unlocked screen: see PROGRESS]; logic in engine.ts
+- [x] Z6 Add engine dialog (address, optional name; https, or http://127.0.0.1 for a local relay) and Connect dialog (masked token, Enter) — engine.ts through the dialogs' handlers
+- [x] Z7 Dot on the workspace icon for unread errors/warnings in background workspaces — engine.ts: a Haiku child with a $0.0001 budget in test-gpui-b pauses ("paused: budget exceeded") while test-gpui-a is on screen → bgAlert
+- [x] Z8 Status bar: the workspace's name (click → menu) and a dot per level with its unread count (red error, orange warn, grey info, green ok); click → Notifications — parity::notices (no toasts)
+- [x] Z9 Notifications rail view: latest 500 from the engine (rpc notices) + live `notices` events, filters All / Errors / Warnings / Info / OK (unread counts), unread-only toggle, a click opens the task and marks it read, Mark all read; read state on the engine (`notices.read`) — engine.ts (read one → another client sees it read; read all → 0 unread)
+- [x] Z10 Toasts removed; command failures are local error notices — parity::notices
+- [x] Z11 Disconnect (menu ×, Settings › App): unsubscribes, forgets the token, the next workspace comes on screen; none left → empty state with Add engine / Workspaces — engine.ts
+- [x] Z12 Engine goes away: offline within 5 s (menu greyed, status "connecting / disconnected · reconnecting"), reconnect backoff 0.4 s doubling to 4 s, resubscribes and resnapshots — engine.ts via a local relay started and killed twice: offline after 154 / 458 ms, back after 3.8 / 3.5 s (the real engine never went down)
+- [x] Z13 Layout chosen at the root by window size: narrow (< 760 pt) or portrait → the narrow layout (sidebar as a sheet) — panels.ts narrow window (700×820)
+- [x] Z14 Engines without a connected socket: their public list (`GET /engine/workspaces`) every 5 s (online / offline, available workspaces) — engine.ts "Add engine: online, 5 workspaces listed (1 disabled)"
+
