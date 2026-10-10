@@ -1,0 +1,139 @@
+diff --git a/crates/gpui_apple/src/bench_stats.rs b/crates/gpui_apple/src/bench_stats.rs
+new file mode 100644
+index 0000000..5246a41
+--- /dev/null
++++ b/crates/gpui_apple/src/bench_stats.rs
+@@ -0,0 +1,27 @@
++//! OptChat bench instrumentation. Counters are read by the bench app; the knobs default to upstream behaviour.
++use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
++
++/// nanoseconds the main thread waited inside `CAMetalLayer.nextDrawable`
++pub static DRAWABLE_WAIT_NS: AtomicU64 = AtomicU64::new(0);
++/// nanoseconds spent encoding + committing a frame (render_frame + present/commit)
++pub static RENDER_NS: AtomicU64 = AtomicU64::new(0);
++/// frames drawn
++pub static FRAMES: AtomicU64 = AtomicU64::new(0);
++/// bytes of instance buffers ever allocated, and their current pool size setting
++pub static INSTANCE_ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
++pub static INSTANCE_BUFFER_SIZE: AtomicU64 = AtomicU64::new(0);
++/// bytes of path intermediate textures currently allocated (color + MSAA when not memoryless)
++pub static PATH_TEXTURE_BYTES: AtomicU64 = AtomicU64::new(0);
++
++pub fn snapshot() -> [u64; 6] {
++    [DRAWABLE_WAIT_NS.load(Relaxed), RENDER_NS.load(Relaxed), FRAMES.load(Relaxed), INSTANCE_ALLOC_BYTES.load(Relaxed), INSTANCE_BUFFER_SIZE.load(Relaxed), PATH_TEXTURE_BYTES.load(Relaxed)]
++}
++
++/// GPUI_MAX_DRAWABLES (2 or 3; upstream 3)
++pub fn max_drawables() -> u64 {
++    std::env::var("GPUI_MAX_DRAWABLES").ok().and_then(|v| v.parse().ok()).filter(|n| *n == 2 || *n == 3).unwrap_or(3)
++}
++/// GPUI_LAZY_PATH_TEXTURE=1: allocate the full-window path texture only when a frame has paths (upstream: always)
++pub fn lazy_path_texture() -> bool {
++    std::env::var("GPUI_LAZY_PATH_TEXTURE").map(|v| v == "1").unwrap_or(false)
++}
+diff --git a/crates/gpui_apple/src/gpui_apple.rs b/crates/gpui_apple/src/gpui_apple.rs
+index 6f39e63..8aa64a1 100644
+--- a/crates/gpui_apple/src/gpui_apple.rs
++++ b/crates/gpui_apple/src/gpui_apple.rs
+@@ -9,6 +9,8 @@ mod dispatcher;
+ pub mod keychain;
+ mod metal_atlas;
+ pub mod metal_renderer;
++/// OptChat bench: per-frame counters and experiment knobs (bench/gpui/patches/gpui_apple-bench.patch).
++pub mod bench_stats;
+ pub mod thermal;
+ 
+ #[cfg(feature = "font-kit")]
+diff --git a/crates/gpui_apple/src/metal_renderer.rs b/crates/gpui_apple/src/metal_renderer.rs
+index e466205..ab2af6f 100644
+--- a/crates/gpui_apple/src/metal_renderer.rs
++++ b/crates/gpui_apple/src/metal_renderer.rs
+@@ -92,8 +92,10 @@ impl InstanceBufferPool {
+                 MTLResourceOptions::StorageModeManaged
+             };
+ 
++            crate::bench_stats::INSTANCE_ALLOC_BYTES.fetch_add(self.buffer_size as u64, std::sync::atomic::Ordering::Relaxed);
+             device.new_buffer(self.buffer_size as u64, options)
+         });
++        crate::bench_stats::INSTANCE_BUFFER_SIZE.store(self.buffer_size as u64, std::sync::atomic::Ordering::Relaxed);
+         InstanceBuffer {
+             metal_buffer: buffer,
+             size: self.buffer_size,
+@@ -130,6 +132,7 @@ pub struct MetalRenderer {
+     sprite_atlas: Arc<MetalAtlas>,
+     core_video_texture_cache: CFRetained<CVMetalTextureCache>,
+     path_intermediate_texture: Option<metal::Texture>,
++    path_texture_size: Size<DevicePixels>,
+     path_intermediate_msaa_texture: Option<metal::Texture>,
+     path_sample_count: u32,
+     /// Offscreen render target reused across `render_scene` calls when
+@@ -180,7 +183,7 @@ impl MetalRenderer {
+         // Support direct-to-display rendering if the window is not transparent
+         // https://developer.apple.com/documentation/metal/managing-your-game-window-for-metal-in-macos
+         layer.set_opaque(!transparent);
+-        layer.set_maximum_drawable_count(3);
++        layer.set_maximum_drawable_count(crate::bench_stats::max_drawables());
+         // Allow texture reading for visual tests and UI automation screenshots
+         // (captures without ScreenCaptureKit). Only debug builds pay the
+         // presentation cost, even when `test-support` is compiled in.
+@@ -404,6 +407,7 @@ impl MetalRenderer {
+             sprite_atlas,
+             core_video_texture_cache,
+             path_intermediate_texture: None,
++            path_texture_size: Size::default(),
+             path_intermediate_msaa_texture: None,
+             path_sample_count: PATH_SAMPLE_COUNT,
+             #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+@@ -441,14 +445,26 @@ impl MetalRenderer {
+     }
+ 
+     fn update_path_intermediate_textures(&mut self, size: Size<DevicePixels>) {
++        self.path_texture_size = size;
++        if crate::bench_stats::lazy_path_texture() && self.path_intermediate_texture.is_none() {
++            // allocated by draw() on the first frame that has paths
++            return;
++        }
++        self.allocate_path_intermediate_textures(size);
++    }
++
++    fn allocate_path_intermediate_textures(&mut self, size: Size<DevicePixels>) {
+         // We are uncertain when this happens, but sometimes size can be 0 here. Most likely before
+         // the layout pass on window creation. Zero-sized texture creation causes SIGABRT.
+         // https://github.com/zed-industries/zed/issues/36229
+         if size.width.0 <= 0 || size.height.0 <= 0 {
+             self.path_intermediate_texture = None;
+             self.path_intermediate_msaa_texture = None;
++            crate::bench_stats::PATH_TEXTURE_BYTES.store(0, std::sync::atomic::Ordering::Relaxed);
+             return;
+         }
++        let msaa_bytes = if self.path_sample_count > 1 && !self.is_apple_gpu { self.path_sample_count as u64 } else { 0 };
++        crate::bench_stats::PATH_TEXTURE_BYTES.store(size.width.0 as u64 * size.height.0 as u64 * 4 * (1 + msaa_bytes), std::sync::atomic::Ordering::Relaxed);
+ 
+         let texture_descriptor = metal::TextureDescriptor::new();
+         texture_descriptor.set_width(size.width.0 as u64);
+@@ -504,7 +520,15 @@ impl MetalRenderer {
+             (viewport_size.width.ceil() as i32).into(),
+             (viewport_size.height.ceil() as i32).into(),
+         );
+-        let drawable = if let Some(drawable) = layer.next_drawable() {
++        if crate::bench_stats::lazy_path_texture() && !scene.paths.is_empty() && self.path_intermediate_texture.is_none() {
++            let size = self.path_texture_size;
++            self.allocate_path_intermediate_textures(size);
++        }
++        let t_wait = std::time::Instant::now();
++        let next = layer.next_drawable();
++        crate::bench_stats::DRAWABLE_WAIT_NS.fetch_add(t_wait.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
++        let t_render = std::time::Instant::now();
++        let drawable = if let Some(drawable) = next {
+             drawable
+         } else {
+             log::error!(
+@@ -530,6 +554,8 @@ impl MetalRenderer {
+             command_buffer.present_drawable(drawable);
+             command_buffer.commit();
+         }
++        crate::bench_stats::RENDER_NS.fetch_add(t_render.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
++        crate::bench_stats::FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+     }
+ 
+     fn render_frame(
