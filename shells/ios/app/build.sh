@@ -40,7 +40,7 @@ XC
 fi
 OUTJSON="$(mktemp)"
 ( cd "$HERE" && env -i HOME="$HOME" PATH="$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin" ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} \
-    IPHONEOS_DEPLOYMENT_TARGET=18.0 ${LINKARGS:+RUSTFLAGS="$LINKARGS"} RUSTUP_TOOLCHAIN="$(cat "$ZED/rust-toolchain.toml" | sed -n 's/^channel = "\(.*\)"/\1/p')" \
+    IPHONEOS_DEPLOYMENT_TARGET=15.0 ${LINKARGS:+RUSTFLAGS="$LINKARGS"} RUSTUP_TOOLCHAIN="$(cat "$ZED/rust-toolchain.toml" | sed -n 's/^channel = "\(.*\)"/\1/p')" \
     cargo build --profile $PROFILE --target $TARGET --message-format=json-render-diagnostics > "$OUTJSON" )
 EXE="$(python3 -c "import json,sys;print([e['executable'] for e in map(json.loads,open(sys.argv[1])) if e.get('reason')=='compiler-artifact' and e.get('target',{}).get('name')=='optchat-ios' and e.get('executable')][0])" "$OUTJSON")"
 rm -f "$OUTJSON"
