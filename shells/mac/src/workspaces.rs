@@ -9,8 +9,8 @@ use crate::ui::*;
 use crate::workspace::Workspace;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::Sizable;
+use crate::state::View;
+use crate::kit::input::{Input, InputEvent, InputState};
 use optchat_proto::api::Conn;
 
 /// the panel on screen (from the status bar's workspace chip, the empty state, Settings › App): never toggles it off

@@ -6,12 +6,13 @@ use crate::theme::{c, Themes};
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use crate::state::View;
+use optchat_proto::types::Role;
 use gpui::Context;
-use gpui_component::button::Button;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::menu::{DropdownMenu, PopupMenuItem};
-use gpui_component::switch::Switch;
-use gpui_component::Sizable;
+use crate::kit::button::Button;
+use crate::kit::input::{Input, InputEvent, InputState};
+use crate::kit::menu::PopupMenuItem;
+use crate::kit::button::Switch;
 use optchat_proto::api::*;
 use optchat_proto::rates::Per1M;
 use optchat_proto::types::*;
@@ -229,7 +230,7 @@ impl MemoryPanel {
                         .flex_none()
                         .flex()
                         .gap(px(3.))
-                        .font_family("Menlo")
+                        .font_family(crate::ui::MONO)
                         .text_size(px(10.5))
                         .text_color(k.muted)
                         .child(format!("{start}+{n}"))
@@ -256,7 +257,7 @@ impl MemoryPanel {
                                 .border_color(k.line)
                                 .text_size(px(12.))
                                 .line_height(px(18.))
-                                .child(div().font_family("Menlo").text_size(px(10.5)).text_color(k.muted).mb(px(4.)).child(format!("{}message {} · {} · {}", if foreign { format!("#{t} · ") } else { String::new() }, m.i, m.kind.as_str(), fmt::datetime(&m.date))))
+                                .child(div().font_family(crate::ui::MONO).text_size(px(10.5)).text_color(k.muted).mb(px(4.)).child(format!("{}message {} · {} · {}", if foreign { format!("#{t} · ") } else { String::new() }, m.i, m.kind.as_str(), fmt::datetime(&m.date))))
                                 .child(div().text_color(k.text2).child(m.text.clone()))
                                 .when_some(m.image.clone(), |d, r| d.child(div().mt(px(6.)).child(crate::ui::blob_thumb(&self.state, &r.blob, 260., 200., r.w.zip(r.h), cx)))),
                         );
@@ -378,7 +379,7 @@ impl MemoryPanel {
                         .cursor_pointer()
                         .hover(|s| s.bg(k.hover))
                         .child(probe(format!("hit.{t}.{i}")))
-                        .child(div().flex_none().font_family("Menlo").text_color(k.muted).child(format!("{i}{}", if t != task { format!("@{t}") } else { String::new() })))
+                        .child(div().flex_none().font_family(crate::ui::MONO).text_color(k.muted).child(format!("{i}{}", if t != task { format!("@{t}") } else { String::new() })))
                         .child(div().flex_none().px(px(4.)).rounded(px(3.)).bg(k.panel2).text_size(px(10.5)).text_color(k.muted).child(x.kind.clone()))
                         .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.text2).child(x.text.replace('\n', " ").chars().take(160).collect::<String>()))
                         .on_click(cx.listener(move |m, _, _, cx| m.reveal(t, i, cx))),
@@ -439,7 +440,7 @@ impl MemoryPanel {
                                 .bg(k.code_bg)
                                 .max_h(px(360.))
                                 .overflow_y_scroll()
-                                .font_family("Menlo")
+                                .font_family(crate::ui::MONO)
                                 .text_size(px(11.))
                                 .text_color(k.text2)
                                 .child(format!("{} chars · {} blocks of 4 lines · cache mark on block {} (first {} chars)\n\n{}\n\n{}", js_len(&r.text), r.blocks, r.mark_index + 1, r.marked_chars, r.text, r.header)),
@@ -533,7 +534,7 @@ impl ContextPanel {
                     Body::Image { blob: Some(b), .. } => Some(crate::ui::blob_thumb(&self.state, b, 260., 200., None, cx)),
                     _ => None,
                 };
-                d.child(div().ml(px(18.)).mb(px(6.)).p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.5)).line_height(px(17.)).text_color(k.text2).child(full).when_some(image, |d, i| d.child(div().mt(px(6.)).child(i).child(probe("ctx.thumb")))))
+                d.child(div().ml(px(18.)).mb(px(6.)).p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family(crate::ui::MONO).text_size(px(11.5)).line_height(px(17.)).text_color(k.text2).child(full).when_some(image, |d, i| d.child(div().mt(px(6.)).child(i).child(probe("ctx.thumb")))))
             })
             .into_any_element()
     }
@@ -652,7 +653,7 @@ impl ContextPanel {
         for (cid, mark, m, children) in d.context.iter() {
             if let Some(p) = &prev_ctx {
                 if p != cid {
-                    ctx = ctx.child(div().my(px(4.)).text_size(px(10.5)).text_color(k.faint).font_family("Menlo").child(format!("context {}", &cid[..6.min(cid.len())])));
+                    ctx = ctx.child(div().my(px(4.)).text_size(px(10.5)).text_color(k.faint).font_family(crate::ui::MONO).child(format!("context {}", &cid[..6.min(cid.len())])));
                 }
             }
             prev_ctx = Some(cid.clone());
@@ -687,7 +688,7 @@ impl ContextPanel {
                     .child(div().flex().items_center().gap(px(8.)).child(section_title("wire request", cx)).child(btn_small("wire", if self.wire { "hide" } else { "show" }, Tone::Ghost, cx).child(probe("ctx.wire")).on_click(cx.listener(|p, _, _, cx| { p.wire = !p.wire; cx.notify(); }))))
                     .child(if self.wire {
                         match wire_txt {
-                            Some(w) => div().p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.)).text_color(k.text2).child(w.chars().take(200_000).collect::<String>()),
+                            Some(w) => div().p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family(crate::ui::MONO).text_size(px(11.)).text_color(k.text2).child(w.chars().take(200_000).collect::<String>()),
                             None => div().text_size(px(12.)).text_color(k.muted).child("not captured for this call"),
                         }
                     } else {
@@ -823,7 +824,7 @@ impl LogPanel {
                     .hover(|s| s.bg(k.hover))
                     .text_color(k.text2)
                     .child(div().w(px(64.)).child(format!("{}{}", fmt::time(&r.started_at), if r.purpose == "compact" { " · c" } else { "" })))
-                    .when(self.subtree, |d| d.child(div().w(px(36.)).font_family("Menlo").child(format!("#{}", r.task.unwrap_or(0)))))
+                    .when(self.subtree, |d| d.child(div().w(px(36.)).font_family(crate::ui::MONO).child(format!("#{}", r.task.unwrap_or(0)))))
                     .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().child(format!("{}{}", r.model.replace("claude-", ""), if r.status == "running" { " …" } else { "" })))
                     .child(div().w(px(48.)).flex().justify_end().child(fmt::tokens(r.usage.as_ref().map(|u| u.input).unwrap_or(0))))
                     .child(div().w(px(40.)).flex().justify_end().child(format!("{}%", fmt::cache_pct(r.usage.as_ref()))))
@@ -1017,7 +1018,7 @@ impl ModelsPanel {
                 div()
                     .flex()
                     .items_start()
-                    .child(div().flex_1().flex().flex_col().child(div().font_weight(FontWeight::SEMIBOLD).child(r.cat.label.clone())).child(div().font_family("Menlo").text_size(px(11.)).text_color(k.muted).child(id.clone())))
+                    .child(div().flex_1().flex().flex_col().child(div().font_weight(FontWeight::SEMIBOLD).child(r.cat.label.clone())).child(div().font_family(crate::ui::MONO).text_size(px(11.)).text_color(k.muted).child(id.clone())))
                     .when(r.spend_calls > 0, |d| d.child(div().id(SharedString::from(format!("spend{id}"))).font_weight(FontWeight::SEMIBOLD).child(fmt::usd(r.spend_usd as f64 / 1e6)).tooltip(tooltip(format!("{} calls · {} tokens, from the ledger", r.spend_calls, fmt::tokens(r.spend_tokens)))))),
             )
             .child(tags)
@@ -1287,7 +1288,7 @@ impl SettingsPanel {
         let st2 = st_e.clone();
         let st3 = st_e.clone();
         let log: Vec<String> = s.server_log.iter().rev().take(80).rev().cloned().collect();
-        let srvlog = section(cx).child(section_title(format!("server log · engine {} · build {} · {}", s.version, s.build, s.hub().map(|h| h.label()).unwrap_or_default()), cx)).child(div().id("srvlog").max_h(px(300.)).overflow_y_scroll().p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.)).line_height(px(16.)).text_color(k.text2).child(if log.is_empty() { "—".to_string() } else { log.join("\n") }));
+        let srvlog = section(cx).child(section_title(format!("server log · engine {} · build {} · {}", s.version, s.build, s.hub().map(|h| h.label()).unwrap_or_default()), cx)).child(div().id("srvlog").max_h(px(300.)).overflow_y_scroll().p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family(crate::ui::MONO).text_size(px(11.)).line_height(px(16.)).text_color(k.text2).child(if log.is_empty() { "—".to_string() } else { log.join("\n") }));
         let ws_name = s.meta.get(&s.active).map(|m| m.ws.clone()).unwrap_or_default();
         let ws_head = div()
             .text_size(px(12.))

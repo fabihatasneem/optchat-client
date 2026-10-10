@@ -7,8 +7,7 @@ use crate::theme::c;
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::RopeExt;
+use crate::kit::input::{Input, InputEvent, InputState};
 use crate::media::prepare_image;
 use optchat_proto::api::ImageIn;
 use optchat_proto::types::TaskStatus;
@@ -205,7 +204,7 @@ impl Composer {
         }
         if !got_image {
             if let Some(t) = item.text() {
-                self.input.update(cx, |i, cx| i.insert(t, window, cx));
+                self.input.update(cx, |i, cx| i.insert(&t, window, cx));
             }
         }
     }
@@ -343,8 +342,7 @@ impl Composer {
         if d.state == "idle" || d.done.is_some() && d.state == "idle" {
             // finished: caret after the dictated text, focus back
             self.anchor = None;
-            let pos = self.input.read(cx).text().offset_to_position(caret);
-            self.input.update(cx, |i, cx| i.set_cursor_position(pos, window, cx));
+            self.input.update(cx, |i, cx| i.set_cursor(caret, window, cx));
             self.focus(window, cx);
             if let Some(run) = self.pending_submit.take() {
                 self.submit(run, window, cx);
@@ -386,7 +384,7 @@ impl Composer {
                 if st == "listening" {
                     el.with_animation("micpulse", Animation::new(std::time::Duration::from_millis(1600)).repeat(), |e, t| {
                         let a = ((t * std::f32::consts::TAU).sin() * 0.5 + 0.5) * 0.12;
-                        e.shadow(vec![BoxShadow { color: hsla(0., 1., 0.7, a), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(4.) }])
+                        e.shadow(vec![BoxShadow { color: hsla(0., 1., 0.7, a), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(4.), inset: false }])
                     }).into_any_element()
                 } else {
                     el.into_any_element()

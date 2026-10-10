@@ -443,7 +443,7 @@ impl AppState {
                     cx.notify();
                 });
             }
-            gpui::Timer::after(std::time::Duration::from_secs(5)).await;
+            crate::ui::Timer::after(std::time::Duration::from_secs(5)).await;
         }));
     }
 
@@ -1052,7 +1052,7 @@ impl AppState {
                     DictEvent::Error(m) => {
                         self.dict.error = Some((m, std::time::Instant::now()));
                         cx.spawn(async move |this, cx| {
-                            gpui::Timer::after(std::time::Duration::from_millis(6050)).await;
+                            crate::ui::Timer::after(std::time::Duration::from_millis(6050)).await;
                             let _ = this.update(cx, |_, cx| cx.notify());
                         })
                         .detach();

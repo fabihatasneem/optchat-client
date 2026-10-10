@@ -2,7 +2,6 @@
 use crate::theme::{c, C};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::tooltip::Tooltip;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -71,7 +70,7 @@ pub fn status_dot(id: impl Into<SharedString>, status: &str, size: f32, cx: &App
     let k = c(cx);
     let id: SharedString = id.into();
     match status {
-        "active" => pulse(ElementId::Name(format!("sd-{id}").into()), dot(k.accent, size).shadow(vec![BoxShadow { color: k.accent.opacity(0.6), offset: point(px(0.), px(0.)), blur_radius: px(6.), spread_radius: px(0.) }])).into_any_element(),
+        "active" => pulse(ElementId::Name(format!("sd-{id}").into()), dot(k.accent, size).shadow(vec![BoxShadow { color: k.accent.opacity(0.6), offset: point(px(0.), px(0.)), blur_radius: px(6.), spread_radius: px(0.), inset: false }])).into_any_element(),
         "paused" => dot(k.amber, size).into_any_element(),
         "canceled" => dot(k.red, size).opacity(0.85).into_any_element(),
         "done" => dot(k.green, size).into_any_element(),
@@ -85,7 +84,8 @@ pub fn tooltip(text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut App) 
     move |w, cx| {
         // UI tests: the text of the last tooltip shown
         set_state_extra("tooltip", serde_json::json!(t.to_string()));
-        Tooltip::new(t.clone()).build(w, cx)
+        let _ = w;
+        cx.new(|_| TooltipView(t.clone())).into()
     }
 }
 
@@ -288,7 +288,7 @@ pub fn kv_row(k_: impl Into<SharedString>, v: impl Into<SharedString>, cx: &App)
 
 pub fn mono(cx: &App) -> SharedString {
     let _ = cx;
-    "Menlo".into()
+    crate::ui::MONO.into()
 }
 
 pub fn skeleton_line(w: Option<f32>, cx: &App) -> Div {
@@ -516,5 +516,38 @@ pub fn blob_thumb<V: 'static>(state: &Entity<crate::state::AppState>, blob: &str
     match blob_image(state, blob, cx) {
         Some(i) => img(i).w(px(dw)).h(px(dh)).rounded(px(6.)).into_any_element(),
         None => div().w(px(dw)).h(px(dh)).rounded(px(6.)).bg(k.panel2).into_any_element(),
+    }
+}
+
+/// a tooltip's view: the text in a small panel
+pub struct TooltipView(SharedString);
+impl Render for TooltipView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = c(cx).clone();
+        div().px(px(8.)).py(px(4.)).rounded(px(6.)).bg(k.panel2).border_1().border_color(k.line2).text_size(px(12.)).text_color(k.text).max_w(px(360.)).child(self.0.clone())
+    }
+}
+
+// ---- timers: gpui's background executor (set once at launch) ----------------------------------------------------------
+thread_local!(static EXEC: std::cell::RefCell<Option<BackgroundExecutor>> = const { std::cell::RefCell::new(None) });
+pub fn set_executor(e: BackgroundExecutor) {
+    EXEC.with(|x| *x.borrow_mut() = Some(e));
+}
+pub struct Timer;
+impl Timer {
+    /// a future that completes after `d` (create it on the main thread)
+    pub fn after(d: Duration) -> Task<()> {
+        EXEC.with(|x| x.borrow().as_ref().expect("executor set at launch").timer(d))
+    }
+}
+
+// ---- fonts: bundled (IBM Plex Sans, Lilex; OFL, assets/fonts), registered at launch; named system fonts are not
+// relied on (they do not resolve on iOS, and the current GPUI drew no text with them on macOS) ----------------------
+pub const SANS: &str = "IBM Plex Sans";
+pub const MONO: &str = "Lilex";
+pub fn register_fonts(cx: &mut App, files: &[(&str, &'static [u8])]) {
+    let fonts: Vec<std::borrow::Cow<'static, [u8]>> = files.iter().filter(|(p, _)| p.starts_with("fonts/") && p.ends_with(".ttf")).map(|(_, b)| std::borrow::Cow::Borrowed(*b)).collect();
+    if let Err(e) = cx.text_system().add_fonts(fonts) {
+        eprintln!("fonts: {e}");
     }
 }

@@ -7,11 +7,11 @@ use crate::ui::*;
 use crate::workspace::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use crate::state::View;
 use gpui::Context;
-use gpui_component::button::Button;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::menu::{DropdownMenu, PopupMenuItem};
-use gpui_component::Sizable;
+use crate::kit::button::Button;
+use crate::kit::input::{Input, InputEvent, InputState};
+use crate::kit::menu::PopupMenuItem;
 use crate::media::prepare_image;
 use optchat_proto::api::{Approval, ImageIn};
 use optchat_proto::api::BudgetArgs;
@@ -50,7 +50,7 @@ pub fn zoom(w: &mut Workspace, d: f32, cx: &mut Context<Workspace>) {
         cx.notify();
     });
     let size = w.state.read(cx).prefs.font_size;
-    gpui_component::Theme::global_mut(cx).font_size = px(size - 0.5);
+    crate::kit::set_font_size(cx, px(size - 0.5));
     crate::ui::set_zoom(size);
     w.feed.update(cx, |f, cx| f.relayout(cx));
     cx.refresh_windows();
@@ -88,7 +88,7 @@ pub(crate) fn dialog_box(cx: &App, w: f32) -> Div {
         .border_color(k.line2)
         .rounded(px(14.))
         .p(px(20.))
-        .shadow(vec![BoxShadow { color: k.shadow, offset: point(px(0.), px(20.)), blur_radius: px(60.), spread_radius: px(0.) }])
+        .shadow(vec![BoxShadow { color: k.shadow, offset: point(px(0.), px(20.)), blur_radius: px(60.), spread_radius: px(0.), inset: false }])
 }
 
 pub fn render_overlay(w: &mut Workspace, o: Overlay, _window: &mut Window, cx: &mut Context<Workspace>) -> AnyElement {
@@ -149,7 +149,7 @@ pub fn approval(w: &mut Workspace, a: Approval, cx: &mut Context<Workspace>) -> 
                 .child(probe("approval"))
                 .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).mb(px(8.)).child(format!("Computer use{}", a.task.map(|t| format!(" · task #{t}")).unwrap_or_default())))
                 .child(div().text_color(k.text2).line_height(px(21.)).mb(px(14.)).child(a.message.clone()))
-                .when(!params.is_empty(), |d| d.child(div().mb(px(14.)).p(px(10.)).rounded(px(8.)).bg(k.code_bg).font_family("Menlo").text_size(px(12.)).text_color(k.text2).child(params)))
+                .when(!params.is_empty(), |d| d.child(div().mb(px(14.)).p(px(10.)).rounded(px(8.)).bg(k.code_bg).font_family(crate::ui::MONO).text_size(px(12.)).text_color(k.text2).child(params)))
                 .child(div().flex().justify_end().gap(px(8.)).child(b1).child(b2).child(b3).child(b4)),
         )
         .into_any_element()
@@ -413,7 +413,7 @@ impl NewTaskDialog {
         }
         if !got {
             if let Some(t) = item.text() {
-                self.instruction.update(cx, |i, cx| i.insert(t, window, cx));
+                self.instruction.update(cx, |i, cx| i.insert(&t, window, cx));
             }
         }
         cx.notify();

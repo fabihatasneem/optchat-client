@@ -116,7 +116,7 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
         _ => k.muted,
     };
     let hover = k.hover;
-    let mut meta = div().flex().gap(px(7.)).text_size(px(11.)).text_color(k.faint).whitespace_nowrap().child(div().font_family("Menlo").child(format!("#{id}")));
+    let mut meta = div().flex().gap(px(7.)).text_size(px(11.)).text_color(k.faint).whitespace_nowrap().child(div().font_family(crate::ui::MONO).child(format!("#{id}")));
     if usd > 0 {
         meta = meta.child(fmt::usd(usd as f64 / 1e6));
     }

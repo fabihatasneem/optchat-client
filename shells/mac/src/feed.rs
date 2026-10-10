@@ -10,7 +10,7 @@ use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui::Context;
-use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use crate::kit::menu::{ContextMenuExt, PopupMenuItem};
 use optchat_proto::types::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -792,7 +792,7 @@ impl Feed {
 
     fn meta_line(&self, e: &LogEntry, cx: &App) -> Div {
         let k = c(cx);
-        div().flex().justify_end().gap(zx(8.)).mt(zx(4.)).text_size(zx(10.5)).font_family("Menlo").text_color(k.faint).child(format!("#{}", e.i)).child(fmt::time(&e.date))
+        div().flex().justify_end().gap(zx(8.)).mt(zx(4.)).text_size(zx(10.5)).font_family(crate::ui::MONO).text_color(k.faint).child(format!("#{}", e.i)).child(fmt::time(&e.date))
     }
 
     fn user(&mut self, e: &Arc<LogEntry>, _w: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -859,7 +859,7 @@ impl Feed {
         let user = e.kind == LogKind::User;
         let im = self.blob_img(e.image.as_ref().unwrap(), 420., 360., cx);
         let k = c(cx);
-        let meta = div().mt(zx(4.)).text_size(zx(10.5)).font_family("Menlo").text_color(k.faint).child(format!("#{} {}", e.i, e.text));
+        let meta = div().mt(zx(4.)).text_size(zx(10.5)).font_family(crate::ui::MONO).text_color(k.faint).child(format!("#{} {}", e.i, e.text));
         if user {
             div().flex().justify_end().my(zx(10.)).child(div().flex().flex_col().items_end().child(im).child(meta)).into_any_element()
         } else {
@@ -917,7 +917,7 @@ impl Feed {
                             .child(format!("↳ {label}"))
                             .when_some(from, |d, f| d.on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::OpenTask(f))))),
                     )
-                    .child(div().ml_auto().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date)))),
+                    .child(div().ml_auto().font_family(crate::ui::MONO).text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date)))),
             )
             .child(body)
             .into_any_element()
@@ -939,7 +939,7 @@ impl Feed {
                 .border_1()
                 .border_color(k.line2)
                 .rounded(zx(12.))
-                .child(div().font_family("Menlo").text_color(k.violet).font_weight(FontWeight::BOLD).child(format!("#{id}")))
+                .child(div().font_family(crate::ui::MONO).text_color(k.violet).font_weight(FontWeight::BOLD).child(format!("#{id}")))
                 .child(im)
                 .into_any_element();
         }
@@ -993,10 +993,10 @@ impl Feed {
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
                     .on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::OpenTask(id))))
-                    .child(div().font_family("Menlo").font_weight(FontWeight::BOLD).text_color(k.violet).child(format!("#{id}")))
+                    .child(div().font_family(crate::ui::MONO).font_weight(FontWeight::BOLD).text_color(k.violet).child(format!("#{id}")))
                     .child(div().text_color(kcol).child(klabel))
                     .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.text2).child(child))
-                    .child(div().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date))))
+                    .child(div().font_family(crate::ui::MONO).text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date))))
                     .child(div().text_size(zx(11.)).text_color(k.accent).child("open ↗")),
             )
             .child(
@@ -1029,7 +1029,7 @@ impl Feed {
                     .mb(zx(6.))
                     .child(if parts.len() == 1 { "⭑ report from a background task".to_string() } else { format!("⭑ {} reports from background tasks", parts.len()) })
                     .child(div().flex_1())
-                    .child(div().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date)))),
+                    .child(div().font_family(crate::ui::MONO).text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date)))),
             );
         for (n, (id, text)) in parts.into_iter().enumerate() {
             let tid: Option<i64> = id.strip_prefix('a').and_then(|x| x.parse().ok());
@@ -1042,7 +1042,7 @@ impl Feed {
                             div()
                                 .id(ElementId::Name(format!("w{}.{n}", e.i).into()))
                                 .text_size(zx(12.))
-                                .font_family("Menlo")
+                                .font_family(crate::ui::MONO)
                                 .text_color(k.violet)
                                 .cursor_pointer()
                                 .child(probe(format!("work.{}.{n}", e.i)))
@@ -1135,8 +1135,8 @@ impl Feed {
                         move |f, _, _, cx| f.toggle(&key, cx)
                     }))
                     .child(chevron(format!("tool{}.{}", self.task, e.i), 12., k.faint, open))
-                    .child(div().font_family("Menlo").text_size(zx(12.)).text_color(k.cyan).whitespace_nowrap().child(name.clone()))
-                    .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().font_family("Menlo").text_size(zx(12.)).text_color(k.text2).child(arg_preview(&name, &input)))
+                    .child(div().font_family(crate::ui::MONO).text_size(zx(12.)).text_color(k.cyan).whitespace_nowrap().child(name.clone()))
+                    .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().font_family(crate::ui::MONO).text_size(zx(12.)).text_color(k.text2).child(arg_preview(&name, &input)))
                     .child(div().text_size(zx(11.)).whitespace_nowrap().text_color(scol).child(stext))
                     .when(can_stop, |d| {
                         d.child(btn_small(ElementId::Name(format!("stop{}", e.i).into()), "stop", Tone::Danger, cx).on_click(move |_, _, cx| {
@@ -1145,7 +1145,7 @@ impl Feed {
                             state_e.update(cx, |s, cx| s.command(cx, false, move |h| async move { { h.stop_tool(&c3); Ok(String::new()) } }));
                         }))
                     })
-                    .child(div().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{}{}", e.i, echo.map(|x| format!("–{}", x.i)).unwrap_or_default()))),
+                    .child(div().font_family(crate::ui::MONO).text_size(zx(10.5)).text_color(k.faint).child(format!("#{}{}", e.i, echo.map(|x| format!("–{}", x.i)).unwrap_or_default()))),
             );
         if name.starts_with("task_") && name != "task_list" {
             let mut ids: Vec<i64> = vec![];
@@ -1186,7 +1186,7 @@ impl Feed {
                     .overflow_y_scroll()
                     .px(zx(12.))
                     .py(zx(8.))
-                    .font_family("Menlo")
+                    .font_family(crate::ui::MONO)
                     .text_size(zx(12.))
                     .line_height(zx(18.))
                     .text_color(k.text2)
@@ -1572,7 +1572,7 @@ pub fn logo(size: f32, cx: &App) -> Div {
         .size(zx(size))
         .rounded(zx(size * 0.3))
         .bg(linear_gradient(200., linear_color_stop(k.accent, 0.), linear_color_stop(k.violet, 1.)))
-        .shadow(vec![BoxShadow { color: k.accent.opacity(0.35), offset: point(zx(0.), zx(0.)), blur_radius: zx(18.), spread_radius: zx(0.) }])
+        .shadow(vec![BoxShadow { color: k.accent.opacity(0.35), offset: point(zx(0.), zx(0.)), blur_radius: zx(18.), spread_radius: zx(0.), inset: false }])
 }
 
 #[allow(dead_code)]

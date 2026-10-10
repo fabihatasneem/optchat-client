@@ -5,7 +5,7 @@ import { type McpClient, stdioClient } from "./mcp-client.ts";
 const R = "/Applications/ChatGPT.app/Contents/Resources";
 const NM = `${R}/cua_node/lib/node_modules`;
 const HOME = Deno.env.get("HOME") ?? "";
-export const BUNDLE = "com.reframe.optchat.gpui";
+export const BUNDLE = "com.reframe.optchat.gpui.dev"; // the dev build (dist-dev), never the user's app
 export const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 
 export type Rect = [number, number, number, number];

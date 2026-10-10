@@ -18,6 +18,9 @@ regex = "1"
 base64 = "0.22"
 sha2 = "0.10"
 log = "0.4"
+# GPUI at the zed revision with the iOS backend (zed#63068 gpui-ios-platform), the same one optchat-ios builds
+gpui = { git = "https://github.com/zed-industries/zed", rev = "97dc71d8b8f79012c1441aa01121fba95667292a" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "97dc71d8b8f79012c1441aa01121fba95667292a" }
 
 [profile.dev]
 opt-level = 1

@@ -3,3 +3,4 @@ data/
 shots/*.tmp
 *.DS_Store
 /dist/
+/dist-dev/

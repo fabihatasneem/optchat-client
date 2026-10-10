@@ -8,8 +8,7 @@ use crate::workspace::Workspace;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui::Context;
-use gpui_component::input::Input;
-use gpui_component::Sizable;
+use crate::kit::input::Input;
 use optchat_proto::types::*;
 
 pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) -> impl IntoElement {

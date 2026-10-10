@@ -12,8 +12,9 @@ use crate::theme::c;
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use crate::state::View;
 use gpui::Context;
-use gpui_component::input::{InputEvent, InputState};
+use crate::kit::input::{InputEvent, InputState};
 use optchat_proto::types::*;
 
 actions!(
@@ -142,7 +143,7 @@ pub struct Workspace {
     ask_limit: std::rc::Rc<std::cell::Cell<usize>>,
     bounds_seq: u64,
     title: String,
-    task_menu: Option<(Entity<gpui_component::menu::PopupMenu>, Point<Pixels>, Subscription)>,
+    task_menu: Option<(Entity<crate::kit::menu::PopupMenu>, Point<Pixels>, Subscription)>,
     pub tab_scroll: ScrollHandle,
     pub tab_scrolled_to: Option<i64>,
 }
@@ -243,7 +244,7 @@ impl Workspace {
             if let Some((menu, _, _)) = &this.task_menu {
                 // an open task menu keeps the focus (so Esc and the arrows reach it)
                 let m = menu.clone();
-                m.update(cx, |m, cx| m.focus_handle(cx).focus(window));
+                m.update(cx, |m, cx| m.focus_handle(cx).focus(window, cx));
                 return;
             }
             let input = match &this.overlay {
@@ -254,7 +255,7 @@ impl Workspace {
             };
             match input {
                 Some(i) => i.update(cx, |i, cx| i.focus(window, cx)),
-                None => window.focus(&this.focus),
+                None => window.focus(&this.focus, cx),
             }
             cx.notify();
         }));
@@ -335,14 +336,14 @@ impl Workspace {
                         let _ = this.update_in(cx, |w, window, cx| crate::testcmd::run(w, &c, window, cx));
                     }
                     if headless {
-                        let _ = cx.update(|window, cx| window.draw(cx).clear());
+                        let _ = cx.update(|window, cx| { let a = window.draw(cx); a.clear(cx) });
                     }
                     crate::ui::set_state_extra("lastCmd", serde_json::json!({ "op": c["op"], "seq": c["seq"] }));
                 }
                 if headless {
                     // macOS draws nothing while the screen is locked: lay the frame out ourselves (hitboxes, focus,
                     // probes), nothing is presented
-                    let _ = cx.update(|window, cx| window.draw(cx).clear());
+                    let _ = cx.update(|window, cx| { let a = window.draw(cx); a.clear(cx) });
                 }
                 if this.update(cx, |w, cx| w.publish_state(cx)).is_err() {
                     break;
@@ -468,7 +469,7 @@ impl Workspace {
                 if op == "open" { w.open_task(id, window, cx) } else { w.act(id, op, window, cx) }
             });
         });
-        let menu = gpui_component::menu::PopupMenu::build(window, cx, move |m, _, _| task_menu(m, id, status, act));
+        let menu = crate::kit::menu::PopupMenu::build(window, cx, move |m, _, _| task_menu(m, id, status, act));
         let sub = cx.subscribe_in(&menu, window, |w: &mut Workspace, _, _: &DismissEvent, _, cx| {
             w.close_task_menu(cx);
         });
@@ -476,7 +477,7 @@ impl Workspace {
             p.menu_open = true;
             cx.notify();
         });
-        menu.update(cx, |m, cx| m.focus_handle(cx).focus(window));
+        menu.update(cx, |m, cx| m.focus_handle(cx).focus(window, cx));
         self.task_menu = Some((menu, pos, sub));
         cx.notify();
     }
@@ -577,7 +578,7 @@ impl Render for Workspace {
         // nothing focused (a finished task has no composer, a dialog closed): keep the workspace's keys working
         let ended_now = self.state.read(cx).info().map(|i| i.task.status.terminal()).unwrap_or(false);
         if self.overlay.is_none() && self.ask.is_none() && (window.focused(cx).is_none() || (ended_now && !self.focus.contains_focused(window, cx))) {
-            window.focus(&self.focus);
+            window.focus(&self.focus, cx);
         }
         self.renders = crate::ui::frame_count();
         self.update_title(window, cx); // a rename shows at once
@@ -617,7 +618,7 @@ impl Render for Workspace {
             .bg(k.bg)
             .text_color(k.text)
             .text_size(px(13.5))
-            .font_family(".SystemUIFont")
+            .font_family(crate::ui::SANS)
             .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
                 let o = w.side_open(cx);
                 w.set_side_open(!o, cx)
@@ -1024,7 +1025,7 @@ impl Workspace {
         ed = ed.child(crate::tabs::tab_strip(self, window, cx));
         ed = ed.child(crate::tabs::task_bar(self, window, cx));
         // a click in the feed leaves the composer (so M dictates, as outside a text field in the web app)
-        ed = ed.child(div().flex_1().min_h_0().child(AnyView::from(self.feed.clone()).cached(StyleRefinement::default().size_full())).child(probe("feed")).on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, _| window.focus(&w.focus))));
+        ed = ed.child(div().flex_1().min_h_0().child(AnyView::from(self.feed.clone()).cached(StyleRefinement::default().size_full())).child(probe("feed")).on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, cx| window.focus(&w.focus, cx))));
         if ended {
             ed = ed.child(crate::tabs::endbar(self, cx));
         } else {
@@ -1036,11 +1037,11 @@ impl Workspace {
 }
 
 /// The task context menu (task rows and tabs): the web app's task actions for that task's status, then Copy #id.
-pub fn task_menu(m: gpui_component::menu::PopupMenu, id: i64, status: TaskStatus, act: std::rc::Rc<dyn Fn(i64, &'static str, &mut Window, &mut App)>) -> gpui_component::menu::PopupMenu {
-    use gpui_component::menu::PopupMenuItem;
+pub fn task_menu(m: crate::kit::menu::PopupMenu, id: i64, status: TaskStatus, act: std::rc::Rc<dyn Fn(i64, &'static str, &mut Window, &mut App)>) -> crate::kit::menu::PopupMenu {
+    use crate::kit::menu::PopupMenuItem;
     let term = status.terminal();
     let mut m = m;
-    let item = |m: gpui_component::menu::PopupMenu, label: &str, op: &'static str| {
+    let item = |m: crate::kit::menu::PopupMenu, label: &str, op: &'static str| {
         let act = act.clone();
         m.item(PopupMenuItem::new(label.to_string()).on_click(move |_, window, cx| act(id, op, window, cx)))
     };

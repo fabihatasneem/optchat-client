@@ -7,6 +7,7 @@ mod composer;
 mod dialogs;
 mod feed;
 mod fmt;
+mod kit;
 mod markdown;
 mod media;
 mod mic;
@@ -24,7 +25,6 @@ mod ui;
 mod workspace;
 
 use gpui::*;
-use gpui_component::Root;
 use std::sync::OnceLock;
 
 pub static LAUNCH: OnceLock<std::time::Instant> = OnceLock::new();
@@ -85,11 +85,13 @@ fn main() {
     let rt: &'static tokio::runtime::Runtime = Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("optchat-client").enable_all().build().expect("tokio runtime")));
     ui::start_probe_writer();
 
-    Application::new().with_assets(Assets).run(move |cx: &mut App| {
-        gpui_component::init(cx);
+    gpui_platform::application().with_assets(Assets).run(move |cx: &mut App| {
+        kit::init(cx);
+        ui::register_fonts(cx, assets::ASSETS);
+        ui::set_executor(cx.background_executor().clone());
         let prefs: state::Prefs = std::fs::read_to_string(&prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         theme::init(cx, prefs.theme.clone(), prefs.follow_system, cx.window_appearance());
-        gpui_component::Theme::global_mut(cx).font_size = px(prefs.font_size - 0.5);
+        kit::set_font_size(cx, px(prefs.font_size - 0.5));
         crate::ui::set_zoom(prefs.font_size);
         workspace::bind(cx);
         composer::bind(cx);
@@ -130,7 +132,7 @@ fn main() {
                     theme::sync_window(window, cx);
                     let ws = cx.new(|cx| workspace::Workspace::new(st2.clone(), window, cx));
                     ws.update(cx, |w, cx| w.composer.update(cx, |c, cx| c.focus(window, cx)));
-                    cx.new(|cx| Root::new(ws, window, cx))
+                    ws
                 },
             )
             .expect("open window");
@@ -163,11 +165,11 @@ fn main() {
 
 
 fn set_menus(cx: &mut App) {
-    use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
+    use crate::kit::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
     use workspace::*;
     cx.set_menus(vec![
         Menu {
-            name: "OptChat".into(),
+            name: "OptChat".into(), disabled: false,
             items: vec![
                 MenuItem::action("About OptChat", About),
                 MenuItem::separator(),
@@ -182,9 +184,9 @@ fn set_menus(cx: &mut App) {
                 MenuItem::action("Quit OptChat", Quit),
             ],
         },
-        Menu { name: "File".into(), items: vec![MenuItem::action("New Task…", NewTask), MenuItem::action("Open Main Chat", OpenMainChat), MenuItem::action("Go to Task…", TaskSwitcher), MenuItem::separator(), MenuItem::action("Close Tab", CloseTab)] },
+        Menu { name: "File".into(), disabled: false, items: vec![MenuItem::action("New Task…", NewTask), MenuItem::action("Open Main Chat", OpenMainChat), MenuItem::action("Go to Task…", TaskSwitcher), MenuItem::separator(), MenuItem::action("Close Tab", CloseTab)] },
         Menu {
-            name: "Edit".into(),
+            name: "Edit".into(), disabled: false,
             items: vec![
                 MenuItem::os_action("Undo", Undo, OsAction::Undo),
                 MenuItem::os_action("Redo", Redo, OsAction::Redo),
@@ -196,7 +198,7 @@ fn set_menus(cx: &mut App) {
             ],
         },
         Menu {
-            name: "View".into(),
+            name: "View".into(), disabled: false,
             items: vec![
                 MenuItem::action("Command Palette…", CommandPalette),
                 MenuItem::separator(),
@@ -217,7 +219,7 @@ fn set_menus(cx: &mut App) {
             ],
         },
         Menu {
-            name: "Task".into(),
+            name: "Task".into(), disabled: false,
             items: vec![
                 MenuItem::action("Focus Composer", FocusComposer),
                 MenuItem::action("Stop the Running Turn", StopTurn),
@@ -229,7 +231,7 @@ fn set_menus(cx: &mut App) {
             ],
         },
         Menu {
-            name: "Window".into(),
+            name: "Window".into(), disabled: false,
             items: vec![
                 MenuItem::action("Minimize", Minimize),
                 MenuItem::action("Zoom", ZoomWindow),
@@ -241,7 +243,7 @@ fn set_menus(cx: &mut App) {
             ],
         },
         Menu {
-            name: "Help".into(),
+            name: "Help".into(), disabled: false,
             items: vec![MenuItem::action("Keyboard Shortcuts", ShowShortcuts), MenuItem::action("Commands…", CommandPalette), MenuItem::separator(), MenuItem::action("Show Data Folder", OpenDataFolder)],
         },
     ]);

@@ -1,4 +1,4 @@
-// The app under test: dist/OptChat.app as a client of the OptChat engine, connected to TEST workspaces only
+// The app under test: dist-dev/OptChat Dev.app (never the user's dist/OptChat.app) as a client of the OptChat engine, connected to TEST workspaces only
 // (test-gpui-c / test-gpui-d, scoped tokens from data/test-tokens.json; never the live chat), with its prefs and its
 // token store in a temp folder; driven through Computer Use with coordinates from the app's probe
 // file, observed through its state file and screenshots.
@@ -40,7 +40,7 @@ export class App {
     const env = { ...hl, OPTCHAT_TEST_NO_GLOBAL: "1", OPTCHAT_LOCAL_TOKEN_FILE: `${me.dir}/no-local-token`, OPTCHAT_PROBES: me.probes, OPTCHAT_PREFS_DIR: me.dir, OPTCHAT_TOKEN_DIR: me.dir, OPTCHAT_TEST_TOKENS: TOKENS, ...conn, ...(o.env ?? {}) };
     const args = ["-n", "-W", "--stderr", `${me.dir}/stderr.txt`];
     for (const [k, v] of Object.entries(env)) args.push("--env", `${k}=${v}`);
-    args.push(`${ROOT}/dist/OptChat.app`);
+    args.push(`${ROOT}/dist-dev/OptChat Dev.app`);
     await killLeftovers();
     me.proc = new Deno.Command("open", { args, stdout: "null", stderr: "null" }).spawn(); // -W: returns when the app quits
     // OPTCHAT_E2E_HEADLESS=1: every suite without Computer Use (a locked screen): input through the app's test
@@ -248,7 +248,7 @@ export class App {
 
 /** only instances of this project's bundle (never any other app) */
 async function killLeftovers() {
-  const pat = `${ROOT}/dist/OptChat.app/Contents/MacOS/`;
+  const pat = `${ROOT}/dist-dev/OptChat Dev.app/Contents/MacOS/`; // never the user's app in dist/
   const r = await new Deno.Command("pgrep", { args: ["-f", pat] }).output();
   const pids = new TextDecoder().decode(r.stdout).split("\n").filter(Boolean);
   for (const pid of pids) await new Deno.Command("kill", { args: [pid] }).output();

@@ -8,10 +8,10 @@ use crate::theme::c;
 use crate::ui::*;
 use crate::workspace::Workspace;
 use gpui::*;
+use crate::state::View;
 use gpui::Context;
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::menu::{DropdownMenu, PopupMenuItem};
-use gpui_component::Sizable;
+use crate::kit::button::Button;
+use crate::kit::menu::PopupMenuItem;
 use optchat_proto::metrics::TOKENS;
 use optchat_proto::types::*;
 
@@ -164,7 +164,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
                         Button::new("sb-model")
                             .ghost()
                             .xsmall()
-                            .icon(gpui_component::Icon::empty().path("icons/cpu.svg"))
+                            .icon("cpu")
                             .label(model_label)
                             .dropdown_caret(true)
                             .dropdown_menu(move |mut m, _, _| {

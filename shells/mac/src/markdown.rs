@@ -278,7 +278,7 @@ pub struct Opts {
 
 fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Window) -> AnyElement {
     let base = window.text_style().font();
-    let mono = Font { family: "Menlo".into(), ..base.clone() };
+    let mono = Font { family: crate::ui::MONO.into(), ..base.clone() };
     let mut runs = vec![];
     let mut links: Vec<(Range<usize>, String)> = vec![];
     let mut at = 0;
@@ -456,7 +456,7 @@ pub fn code_block(id: &str, lang: &str, text: &str, k: &C, _cx: &App) -> Statefu
                 .border_color(k.line)
                 .text_size(zx(11.5))
                 .text_color(k.muted)
-                .child(div().font_family("Menlo").child(lang_l))
+                .child(div().font_family(crate::ui::MONO).child(lang_l))
                 .child(
                     div()
                         .id(ElementId::Name(format!("{id}.copy").into()))
@@ -474,7 +474,7 @@ pub fn code_block(id: &str, lang: &str, text: &str, k: &C, _cx: &App) -> Statefu
                 .overflow_x_scroll()
                 .px(zx(14.))
                 .py(zx(10.))
-                .font_family("Menlo")
+                .font_family(crate::ui::MONO)
                 .text_size(zx(12.5))
                 .line_height(zx(19.))
                 .child(highlight(text, lang, k)),

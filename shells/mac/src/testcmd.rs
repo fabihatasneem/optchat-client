@@ -5,6 +5,7 @@
 use crate::state::*;
 use crate::workspace::Workspace;
 use gpui::*;
+use crate::state::View;
 use serde_json::Value;
 
 /// OPTCHAT_HEADLESS: the test lays frames out itself (a locked screen draws nothing)
