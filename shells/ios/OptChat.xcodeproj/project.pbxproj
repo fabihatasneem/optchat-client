@@ -7,16 +7,25 @@
 	objects = {
 
 /* Begin PBXFileReference section */
+		AA00000000000000000000A1 /* OptChatUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OptChatUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000001 /* OptChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OptChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000002 /* OptChat-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "OptChat-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		AA00000000000000000000A2 /* OptChatUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OptChatUITests; sourceTree = "<group>"; };
 		AA0000000000000000000010 /* OptChat */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OptChat; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		AA0000000000000000000020 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA00000000000000000000A3 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -31,6 +40,7 @@
 			children = (
 				AA0000000000000000000002 /* OptChat-Info.plist */,
 				AA0000000000000000000010 /* OptChat */,
+				AA00000000000000000000A2 /* OptChatUITests */,
 				AA0000000000000000000031 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -39,6 +49,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000001 /* OptChat.app */,
+				AA00000000000000000000A1 /* OptChatUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -68,7 +79,46 @@
 			productReference = AA0000000000000000000001 /* OptChat.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AA00000000000000000000A4 /* OptChatUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA00000000000000000000A8 /* Build configuration list for PBXNativeTarget "OptChatUITests" */;
+			buildPhases = (
+				AA00000000000000000000A5 /* Sources */,
+				AA00000000000000000000A3 /* Frameworks */,
+				AA00000000000000000000A6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA00000000000000000000AB /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA00000000000000000000A2 /* OptChatUITests */,
+			);
+			name = OptChatUITests;
+			productName = OptChatUITests;
+			productReference = AA00000000000000000000A1 /* OptChatUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		AA00000000000000000000AA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000050 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0000000000000000000040;
+			remoteInfo = OptChat;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		AA00000000000000000000AB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0000000000000000000040 /* OptChat */;
+			targetProxy = AA00000000000000000000AA /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		AA0000000000000000000050 /* Project object */ = {
@@ -93,6 +143,7 @@
 			projectRoot = "";
 			targets = (
 				AA0000000000000000000040 /* OptChat */,
+				AA00000000000000000000A4 /* OptChatUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -105,10 +156,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA00000000000000000000A6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		AA0000000000000000000041 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA00000000000000000000A5 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -200,6 +265,38 @@
 			};
 			name = Release;
 		};
+		AA00000000000000000000A9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.reframe.optchat.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = OptChat;
+			};
+			name = Debug;
+		};
+		AA00000000000000000000AC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.reframe.optchat.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = OptChat;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -217,6 +314,15 @@
 			buildConfigurations = (
 				AA0000000000000000000071 /* Debug */,
 				AA0000000000000000000072 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA00000000000000000000A8 /* Build configuration list for PBXNativeTarget "OptChatUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA00000000000000000000A9 /* Debug */,
+				AA00000000000000000000AC /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
