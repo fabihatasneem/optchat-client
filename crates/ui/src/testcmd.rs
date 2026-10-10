@@ -384,11 +384,13 @@ pub fn run(w: &mut Workspace, c: &Value, window: &mut Window, cx: &mut Context<W
             // as the new-task dialog's Start does
             let (title, instruction) = (str_("title"), str_("instruction"));
             let usd = c["usd"].as_f64();
+            // a model for the child (tests: Haiku, low), else the parent's
+            let settings = c["model"].as_str().map(|m| optchat_proto::types::SettingsPatch { model: Some(m.to_string()), effort: Some("low".into()), ..Default::default() });
             let parent = w.state.read(cx).current;
             w.state.update(cx, |s, cx| {
                 s.run(
                     cx,
-                    move |h| async move { h.spawn(parent, "handoff", &title, &instruction, vec![], None, usd.map(|u| optchat_proto::api::BudgetArgs { usd: Some(u), ..Default::default() }), None, true).await },
+                    move |h| async move { h.spawn(parent, "handoff", &title, &instruction, vec![], None, usd.map(|u| optchat_proto::api::BudgetArgs { usd: Some(u), ..Default::default() }), settings, true).await },
                     move |s, r, cx| match r {
                         Ok(id) => cx.emit(StateEvent::SpawnedOpen(id)),
                         Err(e) => s.local_notice("error", e),
