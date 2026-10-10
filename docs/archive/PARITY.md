@@ -14,13 +14,13 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 - [x] A5 Writer lock (pid file `writer.lock` in the app dir); a second live process refuses to open the same chat — <dir>/<instance>/writer.lock like takeLock; store_file::writer_lock_refuses_a_second_live_process
 - [x] A6 Serialized writes (no read-then-write race); upsert by id for message/context/request/turn/task/wire/kv/rate/model — single connection mutex, upserts; store::roundtrip_memory
 - [x] A7 tlog id `t:i`, tnode id `t:l:i`; first node build wins (insert-if-absent) — t:i / t:l:i, insert-if-absent; store::roundtrip_memory
-- [~] A8 Blobs content-addressed (sha256 hex), stored once; image bytes externalized from message bodies (data "" + blob) — sha256 blobs stored once (store_file test); externalize() of message bodies not directly asserted
-- [~] A9 kv: `t<id>:view` {view, batching}, `t<id>:cview`, `t<id>:inbox`, `global:settings`, `root:<sha>` → root context id — all kv keys used; only the inbox key is asserted (tasks_offline)
-- [~] A10 metrics emission is one transaction (INSERT OR IGNORE event + ON CONFLICT totals for task and every ancestor, own + `*`) — single-transaction emission; exercised by model tests, store path not unit-tested
-- [~] A11 `putMetricTotals` (rebuild) replaces the cache in one transaction — put_metric_totals one transaction; only via the fresh migration test
-- [~] A12 v3→v4 migration (idempotent, keyed on task 0): log/node → tlog/tnode of task 0, view/cview kv, v2 agents a1–a7 → children #1–#7, request/turn task column — migrate() keyed on task 0; fresh-DB idempotence tested, no v3 fixture database
-- [~] A13 metrics migration (idempotent, keyed on `metric` non-empty): seed rates, backfill ledger from requests/turns, fold totals; later starts upsert new metric definitions — migrate_metrics idempotent on a fresh DB; backfill from a real v3 ledger not fixture-tested
-- [~] A14 `spent` field dropped from task rows on load — extra["spent"] stripped on load; no test
+- [x] A8 Blobs content-addressed (sha256 hex), stored once; image bytes externalized from message bodies (data "" + blob) — store_migrate::a8_put_message_externalizes_image_bytes_into_blobs
+- [x] A9 kv: `t<id>:view` {view, batching}, `t<id>:cview`, `t<id>:inbox`, `global:settings`, `root:<sha>` → root context id — store_migrate::a9_kv_keys_view_cview_inbox, metrics_rates::a9_global_settings_kv (root:<sha> in memory_compactor c4_c5_c13)
+- [x] A10 metrics emission is one transaction (INSERT OR IGNORE event + ON CONFLICT totals for task and every ancestor, own + `*`) — store_migrate::a10_emission_is_one_transaction_over_the_chain, metrics_rates::a10_h5_emission_chain_and_runtime_rebuild
+- [x] A11 `putMetricTotals` (rebuild) replaces the cache in one transaction — store_migrate::a11_put_metric_totals_replaces_the_cache_in_one_transaction
+- [x] A12 v3→v4 migration (idempotent, keyed on task 0): log/node → tlog/tnode of task 0, view/cview kv, v2 agents a1–a7 → children #1–#7, request/turn task column — store_migrate::a12_v3_to_v4_migration_on_a_fixture (synthetic v3 database)
+- [x] A13 metrics migration (idempotent, keyed on `metric` non-empty): seed rates, backfill ledger from requests/turns, fold totals; later starts upsert new metric definitions — store_migrate::a13_metrics_migration_backfills_the_ledger_once
+- [x] A14 `spent` field dropped from task rows on load — store_migrate::x3_a14_b6_engine_loads_the_migrated_fixture (spent stripped)
 - [x] A15 Loading 1.5 GB DB: logs + nodes + totals + rates load off the UI thread; first paint before load completes (skeleton) — engine loads on tokio; first frame ~200 ms before chat loaded ~850 ms (perf.json)
 - [x] A16 In-memory store for tests (same trait) — Store::memory() used by the harness and roundtrip_memory
 
@@ -29,33 +29,33 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 - [x] B2 `mostDuePair` due = (T − last)/2^l over global positions, ties → oldest, pairs within one tree, parent must be buildable/built — view_props::d2_fork_of_fork_merge_down_matches_reference (20000 steps), d_ties_and_age_oldest_pair_most_due
 - [x] B3 `mergeDown` to target; `tiles` validity check of a saved view — view_props (tiling after every step), view::tests::tiling
 - [x] B4 renderBlocks: blocks of 4 lines, `<chat>\n` prefix, `</chat>` closing block, mark on last whole block — view::tests::blocks
-- [~] B5 Line format `start+2^l|text` and `start+2^l@t|text` for foreign trees; newlines flattened — line format checked indirectly (zoom output in tasks_offline)
-- [~] B6 View saved and loaded (never rebuilt), folded once from the log when missing/invalid ("view folded" log line) — saved view reused (hub_realdb no refold); the refold path is not tested
-- [~] B7 Append: each message appends its line; past HIGH (viewBudget) one batch merges down to LOW (half); `batching` persisted; pending batch runs at load — view_batches_under_a_small_budget (sawtooth); exact HIGH/LOW numbers not asserted
-- [~] B8 Compactions' view (cview) 16–32 KB sawtooth, re-merged when the view merges or past 32 KB; derived when missing — cview 16–32 KB in code; sizes not asserted (view_props checks cview cuts only)
-- [~] B9 `#want`: a pending batch stuck on an inherited pair builds that parent (any reader may build) — Task::want → wanted queue; no test
+- [x] B5 Line format `start+2^l|text` and `start+2^l@t|text` for foreign trees; newlines flattened — memory_compactor::b5_line_format_own_foreign_flattened
+- [x] B6 View saved and loaded (never rebuilt), folded once from the log when missing/invalid ("view folded" log line) — store_migrate::x3_a14_b6_engine_loads_the_migrated_fixture (refold + "view folded"), hub_realdb (saved view reused)
+- [x] B7 Append: each message appends its line; past HIGH (viewBudget) one batch merges down to LOW (half); `batching` persisted; pending batch runs at load — memory_compactor::b7_high_low_exact_numbers, b7_pending_batch_runs_at_load
+- [x] B8 Compactions' view (cview) 16–32 KB sawtooth, re-merged when the view merges or past 32 KB; derived when missing — memory_compactor::b8_cview_sawtooth_16_32_kb, b8_cview_remerged_when_the_view_merges
+- [x] B9 `#want`: a pending batch stuck on an inherited pair builds that parent (any reader may build) — memory_compactor::b9_c12_want_builds_the_inherited_parent
 - [x] B10 Long texts split at CAP (30,000 chars) over several messages (echo excepted); images are their own leaf messages with a marker text `[image name w×h]` — engine_offline::long_texts_split_at_cap_and_images_are_leaves (CAP 30000 split, echo excepted, `[image name w×h]` leaves)
 - [x] B11 appendMany rollback on a failed store write (no phantom entries) — engine_offline::append_rolls_back_when_the_store_fails
-- [~] B12 render(skip) leaves out own lines made only of messages delivered as new; settled(skip) — render(skip)/settled(skip) as TS; covered only by the model tests
-- [~] B13 Unbuilt queue / mergeReady / wanted queues; rebuildQueues at load — queues rebuilt at load; tasks_offline drains them, no specific assert
+- [x] B12 render(skip) leaves out own lines made only of messages delivered as new; settled(skip) — memory_compactor::b12_render_and_settled_with_skip
+- [x] B13 Unbuilt queue / mergeReady / wanted queues; rebuildQueues at load — memory_compactor::b13_queues_rebuilt_at_load
 - [x] B14 Fork/continue copies the source's view and cview; segments = source.segments ++ {source, cut=T} — view_props::a_b_fork_copies_view_own_lines_append (view, cview, batching, segments)
 - [x] B15 Property tests: tiling, no inherited merge past cut, Taelin push order equals reference `due` rule (view-tasks equivalents) — crates/engine/tests/view_props.rs: c (2000 random pushes over fork chains, no inherited part past its cut), d1 (Taelin push = due rule, 20001 steps), d2 (fork-of-fork reference, 20000)
 
 ## C. Compactor (optchat.ts #build / #compact, prompts.ts)
-- [~] C1 Shared pool of 8 jobs across all tasks; settle-waiting tasks first; first 8 unbuilt per task; ready merges; wanted — pool of 8 jobs, settle waiters first; no test
-- [~] C2 Level 0: message ≤ 512 B (report lines 280 B) and not an image → its own text, no call — ≤512 B leaf without a call (tasks_offline); 280 B report path not tested
+- [~] C1 Shared pool of 8 jobs across all tasks; settle-waiting tasks first; first 8 unbuilt per task; ready merges; wanted — memory_compactor::c1_pool_of_8_settle_waiters_first (pool of 8, settle waiters first, first 8 unbuilt); the order of ready merges vs wanted parents is not asserted
+- [x] C2 Level 0: message ≤ 512 B (report lines 280 B) and not an image → its own text, no call — memory_compactor::c2_level0_limits_512_and_280
 - [x] C3 Merge: halves joined if ≤ 512 B, else a model call — tasks_offline asserts 0:1:0 built from halves
-- [~] C4 Compaction input: builder's cview lines up to the node (stops at first unbuilt), blocks + cache mark, step text (compactMessageTask / compactMergeTask with 512-dash ruler), image attached for image leaves — compaction input rendering bypassed by the scripted compactor in tests
-- [~] C5 Same SYSTEM prompt and same tool list as turns (tools never called: tool call → error result) — same SYSTEM + tools; tool call → error result; no test
-- [~] C6 Too-long retry in the same conversation (`tooLong`), up to 5 tries; best (shortest) kept; cut to limit as last resort — too-long retries, best kept; no test
+- [x] C4 Compaction input: builder's cview lines up to the node (stops at first unbuilt), blocks + cache mark, step text (compactMessageTask / compactMergeTask with 512-dash ruler), image attached for image leaves — memory_compactor::c4_c5_c13_the_compaction_request, c4_merge_request_cache_mark_and_image_leaf
+- [x] C5 Same SYSTEM prompt and same tool list as turns (tools never called: tool call → error result) — memory_compactor::c4_c5_c13_the_compaction_request (SYSTEM + tools, tool call → error result)
+- [x] C6 Too-long retry in the same conversation (`tooLong`), up to 5 tries; best (shortest) kept; cut to limit as last resort — memory_compactor::c6_too_long_retries
 - [x] C7 Output cleanup (strip tags/id prefix); empty reply → failure — compactor::tests::cleanup
 - [x] C8 Output cap 16,000 tokens (CLAUDE_CODE_MAX_OUTPUT_TOKENS + proxy max_tokens clamp + thinking budget kept below) — local::tests::max_tokens_clamp + engine_offline::proxies_pin_openai_routing_and_clamp_anthropic_tokens (stub upstream)
-- [~] C9 150 s hard timeout; runaway abort (>4096 chars or long blank runs) — 150 s timeout; runaway abort (cleanup test); timeout path untested
-- [~] C10 Failed node → `failed` map, retried at the next message, or after 5 s when a turn waits — failed map + retries; no test
-- [~] C11 Prefix-writing lock: a call whose marked prefix another call is writing waits for its first response (≤ 90 s) — prefix-writing lock ≤ 90 s; no test
-- [~] C12 Node record {l,i,text,size,requestId,tries,by}; `by` when a child builds a parent's node; node event to every task whose timeline holds the tree — node record + node events; `by` not asserted
-- [~] C13 Compactor model/effort from the builder's settings (default Haiku 5.5, xhigh) — builder's compactor model/effort (default Haiku 5.5 xhigh); no test
-- [~] C14 Imported v2 tasks named once (titleTask JSON) with TITLE_VERSION — title_imported + TITLE_VERSION; real DB already titled
+- [x] C9 150 s hard timeout; runaway abort (>4096 chars or long blank runs) — memory_compactor::c9_timeout_and_runaway_abort (paused tokio clock)
+- [x] C10 Failed node → `failed` map, retried at the next message, or after 5 s when a turn waits — memory_compactor::c10_failed_map_retries
+- [x] C11 Prefix-writing lock: a call whose marked prefix another call is writing waits for its first response (≤ 90 s) — memory_compactor::c11_prefix_writing_lock
+- [x] C12 Node record {l,i,text,size,requestId,tries,by}; `by` when a child builds a parent's node; node event to every task whose timeline holds the tree — memory_compactor::b9_c12_want_builds_the_inherited_parent (`by`, node events to holders)
+- [~] C13 Compactor model/effort from the builder's settings (default Haiku 5.5, xhigh) — memory_compactor::c4_c5_c13_the_compaction_request (builder's compactor model/effort); the hub default (Haiku 5.5, xhigh) is not asserted
+- [x] C14 Imported v2 tasks named once (titleTask JSON) with TITLE_VERSION — memory_compactor::c14_imported_tasks_titled_once
 
 ## D. Tasks engine (spec-tasks, optchat.ts Engine)
 - [x] D1 Task record fields (id, parent, title, mode, prev, status, reason, result, settings, budget, segments, createdAt, startedBy, endedAt, interrupted, unrun, imported) — TaskRecord fields; hub_realdb loads 109 tasks
@@ -132,11 +132,11 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 - [x] H2 emit(task, source, items, meta): idempotent `<source>:<metric>` ids, own + subtree for chain, per kind and `*`, change callback → task event + budget check — metrics::tests::fold_invariants + budget test
 - [x] H3 charge per model call: usd, tokens.in/cache_read/cache_write/out, time.model, calls.model, calls.unpriced; meta model/effort/provider/backend/request/turn/rate/ratePer1M/cacheWrite1h (+node, tries for compactions) — charge meta; mid_turn_model_switch checks the ledger model
 - [x] H4 time.active heartbeats every 10 s + flush at end; source `turn:<id>#n` — time.active > 0 in the haiku test
-- [~] H5 rebuild folds the ledger — fold tested; no runtime rebuild entry point
-- [~] H6 Rates: inForce(model, at), history, add, price (long context, 1h writes), SEED_TABLE, syncPublished at start (skip manual), calibrate from Claude cost reports (2% threshold, 3 agreeing reports, never over manual), reprice unpriced calls once — rates::tests pricing + calibration; sync_published untested
-- [~] H7 Model catalog: Claude list + Codex models_cache.json (visibility, efforts minus ultra, default effort, computer use not luna); `model` table refresh at start, hidden flag — catalog from claude list + codex cache; models panel screenshot
-- [~] H8 spendByModel from the ledger (cached 30 s) — spend by model; screenshot
-- [~] H9 metrics.breakdown by kind / model / source (own vs subtree) — breakdown tables; log panel screenshots
+- [x] H5 rebuild folds the ledger — metrics_rates::a10_h5_emission_chain_and_runtime_rebuild (Engine::metrics_rebuild)
+- [x] H6 Rates: inForce(model, at), history, add, price (long context, 1h writes), SEED_TABLE, syncPublished at start (skip manual), calibrate from Claude cost reports (2% threshold, 3 agreeing reports, never over manual), reprice unpriced calls once — metrics_rates::h6_in_force_history_add_price, h6_seed_table_is_the_published_table, h6_sync_published_skips_manual, h6_calibrate_rules, h6_reprice_unpriced_once
+- [x] H7 Model catalog: Claude list + Codex models_cache.json (visibility, efforts minus ultra, default effort, computer use not luna); `model` table refresh at start, hidden flag — metrics_rates::h7_claude_list_and_codex_models_cache, h7_catalog_table_refresh_and_hidden (fixture models_cache)
+- [x] H8 spendByModel from the ledger (cached 30 s) — metrics_rates::h8_spend_by_model_cached_30_s
+- [x] H9 metrics.breakdown by kind / model / source (own vs subtree) — metrics_rates::h9_breakdown_by_kind_model_source
 
 ## I. Dictation (spec-dictation, lib/stt.ts, keyterms.ts)
 - [~] I1 Native microphone capture (CoreAudio via cpal), mono, resampled to pcm16 16 kHz, 100 ms chunks with level; recording starts at the press; buffered until the service is ready — cpal capture (device test ignored, needs mic permission); e2e uses the fake mic
@@ -288,7 +288,7 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 ## X. Tests
 - [x] X1 cargo test: view algorithms + property tests (tiling, cut, due order vs reference over 20k steps) — view::tests + view_props (fork cuts over 2000 pushes, 20001/20000-step references)
 - [x] X2 cargo test: trim, keyterms, cap/globToRegExp, cache layout, live settings rewrite, rates pricing/calibration, metrics invariants + rebuild — trim, keyterms, tools, local, rates, metrics unit tests
-- [~] X3 cargo test: store on a temp copy (load counts match sqlite), migration idempotent, schema compatible — store_file (schema identical, sync adds columns, lock, blobs) + fresh migrations; no v3 fixture migration
+- [x] X3 cargo test: store on a temp copy (load counts match sqlite), migration idempotent, schema compatible — store_migrate::a12 / a13 / x3_a14_b6 on a v3 fixture (load counts match sqlite) + store_file
 - [x] X4 cargo test (models): Haiku turn end to end via claude CLI; zoom across fork; lifecycle (spawn/report/pause/resume/close/cancel/budget); Codex gpt-6-luna turn; mid-turn switch — model_turns + lifecycle (Haiku, GPT-6-Luna) passed
 - [x] X5 Dictation engine test with a WAV file (Claude and Codex services, fallback) — stt live WAV tests passed
 - [x] X6 tests/e2e.ts (Deno, Computer Use) walking every area, screenshots in shots/ — tests/e2e.ts: panels, features, chat, inputs, quit, smoke, flow, perf
