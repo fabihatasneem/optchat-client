@@ -285,7 +285,7 @@ impl Workspace {
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
-                "firstFrameMs": s.stats.first_frame_ms, "frames": frame_summary(), "rss": crate::ui::rss_mb(), "loadedMs": s.stats.loaded_ms, "switches": s.stats.switches, "errors": s.errors.clone(),
+                "firstFrameMs": s.stats.first_frame_ms, "frames": frame_summary(), "rss": crate::ui::rss_mb(), "loadedMs": s.stats.loaded_ms, "switches": s.stats.switches, "switchesFull": s.stats.switches_full, "errors": s.errors.clone(),
             });
             set_state_json(j.to_string());
             set_state_extra("ws", serde_json::json!({"sideW": s.prefs.side_w, "maxTurns": s.global.max_turns, "running2": s.tasks.values().filter(|x| x.running).count(), "waiting": s.tasks.values().filter(|x| x.waiting).map(|x| x.task.id).collect::<Vec<_>>(), "taskStatus": s.tasks.values().map(|x| (x.task.id.to_string(), x.task.status.as_str())).collect::<std::collections::BTreeMap<_, _>>(), "pinned": s.pinned_request, "unbuilt": s.cur.view.as_ref().map(|v| v.parts.iter().filter(|p| !p.built).count()), "busy": s.busy.len(), "failed": s.failed.len(), "dictDone": s.dict.done_count, "dictText": s.dict.text.clone()}));

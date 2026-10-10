@@ -160,6 +160,8 @@ pub struct Stats {
     /// task switches: from load_task to the first render with the task's data, ms
     pub switch_t0: Option<std::time::Instant>,
     pub switches: Vec<f64>,
+    /// the same switches until their turns and requests (two rpcs after the snapshot) are in, ms
+    pub switches_full: Vec<f64>,
     pub events: u64,
 }
 
@@ -590,9 +592,17 @@ impl AppState {
                 }
                 // its turns and requests (the foot chips, the step tables), as the page loads them after a snapshot
                 let seq = self.open_seq;
+                let t0 = self.stats.switch_t0;
                 self.run(cx, move |h| async move { (h.turns_recent(cur, 80).await, h.requests_recent(cur, false, 300).await) }, move |s, (turns, requests), _| {
                     if s.open_seq != seq || s.current != cur {
                         return;
+                    }
+                    if let Some(t0) = t0 {
+                        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+                        if std::env::var("OPTCHAT_TIMING").is_ok() {
+                            eprintln!("open #{cur}: turns + requests in at {ms:.1} ms");
+                        }
+                        s.stats.switches_full.push(ms);
                     }
                     for t in turns {
                         s.cur.turns.entry(t.id.clone()).or_insert(t);

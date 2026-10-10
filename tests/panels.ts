@@ -1,6 +1,7 @@
 // Panels, shortcuts and chrome: rail keys, zoom, status bar menus, budgets popover, models rate edit, log subtree,
 // context wire, settings tabs, narrow layout, context menu, tabs, memory search reveal. No model calls.
 import { App, check, failed } from "./lib/app.ts";
+import { Peer } from "./lib/hub.ts";
 import { sleep } from "./lib/cua.ts";
 const a = await App.launch({ env: { OPTCHAT_TEST_HOOKS: "1" } });
 const st = () => a.state();
@@ -173,11 +174,12 @@ try {
       check(st().memory?.hit === `${t}:0:${i}`, `the hit reveals message ${i} in the tree (${st().memory?.hit})`);
     }
   });
-  // the rate saved through the UI is in the app's database copy (read before quitting: quit removes the copy)
-  await step("rate-in-db", async () => {
-    const out = new Deno.Command("sqlite3", { args: [a.db, "select data from rate where model='claude-haiku-5-5'"] }).outputSync();
-    const rate = new TextDecoder().decode(out.stdout);
-    check(/"in":1\.25/.test(rate), `the rate saved through the UI is in the database (${rate.split("\n").filter((l) => l.includes("1.25"))[0]?.slice(0, 120)})`);
+  // the rate saved through the UI is the hub's rate in force (read by a second client)
+  await step("rate-in-hub", async () => {
+    const peer = await Peer.connect(a.db, 0);
+    const h = (await peer.rpc("models.list")).find((m: any) => m.id === "claude-haiku-5-5");
+    peer.close();
+    check(h?.rate?.per1m?.in === 1.25 && h?.rate?.source === "manual", `the rate saved through the UI is the hub's rate in force (in $${h?.rate?.per1m?.in}/1M, ${h?.rate?.source})`);
   });
 } catch (e) { check(false, String(e)); await a.shot("panels-fail"); } finally { await a.quit(); }
 Deno.exit(failed() ? 1 : 0);

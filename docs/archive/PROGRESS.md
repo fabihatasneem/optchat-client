@@ -1,5 +1,24 @@
 # PROGRESS — OptChat for Mac (GPUI)
 
+## Client mode (current)
+The app is a pure client of the web app's hub (https://chat.reframe.dev): one websocket like the browser's page
+(snapshot on connect / open, events, commands, rpc; reconnect with backoff + resnapshot; offline state in the status
+bar), images from /blob, dictation over /stt, the microphone in the app. `crates/proto` holds the wire types; the app
+no longer links `crates/engine` (kept in the repo, unlinked, for the user to decide). Per-window state (tabs, sidebar,
+window, drafts, theme) in `~/Library/Application Support/com.reframe.optchat.gpui/prefs-<instance>.json`.
+- Env: `OPTCHAT_HUB` (default https://chat.reframe.dev), `OPTCHAT_HUB_DB` (a test instance `t<id>`; unset = the live
+  chat). Tests: `OPTCHAT_TEST_DB` (default tmv23x72y, a live-sized test copy seeded by the orchestrator), sync.ts uses
+  tgpuisync, the empty-chat check tgpuiempty. Deno test clients need `DENO_TLS_CA_STORE=system` (e2e.ts sets it).
+- Perf (release, live-sized copy; shots/perf.json): first frame 157 ms, chat loaded 384 ms (in-process: 200 / 850);
+  task switch shown p50 33 / p90 51 ms, main chat 50 / 56 (in-process 14–34); with turns + requests (two rpcs after
+  the snapshot, ≈ 26 ms p50) p50 49 / p90 109, main chat ≈ 107; scroll work p50 3.7 / p95 4.0 / max 4.3 ms
+  (in-process 3.2 / 4.7 / 5.6); RSS 142 MB (185).
+- Hub suggestions (not applied; optchat-src is read-only): turns/requests in the snapshot; a (task, at) index on
+  request (main chat requests.recent ≈ 55 ms slower than other tasks); an explicit allowance for native clients instead
+  of a spoofed Origin; an acknowledgement of settings changes (now / next turn / saved).
+
+## In-process era (until 86e0447)
+
 ## Layout
 - `crates/engine` — native Rust engine (no UI, no JS): types, store (rusqlite on the web app's schema), view,
   compactor, converse (canonical contexts/requests), lifecycle (tasks, turns, reports, budgets), task_tools, agents

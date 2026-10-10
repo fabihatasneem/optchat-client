@@ -439,7 +439,7 @@ impl Render for Feed {
             let mut full: Vec<&i64> = self.full.iter().collect();
             full.sort();
             let top = self.list.logical_scroll_top();
-            crate::ui::set_state_extra("feed", serde_json::json!({ "open": open, "from": self.from, "rows": self.rows.len(), "scrolledUp": self.scrolled_up, "full": full, "top": [top.item_ix, f32::from(top.offset_in_item)], "liveText": self.live_max.0, "liveNow": self.state.read(cx).cur.live.values().map(|l| l.text.len()).sum::<usize>(), "liveThinking": self.live_max.1, "task": self.task }));
+            crate::ui::set_state_extra("feed", serde_json::json!({ "open": open, "from": self.from.and_then(|k| self.state.read(cx).cur.log.get(k).map(|e| e.i)), "rows": self.rows.len(), "scrolledUp": self.scrolled_up, "full": full, "top": [top.item_ix, f32::from(top.offset_in_item)], "liveText": self.live_max.0, "liveNow": self.state.read(cx).cur.live.values().map(|l| l.text.len()).sum::<usize>(), "liveThinking": self.live_max.1, "task": self.task }));
             for p in ["tool.", "img.", "foot.", "feed.more", "feed.jump", "feed.last", "rep.", "work.", "cut.", "toolimg."] {
                 crate::ui::clear_probes(p);
             }
@@ -633,6 +633,29 @@ impl Feed {
 
     /// Test hook: the whole history at once (as if "Load earlier messages" was used until the start).
     pub fn load_all(&mut self, cx: &mut Context<Self>) {
+        self.load_all_then(cx, |_, _| {});
+    }
+    /// Test hook: the whole history (fetched from the hub when it isn't loaded yet), then `then`
+    pub fn load_all_then(&mut self, cx: &mut Context<Self>, then: impl FnOnce(&mut Feed, &mut Context<Feed>) + 'static) {
+        let (task, first) = {
+            let s = self.state.read(cx);
+            (s.current, s.cur.log.first().map(|e| e.i).unwrap_or(0))
+        };
+        if first > 0 {
+            let state = self.state.clone();
+            crate::panels::fetch(&state, cx, move |h| async move { h.log_range(task, 0, first, false).await }, move |f: &mut Feed, r, cx| {
+                if let Ok(entries) = r {
+                    f.state.update(cx, |s, _| s.prepend_older(task, entries));
+                }
+                f.show_all(cx);
+                then(f, cx);
+            });
+            return;
+        }
+        self.show_all(cx);
+        then(self, cx);
+    }
+    fn show_all(&mut self, cx: &mut Context<Self>) {
         let s = self.state.read(cx);
         self.from = Some(0);
         let rows = build_rows(s, 0);
@@ -644,8 +667,10 @@ impl Feed {
 
     /// Test hook: scroll the row of log entry `i` into view (the whole history is loaded first)
     pub fn reveal_entry(&mut self, i: i64, cx: &mut Context<Self>) {
-        if self.from != Some(0) {
-            self.load_all(cx);
+        let all = self.from == Some(0) && self.state.read(cx).cur.log.first().map(|e| e.i == 0).unwrap_or(true);
+        if !all {
+            self.load_all_then(cx, move |f, cx| f.reveal_entry(i, cx));
+            return;
         }
         let ix = self.rows.iter().position(|r| match r {
             Row::User(e) | Row::Parent(e) | Row::Report(e) | Row::Work(e) | Row::Talk(e) | Row::Image(e) => e.i == i,

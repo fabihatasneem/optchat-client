@@ -2,13 +2,14 @@
 // ⌘Enter in the new-task dialog, live text + cursor, rail badge + memory dot, status texts (running, settling,
 // waiting for a slot, #id mode, N working, N queued), "waiting for summaries", Context "still running", compaction
 // jobs + memory rows refreshing, follow mode while streaming, ⌘. stop, Enter / ⌘Enter while dictating (fake mic).
+import { Peer } from "./lib/hub.ts";
 import { App, check, failed } from "./lib/app.ts";
 import { ROOT, sleep } from "./lib/cua.ts";
 const a = await App.launch({ env: { OPTCHAT_TEST_HOOKS: "1", OPTCHAT_FAKE_MIC: `${ROOT}/tests/fixtures/dict.wav` } });
 const st = () => a.state();
 const pal = (q: string) => a.palette(q);
 const keys = (pre: string) => Object.keys(a.allProbes()).filter((k) => k.startsWith(pre));
-const sql = (q: string) => new TextDecoder().decode(new Deno.Command("sqlite3", { args: [a.db, q] }).outputSync().stdout).trim();
+const peer = await Peer.connect(a.db, 0); // a second client of the hub, for what the app doesn't show
 const step = async (name: string, f: () => Promise<void>) => {
   try { await f(); } catch (e) { check(false, `${name}: ${String(e).slice(0, 400)}`); await a.shot(`live-fail-${name}`); await a.key("Escape"); await sleep(300); }
 };
@@ -81,7 +82,7 @@ try {
     await a.waitFor(() => !st().running, 20000, "stopped");
     await sleep(1000);
     await a.shot("live-04-stopped");
-    const n = sql(`select count(*) from turn where task=${child} and json_extract(data,'$.status')='cancelled'`);
+    const n = (await peer.rpc("turns.recent", { task: child, limit: 20 })).filter((t: any) => t.status === "cancelled").length;
     check(Number(n) >= 1, `⌘. stops the running turn (${n} cancelled turn in #${child})`);
   });
 
@@ -94,7 +95,8 @@ try {
     await a.waitFor(() => /dictation/i.test(st().draft), 20000, "dictated text");
     await a.key("Return");
     await a.waitFor(() => st().t > t0 && st().draft === "", 20000, "sent after the final text");
-    const last = sql(`select json_extract(data,'$.text') from tlog where task=${child} and json_extract(data,'$.kind')='user' order by i desc limit 1`);
+    const tail = await peer.rpc("log.range", { task: child, from: Math.max(0, st().t - 20), to: st().t, full: true });
+    const last: string = [...tail].reverse().find((e: any) => e.kind === "user")?.text ?? "";
     const final = (st().ws?.dictText ?? "").trim();
     check(/hello from the dictation test/i.test(last) && last.trim() === final && st().dict === "idle", `Enter while dictating: stopped, waited for the final text, then sent and ran it ("${last.slice(0, 80)}")`);
     await idle();
@@ -196,5 +198,5 @@ try {
     await a.key("Return");
     await a.waitFor(() => st().ws?.maxTurns === 4, 5000, "four").catch(() => {});
   });
-} catch (e) { check(false, String(e).slice(0, 400)); await a.shot("live-fail"); } finally { await a.quit(); }
+} catch (e) { check(false, String(e).slice(0, 400)); await a.shot("live-fail"); } finally { peer.close(); await a.quit(); }
 Deno.exit(failed() ? 1 : 0);

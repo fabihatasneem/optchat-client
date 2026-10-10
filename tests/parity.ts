@@ -5,6 +5,7 @@
 // images), memory / context / log / models / settings panels. Test hooks (OPTCHAT_TEST_HOOKS=1) feed the app's real
 // event paths where the OS or a service can't be driven safely (see PARITY.md notes).
 import { App, check, failed } from "./lib/app.ts";
+import { Peer } from "./lib/hub.ts";
 import { ROOT, sleep } from "./lib/cua.ts";
 const tmp = await Deno.makeTempDir({ prefix: "optchat-parity-" });
 const big = `${tmp}/big.png`; // 3000×2000: the composer downscales to 1568 px
@@ -35,7 +36,8 @@ const lasts = async (f: () => boolean, max: number) => {
   while (Date.now() - t0 < max) { if (!f()) return Date.now() - t0; await sleep(100); }
   return max;
 };
-const sql = (q: string) => new TextDecoder().decode(new Deno.Command("sqlite3", { args: [a.db, q] }).outputSync().stdout).trim();
+const peer = await Peer.connect(a.db, 0); // a second client of the hub, for what the app doesn't show
+const audioMs = async (task: number) => Number((await peer.rpc("metrics.breakdown", { task })).byKind?.dictation?.["audio.ms"] ?? 0);
 const view = async (k: string, v: string) => {
   if (!(st().view === v && st().sideOpen)) await a.key(k);
   await a.waitFor(() => st().view === v && st().sideOpen, 3000, `view ${v}`);
@@ -214,6 +216,7 @@ try {
   });
 
   await step("mic", async () => {
+    const audio0 = await audioMs(st().current);
     await a.click("composer.input");
     await pal("Test: mic tap");
     await a.waitFor(() => st().dict === "connecting" || st().dict === "listening", 4000, "tap started");
@@ -236,10 +239,10 @@ try {
     await a.waitFor(() => st().dict === "idle", 15000, "idle");
     const seen = st().micSeen ?? [];
     check(["idle", "connecting", "listening", "finishing"].every((x) => seen.includes(x)), `mic button drew every state: ${JSON.stringify(seen)}`);
-    // I7: the audio.ms metric with its meta
-    const rows = sql("select value, meta from metric_event where metric='audio.ms' and kind='dictation' order by at desc limit 3");
-    const meta = rows.split("\n")[0]?.split("|").slice(1).join("|") ?? "";
-    check(/"service"/.test(meta) && /"keyterms"/.test(meta) && /"chars"/.test(meta) && Number(rows.split("|")[0]) > 0, `audio.ms metric (kind dictation) recorded: ${rows.split("\n").length} events, ${rows.split("|")[0]} ms, meta ${meta.slice(0, 160)}`);
+    // I7: the dictations went into the hub's ledger as audio.ms (kind dictation) of this task
+    let audio1 = audio0;
+    for (let k = 0; k < 20 && audio1 <= audio0; k++) { await sleep(500); audio1 = await audioMs(st().current); }
+    check(audio1 > audio0, `audio.ms (kind dictation) recorded by the hub for #${st().current}: ${audio0} → ${audio1} ms`);
     await a.key("cmd+a"); await a.key("BackSpace");
   });
 
@@ -385,7 +388,7 @@ try {
     await sleep(500);
     await a.shot("parity-22-sidebar-wide");
     const w1 = st().ws.sideW;
-    const saved = JSON.parse(Deno.readTextFileSync(`${a.dir}/optchat-gpui/prefs.json`)).side_w;
+    const saved = JSON.parse(Deno.readTextFileSync(`${a.dir}/prefs-${a.db}.json`)).side_w;
     check(Math.abs(w1 - (w0 + 120)) < 12 && Math.abs(saved - w1) < 0.5, `dragging the resizer 120 pt widens the sidebar ${w0} → ${Math.round(w1)} pt, saved in prefs (${Math.round(saved)})`);
     const r2 = a.probe("side.resizer")!;
     const [x1, y1] = a.px(r2[0] + r2[2] / 2, r2[1] + 300);
@@ -402,7 +405,7 @@ try {
     await a.waitFor(() => st().overlay === "metrics", 3000, "popover");
     await a.type("0.01");
     await a.key("Return");
-    await a.waitFor(() => st().statusbar?.budget === 0.01, 5000, "budget set");
+    await a.waitFor(() => st().statusbar?.budget === 0.01, 10000, "budget set");
     await sleep(400);
     await a.shot("parity-23-budget-bar");
     const sb = st().statusbar;
@@ -412,8 +415,9 @@ try {
     await a.key("cmd+a");
     await a.type(String(Math.ceil(sb.cost * 1.1 + 1)));
     await a.key("Return");
-    await a.waitFor(() => st().statusbar?.budget === Math.ceil(sb.cost * 1.1 + 1), 5000, "budget 2");
+    await a.waitFor(() => st().statusbar?.budget === Math.ceil(sb.cost * 1.1 + 1), 10000, "budget 2");
     check(["amber", "accent"].includes(st().statusbar.budgetColor), `a larger budget: ${Math.round(st().statusbar.budgetPct)}% ${st().statusbar.budgetColor}`);
+    await peer.command({ type: "control", task: 92, op: "budget", budget: {} }); // the shared test instance: no budget left behind
   });
 
   await step("palette-lifecycle", async () => {
@@ -622,11 +626,12 @@ try {
 
 // L16: a fresh database shows the root's intro
 try {
-  a = await App.launch({ fresh: true, env });
+  a = await App.launch({ db: "tgpuiempty", env }); // a test instance nothing is ever sent to
   await a.waitFor(() => (st().feedEmpty ?? []).includes("root") && !!a.probe("feed.empty"), 8000, "root intro");
   await a.shot("parity-33-root-empty");
-  check(true, "a fresh database shows the root's intro (One chat. It never ends.)");
+  check(true, "an empty chat (a fresh test instance) shows the root's intro (One chat. It never ends.)");
 } catch (e) { check(false, `fresh: ${String(e).slice(0, 300)}`); } finally { await a.quit(); }
 try { Deno.removeSync(`${a.probes}.arg`); } catch { /* none */ }
 try { Deno.removeSync(tmp, { recursive: true }); } catch { /* gone */ }
+peer.close();
 Deno.exit(failed() ? 1 : 0);

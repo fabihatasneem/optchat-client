@@ -360,6 +360,8 @@ impl Client {
             m["persist"] = json!(p);
         }
         let _ = self.send_json(m);
+        // answered here: the dialog goes at once (the hub's approvalDone, to every client, removes it elsewhere)
+        self.emit(HubEvent::ApprovalDone(id.to_string()));
     }
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(&self, parent: i64, mode: &str, title: &str, instruction: &str, images: Vec<ImageIn>, prev: Option<i64>, budget: Option<BudgetArgs>, settings: Option<SettingsPatch>, start: bool) -> Result<i64, String> {

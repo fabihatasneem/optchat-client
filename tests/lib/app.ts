@@ -26,7 +26,7 @@ export class App {
   static async launch(o: { db?: string; env?: Record<string, string>; dir?: string } = {}): Promise<App> {
     const me = new App();
     me.dir = o.dir ?? await Deno.makeTempDir({ prefix: "optchat-e2e-" });
-    me.db = o.db ?? testDb("tgpuie2e");
+    me.db = o.db ?? testDb("tmv23x72y"); // the live-sized test copy (seeded for these runs; never the live chat)
     checkTestDb(me.db);
     try { Deno.removeSync(me.probes); } catch { /* none */ }
     try { Deno.removeSync(`${me.probes}.state.json`); } catch { /* none */ }
