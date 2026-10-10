@@ -6,50 +6,30 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		CC0000000000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000004 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
-		AA00000000000000000000A1 /* OptChatUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OptChatUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA0000000000000000000001 /* OptChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OptChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA0000000000000000000002 /* OptChat-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "OptChat-Info.plist"; sourceTree = "<group>"; };
+		CC0000000000000000000001 /* OptChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OptChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC0000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = app/Info.plist; sourceTree = "<group>"; };
+		CC0000000000000000000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = app/Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedRootGroup section */
-		AA00000000000000000000A2 /* OptChatUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OptChatUITests; sourceTree = "<group>"; };
-		AA0000000000000000000010 /* OptChat */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OptChat; sourceTree = "<group>"; };
-/* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXFrameworksBuildPhase section */
-		AA0000000000000000000020 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		AA00000000000000000000A3 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXFrameworksBuildPhase section */
-
 /* Begin PBXGroup section */
-		AA0000000000000000000030 = {
+		CC0000000000000000000030 = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000002 /* OptChat-Info.plist */,
-				AA0000000000000000000010 /* OptChat */,
-				AA00000000000000000000A2 /* OptChatUITests */,
-				AA0000000000000000000031 /* Products */,
+				CC0000000000000000000002 /* Info.plist */,
+				CC0000000000000000000004 /* Assets.xcassets */,
+				CC0000000000000000000031 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		AA0000000000000000000031 /* Products */ = {
+		CC0000000000000000000031 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000001 /* OptChat.app */,
-				AA00000000000000000000A1 /* OptChatUITests.xctest */,
+				CC0000000000000000000001 /* OptChat.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -57,277 +37,163 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		AA0000000000000000000040 /* OptChat */ = {
+		CC0000000000000000000040 /* OptChat */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA0000000000000000000060 /* Build configuration list for PBXNativeTarget "OptChat" */;
+			buildConfigurationList = CC0000000000000000000060;
 			buildPhases = (
-				AA0000000000000000000041 /* Sources */,
-				AA0000000000000000000020 /* Frameworks */,
-				AA0000000000000000000042 /* Resources */,
+				CC0000000000000000000043 /* Build the Rust app (cargo) */,
+				CC0000000000000000000044 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				AA0000000000000000000010 /* OptChat */,
 			);
 			name = OptChat;
-			packageProductDependencies = (
-			);
 			productName = OptChat;
-			productReference = AA0000000000000000000001 /* OptChat.app */;
+			productReference = CC0000000000000000000001 /* OptChat.app */;
 			productType = "com.apple.product-type.application";
-		};
-		AA00000000000000000000A4 /* OptChatUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = AA00000000000000000000A8 /* Build configuration list for PBXNativeTarget "OptChatUITests" */;
-			buildPhases = (
-				AA00000000000000000000A5 /* Sources */,
-				AA00000000000000000000A3 /* Frameworks */,
-				AA00000000000000000000A6 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				AA00000000000000000000AB /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				AA00000000000000000000A2 /* OptChatUITests */,
-			);
-			name = OptChatUITests;
-			productName = OptChatUITests;
-			productReference = AA00000000000000000000A1 /* OptChatUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
-/* Begin PBXContainerItemProxy section */
-		AA00000000000000000000AA /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = AA0000000000000000000050 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = AA0000000000000000000040;
-			remoteInfo = OptChat;
-		};
-/* End PBXContainerItemProxy section */
-
-/* Begin PBXTargetDependency section */
-		AA00000000000000000000AB /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = AA0000000000000000000040 /* OptChat */;
-			targetProxy = AA00000000000000000000AA /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
-
 /* Begin PBXProject section */
-		AA0000000000000000000050 /* Project object */ = {
+		CC0000000000000000000050 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2700;
 			};
-			buildConfigurationList = AA0000000000000000000070 /* Build configuration list for PBXProject "OptChat" */;
+			buildConfigurationList = CC0000000000000000000070;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = AA0000000000000000000030;
-			minimizedProjectReferenceProxies = 1;
+			mainGroup = CC0000000000000000000030;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = AA0000000000000000000031 /* Products */;
+			productRefGroup = CC0000000000000000000031 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				AA0000000000000000000040 /* OptChat */,
-				AA00000000000000000000A4 /* OptChatUITests */,
+				CC0000000000000000000040 /* OptChat */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		AA0000000000000000000042 /* Resources */ = {
+		CC0000000000000000000044 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		AA00000000000000000000A6 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
+				CC0000000000000000000005 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
-/* Begin PBXSourcesBuildPhase section */
-		AA0000000000000000000041 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
+/* Begin PBXShellScriptBuildPhase section */
+		CC0000000000000000000043 /* Build the Rust app (cargo) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		AA00000000000000000000A5 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
+			inputPaths = (
+			);
+			name = "Build the Rust app (cargo)";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Lilex-Regular.ttf",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "exec \"$PROJECT_DIR/app/build.sh\" xcode\n";
 		};
-/* End PBXSourcesBuildPhase section */
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		AA0000000000000000000061 /* Debug */ = {
+		CC0000000000000000000061 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_PREVIEWS = YES;
+				DEVELOPMENT_TEAM = <TEAM_ID>;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "OptChat-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.reframe.optchat.ios;
+				INFOPLIST_FILE = app/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.reframe.optchat;
 				PRODUCT_NAME = OptChat;
-				SWIFT_EMIT_LOC_STRINGS = NO;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
-			name = Debug;
+			name = Release;
 		};
-		AA0000000000000000000062 /* Release */ = {
+		CC0000000000000000000062 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_PREVIEWS = YES;
+				DEVELOPMENT_TEAM = <TEAM_ID>;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "OptChat-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.reframe.optchat.ios;
+				INFOPLIST_FILE = app/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.reframe.optchat;
 				PRODUCT_NAME = OptChat;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		AA0000000000000000000071 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_TESTABILITY = YES;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 6.0;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
-		AA0000000000000000000072 /* Release */ = {
+		CC0000000000000000000071 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				SDKROOT = iphoneos;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_VERSION = 6.0;
-				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
-		AA00000000000000000000A9 /* Debug */ = {
+		CC0000000000000000000072 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.reframe.optchat.ios.uitests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = OptChat;
+				SDKROOT = iphoneos;
 			};
 			name = Debug;
-		};
-		AA00000000000000000000AC /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.reframe.optchat.ios.uitests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = OptChat;
-			};
-			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA0000000000000000000060 /* Build configuration list for PBXNativeTarget "OptChat" */ = {
+		CC0000000000000000000060 = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA0000000000000000000061 /* Debug */,
-				AA0000000000000000000062 /* Release */,
+				CC0000000000000000000061 /* Release */,
+				CC0000000000000000000062 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA0000000000000000000070 /* Build configuration list for PBXProject "OptChat" */ = {
+		CC0000000000000000000070 = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA0000000000000000000071 /* Debug */,
-				AA0000000000000000000072 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		AA00000000000000000000A8 /* Build configuration list for PBXNativeTarget "OptChatUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				AA00000000000000000000A9 /* Debug */,
-				AA00000000000000000000AC /* Release */,
+				CC0000000000000000000071 /* Release */,
+				CC0000000000000000000072 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = AA0000000000000000000050 /* Project object */;
+	rootObject = CC0000000000000000000050 /* Project object */;
 }

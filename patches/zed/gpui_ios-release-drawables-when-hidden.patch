@@ -1,0 +1,25 @@
+diff --git a/crates/gpui_ios/src/ios/window.rs b/crates/gpui_ios/src/ios/window.rs
+index be1aab3..fcf5397 100644
+--- a/crates/gpui_ios/src/ios/window.rs
++++ b/crates/gpui_ios/src/ios/window.rs
+@@ -595,6 +595,20 @@ impl IosWindowState {
+     }
+ 
+     pub(crate) fn notify_visibility_change(&self, visibility: WindowVisibility) {
++        if self.visibility.get() != visibility {
++            // Background: shrink the drawables (3 full-window IOSurfaces) and the path texture to 1x1 so the
++            // process holds ~50 MB less while suspended; restore the real size before the next visible frame.
++            let (w, h) = if visibility == WindowVisibility::Hidden {
++                (1, 1)
++            } else {
++                let b = self.bounds.get();
++                let s = self.scale_factor.get();
++                ((b.size.width.as_f32() * s) as i32, (b.size.height.as_f32() * s) as i32)
++            };
++            if w > 0 && h > 0 {
++                self.renderer.lock().update_drawable_size(size(DevicePixels(w), DevicePixels(h)));
++            }
++        }
+         if self.visibility.replace(visibility) != visibility {
+             self.visibility_callback
+                 .with(|callback| callback(visibility));
