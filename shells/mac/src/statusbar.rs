@@ -44,7 +44,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
     } else {
         dot(k.green.opacity(0.8), 7.).into_any_element()
     };
-    left = left.child(item().child(sdot).child(status).child(probe("status.text")));
+    left = left.child(item().child(sdot).child(status.clone()).child(probe("status.text")));
     if let Some(t) = &t {
         if t.parent.is_some() && !narrow {
             left = left.child(item().child(icon("git-fork", 13., fg)).child(format!("#{} {}", t.id, t.mode.as_str())));
@@ -60,6 +60,19 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
         left = left.child(item().child(format!("{} queued", s.cur.queue.len())));
     }
     let mut right = div().flex().items_center().h_full().flex_none();
+    if probes_on() {
+        let cost = sub(info.as_ref(), "usd") as f64 / 1e6;
+        let b = t.as_ref().and_then(|t| t.budget.usd);
+        let pct = b.map(|b| (100.0 * cost / b).min(100.0));
+        let col = pct.map(|p| if p >= 100.0 { "red" } else if p > 80.0 { "amber" } else { "accent" });
+        let mode = t.as_ref().filter(|t| t.parent.is_some() && !narrow).map(|t| format!("#{} {}", t.id, t.mode.as_str()));
+        let j = serde_json::json!({ "status": status, "mode": mode, "summarizing": s.busy.len(), "working": if narrow { 0 } else { working }, "queued": s.cur.queue.len(), "budget": b, "budgetPct": pct, "budgetColor": col, "cost": cost });
+        set_state_extra("statusbar", j);
+        crate::ui::seen("statusSeen", &status);
+        if !s.cur.queue.is_empty() {
+            crate::ui::seen("queuedSeen", &format!("{} queued", s.cur.queue.len()));
+        }
+    }
     if let Some(t) = &t {
         let cost = sub(info.as_ref(), "usd") as f64 / 1e6;
         let pct = t.budget.usd.map(|b| (100.0 * cost / b).min(100.0));
@@ -68,7 +81,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
         if let Some(b) = t.budget.usd {
             let p = pct.unwrap_or(0.0);
             let col = if p >= 100.0 { k.red } else if p > 80.0 { k.amber } else { k.accent };
-            costi = costi.child(format!("/ {}", fmt::usd(b))).child(div().w(px(40.)).h(px(4.)).rounded(px(2.)).bg(k.line2).child(div().h_full().rounded(px(2.)).w(px(40. * p as f32 / 100.)).bg(col)));
+            costi = costi.child(format!("/ {}", fmt::usd(b))).child(div().w(px(40.)).h(px(4.)).rounded(px(2.)).bg(k.line2).child(div().h_full().rounded(px(2.)).w(px(40. * p as f32 / 100.)).bg(col)).child(probe("status.budgetbar")));
         }
         right = right.child(costi.tooltip(tooltip(format!("cost of this task and its subtree (own {}), API-equivalent. Click for all metrics and the budget.", fmt::usd(own(info.as_ref(), "usd") as f64 / 1e6)))).on_click(cx.listener(|w, _, window, cx| dialogs::open_metrics(w, window, cx))));
         let at = sub(info.as_ref(), "time.active");

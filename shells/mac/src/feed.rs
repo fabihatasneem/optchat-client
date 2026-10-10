@@ -60,6 +60,8 @@ pub struct Feed {
     loading_more: bool,
     /// the user scrolled away from the bottom: new text no longer pulls the view down (follow mode off)
     pub scrolled_up: bool,
+    /// UI tests: the most live text / thinking seen in this task's running turn (chars)
+    live_max: (usize, usize),
 }
 
 /// entries shown when a task opens, and added per "load earlier" (like the web app's snapshot of 120)
@@ -98,6 +100,7 @@ impl Feed {
             from: None,
             loading_more: false,
             scrolled_up: false,
+            live_max: (0, 0),
         };
         f.sync(cx);
         let me = cx.entity().downgrade();
@@ -189,7 +192,8 @@ impl Feed {
             self.open.clear();
             self.full.clear();
             self.from = None;
-            for p in ["tool.", "img.", "foot.", "feed.more", "feed.jump"] {
+            self.live_max = (0, 0);
+            for p in ["tool.", "img.", "foot.", "feed.more", "feed.jump", "rep.", "work.", "cut.", "toolimg."] {
                 crate::ui::clear_probes(p);
             }
         }
@@ -197,6 +201,14 @@ impl Feed {
             self.from = Some(group_start(&s.cur.log, s.cur.log.len().saturating_sub(PAGE)));
         }
         let rows = build_rows(s, self.from.unwrap_or(0));
+        if crate::ui::probes_on() {
+            // UI tests: skeletons drawn while a task loads; which empty state (never the root's on a real chat)
+            match rows.first() {
+                Some(Row::Skeleton) => crate::ui::bump("feedSkeletons"),
+                Some(Row::Empty) => crate::ui::seen("feedEmpty", if s.tasks.get(&s.current).map(|t| t.task.parent.is_none()).unwrap_or(true) { "root" } else { "child" }),
+                _ => {}
+            }
+        }
         let keys: Vec<(String, u64)> = rows.iter().map(|r| row_key(r, s, &self.open)).collect();
         if switched {
             self.list.reset(rows.len());
@@ -420,8 +432,11 @@ impl Render for Feed {
         if crate::ui::probes_on() {
             let mut open: Vec<&String> = self.open.iter().collect();
             open.sort();
-            crate::ui::set_state_extra("feed", serde_json::json!({ "open": open, "from": self.from, "rows": self.rows.len(), "scrolledUp": self.scrolled_up }));
-            for p in ["tool.", "img.", "foot.", "feed.more", "feed.jump", "feed.last"] {
+            let mut full: Vec<&i64> = self.full.iter().collect();
+            full.sort();
+            let top = self.list.logical_scroll_top();
+            crate::ui::set_state_extra("feed", serde_json::json!({ "open": open, "from": self.from, "rows": self.rows.len(), "scrolledUp": self.scrolled_up, "full": full, "top": [top.item_ix, f32::from(top.offset_in_item)], "liveText": self.live_max.0, "liveNow": self.state.read(cx).cur.live.values().map(|l| l.text.len()).sum::<usize>(), "liveThinking": self.live_max.1, "task": self.task }));
+            for p in ["tool.", "img.", "foot.", "feed.more", "feed.jump", "feed.last", "rep.", "work.", "cut.", "toolimg."] {
                 crate::ui::clear_probes(p);
             }
         }
@@ -543,7 +558,12 @@ impl Feed {
                 .gap(zx(8.))
                 .text_color(k.muted)
                 .child(div().text_size(zx(24.)).text_color(k.text).font_weight(FontWeight::SEMIBOLD).child(t.title.clone()))
-                .child(format!("This task has no messages yet.{}", if t.status == TaskStatus::Active { " Its first turn is starting." } else { "" }))
+                .child({
+                    let msg = format!("This task has no messages yet.{}", if t.status == TaskStatus::Active { " Its first turn is starting." } else { "" });
+                    crate::ui::set_state_extra("feedEmptyText", serde_json::json!(msg));
+                    msg
+                })
+                .child(probe("feed.empty"))
                 .into_any_element(),
             _ => div()
                 .mt(zx(110.))
@@ -559,6 +579,7 @@ impl Feed {
                 .child(div().text_size(zx(26.)).text_color(k.text).font_weight(FontWeight::SEMIBOLD).child("One chat. It never ends."))
                 .child("Every message is kept forever and folded into a tree of summaries. Each turn starts fresh with a ~128 KB view of the whole history, and the agent zooms in when it needs detail. Work can branch into tasks: each one a chat of its own.")
                 .child(div().text_size(zx(12.)).child("Running on your local Claude Code and Codex logins."))
+                .child(probe("feed.empty"))
                 .into_any_element(),
         }
     }
@@ -604,6 +625,33 @@ impl Feed {
         self.list.reset(self.rows.len());
         self.scrolled_up = false;
         cx.notify();
+    }
+
+    /// Test hook: the whole history at once (as if "Load earlier messages" was used until the start).
+    pub fn load_all(&mut self, cx: &mut Context<Self>) {
+        let s = self.state.read(cx);
+        self.from = Some(0);
+        let rows = build_rows(s, 0);
+        self.keys = rows.iter().map(|r| row_key(r, s, &self.open)).collect();
+        self.rows = rows;
+        self.list.reset(self.rows.len());
+        cx.notify();
+    }
+
+    /// Test hook: scroll the row of log entry `i` into view (the whole history is loaded first)
+    pub fn reveal_entry(&mut self, i: i64, cx: &mut Context<Self>) {
+        if self.from != Some(0) {
+            self.load_all(cx);
+        }
+        let ix = self.rows.iter().position(|r| match r {
+            Row::User(e) | Row::Parent(e) | Row::Report(e) | Row::Work(e) | Row::Talk(e) | Row::Image(e) => e.i == i,
+            Row::Tool { e, echo, .. } => e.i == i || echo.as_ref().map(|x| x.i) == Some(i),
+            _ => false,
+        });
+        if let Some(ix) = ix {
+            self.list.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.) });
+            cx.notify();
+        }
     }
 
     /// Show MORE earlier entries, keeping the rows on screen where they are.
@@ -659,6 +707,7 @@ impl Feed {
         Some(
             btn_small(ElementId::Name(format!("cut{i}").into()), format!("shortened · show all {} chars", group_thousands(n)), Tone::Ghost, cx)
                 .mt(zx(4.))
+                .child(probe(format!("cut.{i}")))
                 .on_click(cx.listener(move |f, _, _, cx| {
                     f.full.insert(i);
                     f.md.remove(&i);
@@ -887,7 +936,7 @@ impl Feed {
                     .px(zx(12.))
                     .pt(zx(8.))
                     .pb(zx(10.))
-                    .when(long, |d| d.cursor_pointer().on_click(cx.listener(move |f, _, _, cx| f.toggle(&format!("r{}", e_i(&key)), cx))))
+                    .when(long, |d| d.cursor_pointer().child(probe(format!("rep.{}", e.i))).on_click(cx.listener(move |f, _, _, cx| f.toggle(&format!("r{}", e_i(&key)), cx))))
                     .child(body_el),
             )
             .into_any_element()
@@ -927,6 +976,7 @@ impl Feed {
                                 .font_family("Menlo")
                                 .text_color(k.violet)
                                 .cursor_pointer()
+                                .child(probe(format!("work.{}.{n}", e.i)))
                                 .child(match tid {
                                     Some(t) => format!("{id} → #{t}"),
                                     None => id.clone(),
@@ -1015,7 +1065,7 @@ impl Feed {
                         let key = key.clone();
                         move |f, _, _, cx| f.toggle(&key, cx)
                     }))
-                    .child(icon("chevron-right", 12., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))))
+                    .child(chevron(format!("tool{}.{}", self.task, e.i), 12., k.faint, open))
                     .child(div().font_family("Menlo").text_size(zx(12.)).text_color(k.cyan).whitespace_nowrap().child(name.clone()))
                     .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().font_family("Menlo").text_size(zx(12.)).text_color(k.text2).child(arg_preview(&name, &input)))
                     .child(div().text_size(zx(11.)).whitespace_nowrap().text_color(scol).child(stext))
@@ -1101,7 +1151,7 @@ impl Feed {
                 }
             }
             if any {
-                detail = detail.child(ims);
+                detail = detail.child(ims.child(probe(format!("toolimg.{}", e.i))));
             }
             card = card.child(detail);
         }
@@ -1125,6 +1175,11 @@ impl Feed {
         let failed = s.failed.len();
         let mut d = div().flex().flex_col().gap(zx(6.));
         let waiting_line = |text: String, color: Hsla, id: &str| {
+            crate::ui::seen("waitingSeen", if text.starts_with("waiting for summaries") { "summaries" } else { "model" });
+            crate::ui::set_state_extra("waitingLine", serde_json::json!(text.clone()));
+            if text.starts_with("waiting for summaries") {
+                crate::ui::set_state_extra("waitingSummaries", serde_json::json!(text.clone()));
+            }
             div()
                 .flex()
                 .items_center()
@@ -1135,6 +1190,16 @@ impl Feed {
                 .child(pulse(ElementId::Name(format!("wl{id}").into()), dot(color, 7.)))
                 .child(text)
         };
+        let (tl, th): (usize, usize) = lives.iter().fold((0, 0), |a, x| (a.0 + x.1.len(), a.1 + x.2.len()));
+        if tl > self.live_max.0 || th > self.live_max.1 {
+            self.live_max = (self.live_max.0.max(tl), self.live_max.1.max(th));
+            if tl > 0 {
+                crate::ui::seen("liveSeen", "text");
+            }
+            if th > 0 {
+                crate::ui::seen("liveSeen", if tl == 0 { "thinking" } else { "thought" });
+            }
+        }
         for (rid, text, thinking) in &lives {
             if !thinking.is_empty() {
                 let key = format!("th{rid}");
@@ -1158,7 +1223,7 @@ impl Feed {
                                     let key = key.clone();
                                     move |f, _, _, cx| f.toggle(&key, cx)
                                 }))
-                                .child(icon("chevron-right", 11., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))))
+                                .child(chevron(format!("think{rid}"), 11., k.faint, open))
                                 .when(live_now, |d| d.child(pulse(ElementId::Name(format!("thp{rid}").into()), dot(k.accent, 7.))).child("thinking…"))
                                 .when(!live_now, |d| d.child("thought"))
                                 .when(!open, |d| d.child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().italic().child(last))),
@@ -1178,7 +1243,11 @@ impl Feed {
                 d = d.child(
                     div()
                         .child(markdown::render(&format!("lv{rid}"), &doc, &markdown::Opts { size: 14.0, color: k.text }, w, cx))
-                        .child(pulse(ElementId::Name(format!("cur{rid}").into()), div().w(zx(8.)).h(zx(16.)).rounded(zx(2.)).bg(k.accent))),
+                        .child(pulse(ElementId::Name(format!("cur{rid}").into()), div().w(zx(8.)).h(zx(16.)).rounded(zx(2.)).bg(k.accent)).into_any_element())
+                        .child({
+                            crate::ui::seen("liveSeen", "cursor");
+                            div()
+                        }),
                 );
             }
             if text.is_empty() && thinking.is_empty() {
@@ -1257,7 +1326,7 @@ impl Feed {
         }
         let mut d = div().flex().flex_col().mb(zx(18.));
         if let Some(err) = &turn.error {
-            d = d.child(div().text_size(zx(13.)).text_color(k.red).my(zx(6.)).child(format!("⚠ {err}")));
+            d = d.child(div().text_size(zx(13.)).text_color(k.red).my(zx(6.)).child(format!("⚠ {err}")).child(probe(format!("foot.err.{turn_id}"))));
         }
         d = d.child(row);
         if open {

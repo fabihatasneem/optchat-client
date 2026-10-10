@@ -96,7 +96,7 @@ impl Composer {
         self.input.update(cx, |i, cx| i.focus(window, cx));
     }
 
-    fn running(&self, cx: &App) -> bool {
+    pub fn running(&self, cx: &App) -> bool {
         let s = self.state.read(cx);
         s.cur.running.is_some() || s.info().map(|i| i.waiting).unwrap_or(false)
     }
@@ -158,6 +158,10 @@ impl Composer {
     }
     fn on_paste(&mut self, _: &PasteSmart, window: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = cx.read_from_clipboard() else { return };
+        self.paste_item(item, window, cx);
+    }
+    /// ⌘V's handling of what the clipboard holds: images are attached, text is inserted at the cursor
+    pub fn paste_item(&mut self, item: ClipboardItem, window: &mut Window, cx: &mut Context<Self>) {
         let mut got_image = false;
         for e in item.entries() {
             if let ClipboardEntry::Image(img) = e {
@@ -273,10 +277,21 @@ impl Composer {
     pub fn mic_up(&mut self, cx: &mut Context<Self>) {
         let p = self.mic_press.take();
         if let Some((at, started)) = p {
-            if started && at.elapsed().as_millis() > 300 {
+            let ms = at.elapsed().as_millis();
+            crate::ui::set_state_extra("micRelease", serde_json::json!({ "ms": ms as u64, "started": started, "stops": started && ms > 300 }));
+            if started && ms > 300 {
                 self.stop_dictation(cx);
             }
         }
+    }
+    /// Test hook: press the mic button and release it `hold_ms` later (the same mic_down / mic_up as the mouse)
+    pub fn test_press(&mut self, hold_ms: u64, window: &mut Window, cx: &mut Context<Self>) {
+        self.mic_down(window, cx);
+        cx.spawn(async move |this, cx| {
+            Timer::after(std::time::Duration::from_millis(hold_ms)).await;
+            let _ = this.update(cx, |c, cx| c.mic_up(cx));
+        })
+        .detach();
     }
     fn on_dict_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let d = self.state.read(cx).dict.clone();
@@ -303,6 +318,7 @@ impl Composer {
             self.anchor = None;
             let pos = self.input.read(cx).text().offset_to_position(caret);
             self.input.update(cx, |i, cx| i.set_cursor_position(pos, window, cx));
+            self.focus(window, cx);
             if let Some(run) = self.pending_submit.take() {
                 self.submit(run, window, cx);
             }
@@ -316,6 +332,7 @@ impl Composer {
         let k = c(cx).clone();
         let d = self.state.read(cx).dict.clone();
         let st = if d.task == self.task { d.state.clone() } else { "idle".to_string() };
+        crate::ui::seen("micSeen", &st);
         let off = self.disabled(cx) && st == "idle";
         let b = div()
             .id("mic")
@@ -364,9 +381,25 @@ impl Composer {
 impl Render for Composer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::ui::anim::area(crate::ui::anim::WORKSPACE);
-        crate::ui::set_state_extra("composer", serde_json::json!({ "images": self.images.len(), "task": self.task }));
         let k = c(cx).clone();
         let s = self.state.read(cx);
+        if crate::ui::probes_on() {
+            let fresh = |e: &Option<(String, std::time::Instant)>| e.as_ref().filter(|(_, t)| t.elapsed().as_secs_f32() < 6.0).map(|(e, _)| e.clone());
+            let err = fresh(&self.err).or_else(|| fresh(&s.dict.error)).or_else(|| s.errors.last().cloned());
+            // UI tests: how long a dictation error stayed in the error line (measured when it went)
+            if let Some((m, t)) = &s.dict.error {
+                thread_local!(static DONE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) });
+                if err.as_deref() != Some(m.as_str()) && DONE.with(|d| d.get()) != Some(*t) {
+                    DONE.with(|d| d.set(Some(*t)));
+                    crate::ui::set_state_extra("dictErrorGone", serde_json::json!({ "message": m, "lifeMs": t.elapsed().as_millis() as u64 }));
+                }
+            }
+            let disabled = self.disabled(cx);
+            if disabled && !s.cur.loaded {
+                crate::ui::bump("composerDisabledWhileLoading");
+            }
+            crate::ui::set_state_extra("composer", serde_json::json!({ "images": self.images.len(), "dims": self.images.iter().map(|a| [a.w, a.h]).collect::<Vec<_>>(), "types": self.images.iter().map(|a| a.media_type.clone()).collect::<Vec<_>>(), "task": self.task, "disabled": disabled, "error": err, "dictating": self.dictating(cx) && s.dict.task == self.task }));
+        }
         let running = self.running(cx);
         let stoppable = s.cur.running.is_some();
         let runnable = self.runnable(cx);
@@ -403,6 +436,7 @@ impl Render for Composer {
                             .justify_center()
                             .cursor_pointer()
                             .child(icon("x", 11., white()))
+                            .child(probe(format!("thumbx.{n}")))
                             .on_click(cx.listener(move |c, _, _, cx| {
                                 if n < c.images.len() {
                                     c.images.remove(n);

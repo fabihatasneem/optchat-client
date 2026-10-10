@@ -82,7 +82,70 @@ pub fn status_dot(id: impl Into<SharedString>, status: &str, size: f32, cx: &App
 
 pub fn tooltip(text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let t: SharedString = text.into();
-    move |w, cx| Tooltip::new(t.clone()).build(w, cx)
+    move |w, cx| {
+        // UI tests: the text of the last tooltip shown
+        set_state_extra("tooltip", serde_json::json!(t.to_string()));
+        Tooltip::new(t.clone()).build(w, cx)
+    }
+}
+
+/// A disclosure chevron that turns (150 ms) between closed (→) and open (↓) when its state flips. The first time a
+/// chevron is drawn it shows its state at once (rows scrolled into view don't spin).
+pub fn chevron(id: impl Into<SharedString>, size: f32, color: Hsla, open: bool) -> AnyElement {
+    thread_local!(static CHEV: std::cell::RefCell<HashMap<SharedString, (bool, u64, std::time::Instant)>> = std::cell::RefCell::new(HashMap::new()));
+    let id: SharedString = id.into();
+    let flip = CHEV.with(|m| {
+        let mut m = m.borrow_mut();
+        match m.get_mut(&id) {
+            Some(e) => {
+                if e.0 != open {
+                    *e = (open, e.1 + 1, std::time::Instant::now());
+                }
+                (e.2.elapsed() < Duration::from_millis(150) && e.1 > 0).then_some(e.1)
+            }
+            None => {
+                m.insert(id.clone(), (open, 0, std::time::Instant::now()));
+                None
+            }
+        }
+    });
+    let el = icon("chevron-right", size, color);
+    match flip {
+        None => el.when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))).into_any_element(),
+        Some(n) => el
+            .with_animation(ElementId::Name(format!("chev-{id}-{n}").into()), Animation::new(Duration::from_millis(150)).with_easing(ease_out_quint()), move |s, t| {
+                if t > 0.0 && t < 1.0 {
+                    bump("chevronFrames");
+                }
+                let a = if open { 0.25 * t } else { 0.25 * (1.0 - t) };
+                s.with_transformation(Transformation::rotate(percentage(a)))
+            })
+            .into_any_element(),
+    }
+}
+
+/// UI tests: values seen so far under `key` (published as a sorted list)
+pub fn seen(key: &str, v: &str) {
+    if !probes_on() {
+        return;
+    }
+    static SEEN: OnceLock<Mutex<HashMap<String, std::collections::BTreeSet<String>>>> = OnceLock::new();
+    let mut m = SEEN.get_or_init(Default::default).lock();
+    let e = m.entry(key.to_string()).or_default();
+    if e.insert(v.to_string()) {
+        set_state_extra(key, serde_json::json!(e.iter().cloned().collect::<Vec<_>>()));
+    }
+}
+/// UI tests: a counter published under `key`
+pub fn bump(key: &str) {
+    if !probes_on() {
+        return;
+    }
+    static N: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    let mut m = N.get_or_init(Default::default).lock();
+    let n = m.entry(key.to_string()).or_default();
+    *n += 1;
+    set_state_extra(key, serde_json::json!(*n));
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

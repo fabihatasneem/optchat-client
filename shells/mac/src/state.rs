@@ -112,6 +112,8 @@ pub struct Dict {
     pub text: Option<String>,
     pub done: Option<String>,
     pub seq: u64,
+    /// dictations finished (done events), for UI tests
+    pub done_count: u64,
     /// a dictation error shows in the composer for 6 s (engine errors stay, like the web app)
     pub error: Option<(String, std::time::Instant)>,
 }
@@ -495,6 +497,7 @@ impl AppState {
                         .detach();
                     }
                     DictEvent::Done { text, .. } => {
+                        self.dict.done_count += 1;
                         self.dict.state = "idle".into();
                         self.dict.level = 0.0;
                         self.dict.done = Some(text.clone());

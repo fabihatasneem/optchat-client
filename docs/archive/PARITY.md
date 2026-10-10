@@ -139,64 +139,64 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 - [x] H9 metrics.breakdown by kind / model / source (own vs subtree) — metrics_rates::h9_breakdown_by_kind_model_source
 
 ## I. Dictation (spec-dictation, lib/stt.ts, keyterms.ts)
-- [~] I1 Native microphone capture (CoreAudio via cpal), mono, resampled to pcm16 16 kHz, 100 ms chunks with level; recording starts at the press; buffered until the service is ready — cpal capture (device test ignored, needs mic permission); e2e uses the fake mic
+- [~] I1 Native microphone capture (CoreAudio via cpal), mono, resampled to pcm16 16 kHz, 100 ms chunks with level; recording starts at the press; buffered until the service is ready — not verifiable here: real capture needs a microphone permission grant for the app (not taken); cpal device test stays ignored; every UI test uses OPTCHAT_FAKE_MIC, which feeds the same chunk path (level + pcm) after the device
 - [x] I2 Claude voice_stream client (keychain token, headers, keyterms header, KeepAlive every 8 s, CloseStream, Transcript* messages) — stt::tests::live_claude
 - [x] I3 ChatGPT dictation client (codex auth.json, subprotocols, session.start config, 24 kHz resample, audio.append base64, 700 ms silence before session.close, transcript.segment/final) — stt::tests::live_codex
 - [x] I4 Session: service order from global setting with the other as fallback; failure before ready → next service with all audio; drop after text → keep text, one reconnect re-sending last 1.5 s, overlap merge (≤ 12 words) — stt::tests::live_fallback, live_drop, merge_overlap
-- [~] I5 A new dictation finishes the previous; done event with text/service/audioMs — done once; "a new dictation finishes the previous" untested
+- [x] I5 A new dictation finishes the previous; done event with text/service/audioMs — dictation_hub::a_new_dictation_finishes_the_previous_and_stays_stoppable (live, fake mic: the first finishes with its text, the second stays current, is restated, and stops); fixed: sessions have ids (a superseded Done no longer drops the new session; stale Ready no longer announces)
 - [x] I6 keyterms(): sources (title ×3, related titles ×2, last 40 log entries weighted, tool files only, echoes never), candidates by shape, ranking, hints ≤ 20 (base terms first), words ≤ 60, spoken(), rewriter() — keyterms::tests::same_as_typescript
-- [~] I7 `audio.ms` metric (kind dictation) with meta service/keyterms/chars — audio.ms emitted; not asserted
-- [~] I8 UI: mic button states idle / connecting (spinning ring) / listening (red, 4 level bars, pulse, red composer outline) / finishing (bars settle); no labels — mic states drawn; listening shot (feat-01)
-- [~] I9 Gesture rule: press while idle starts; release > 300 ms later stops (push-to-talk), earlier = tap (keeps running); press while dictating stops — 300 ms gesture rule; taps exercised only
+- [x] I7 `audio.ms` metric (kind dictation) with meta service/keyterms/chars — parity::mic: metric_event audio.ms kind dictation read from the test DB copy: value > 0, meta has service / keyterms / chars
+- [x] I8 UI: mic button states idle / connecting (spinning ring) / listening (red, 4 level bars, pulse, red composer outline) / finishing (bars settle); no labels — parity::mic: mic button drew connecting / listening / finishing / idle (micSeen), composer red outline while listening (composer.dictating); shots/parity-15-mic-listening.jpg
+- [x] I9 Gesture rule: press while idle starts; release > 300 ms later stops (push-to-talk), earlier = tap (keeps running); press while dictating stops — parity::mic (hook calls the composer's mic_down / mic_up with real timing): tap released after ~125 ms keeps dictating, a press while dictating stops, hold released after ~655 ms stops (micRelease.stops)
 - [x] I10 M key outside text fields (tap/hold); inside the composer M types "m"; Esc stops and keeps text — features.ts: M starts dictation outside a text field, Esc stops and keeps the text
 - [x] I11 Text lands at the cursor/selection (before + text + after with spacing), composer read-only while dictating, caret after the text at the end — features.ts: dictation wrote at the cursor
-- [~] I12 Enter while dictating: stop, wait for final text, then → ; ⌘Enter: stop then ↑ — Enter while dictating waits for the final text; untested (would start a model turn)
-- [~] I13 Errors in the composer error line for 6 s ("microphone access is blocked", "dictation is unavailable: log in…") — dictation errors expire after 6 s (state.dict.error + redraw timer), engine errors stay like the web; not exercised (needs a failing service)
+- [x] I12 Enter while dictating: stop, wait for final text, then → ; ⌘Enter: stop then ↑ — live::dictation-enter (Haiku child, fake mic): Enter while dictating stops, waits for the final text and sends + runs exactly the final text; ⌘Enter while dictating stops then appends with no turn. Fixed: the composer field loses the key focus while read-only, so Enter / ⌘Enter did nothing — workspace-level DictEnter / DictAppend bindings now send, and the field gets the focus back when dictation ends
+- [x] I13 Errors in the composer error line for 6 s ("microphone access is blocked", "dictation is unavailable: log in…") — parity::errors: "microphone access is blocked" (dictation error event fed through the hub event path) shown in the composer error line, taken down after 6030 ms (dictErrorGone.lifeMs); shots/parity-13-dictation-error.jpg
 - [x] I14 Engine test with a WAV file through the session (both services), plus fallback test — stt live tests on a WAV (Claude, Codex, fallback, drop)
 
 ## J. App shell and layout (app.tsx)
 - [x] J1 Native macOS window, title "<task name> · #id · OptChat"; restores size; min size — inputs.ts: relaunch restores the window size; title follows the task (and renames)
-- [~] J2 Activity rail: logo (opens main chat), Tasks (badge with active count), Memory (dot while compacting), Context, Log, Models, spacer, Settings, sidebar toggle — rail items, badge, memory dot; badge not seen non-zero
+- [x] J2 Activity rail: logo (opens main chat), Tasks (badge with active count), Memory (dot while compacting), Context, Log, Models, spacer, Settings, sidebar toggle — live::newtask-cmd-enter (Tasks badge while a child is active, railSeen) and live::settling (Memory dot while compacting); rail items: panels.ts ⌘1–⌘6
 - [x] J3 Rail click on the active view hides the sidebar; ⌘B toggles it — panels.ts ⌘1–⌘6 and ⌘B
-- [~] J4 Resizable sidebar (220–760 px), width remembered; sidebar head with view title and per-view actions; hide button — resizer 220–760, width saved; drag untested
-- [~] J5 Editor tabs of open tasks: status dot (root: chat icon), title, spinner while running, close button, middle-click closes; closing the last tab leaves the main chat; active tab scrolled into view — tab dot/title/spinner/close/middle-click, active tab scrolled into view; ⌘W tested
+- [x] J4 Resizable sidebar (220–760 px), width remembered; sidebar head with view title and per-view actions; hide button — parity::sidebar-drag: a CUA drag of the resizer by 120 pt widens 320 → 440 pt, saved in prefs.json; dragging far left stops at 220 pt; shots/parity-22-sidebar-wide.jpg
+- [x] J5 Editor tabs of open tasks: status dot (root: chat icon), title, spinner while running, close button, middle-click closes; closing the last tab leaves the main chat; active tab scrolled into view — parity::tabs-keys: a CUA middle click closes the tab; ⌘W (panels.ts); spinner/dot/title in tab shots
 - [x] J6 Tab actions at the right: pause (not paused/pending/terminal), resume (paused), close as done (non-root, non-terminal), cancel (non-root), new task (non-terminal) — flow.ts pause/resume/close/cancel from the tab actions
-- [~] J7 Task bar: breadcrumb (ancestors clickable, "main chat"), continues #prev link, result (→ …) or status: reason — breadcrumb, continues link, result/status; continues link untested
+- [x] J7 Task bar: breadcrumb (ancestors clickable, "main chat"), continues #prev link, result (→ …) or status: reason — parity::continues-link: #23's task bar "continues #22" link opens #22
 - [x] J8 Task bar ask mode: label, input (autofocus, max 280 for close), "and its subtree" hint, confirm button (danger for cancel), Esc; Enter confirms, Esc cancels; required result for close — inputs.ts: close result stops at 280, other ask inputs up to 2000
 - [x] J9 Remembered per-user prefs: view, sidebar open/width, task scope, show ended, settings tab, theme (local prefs file) — inputs.ts relaunch (prefs file restored)
 - [x] J10 Open tasks persisted across launches (better than web: reopen last tabs) — inputs.ts: relaunch reopens the tabs and the current task
-- [~] J11 Toast notices (controlDone ok 2.6 s / error 6 s) — toasts 2.6 s / 6 s; not asserted
+- [x] J11 Toast notices (controlDone ok 2.6 s / error 6 s) — parity::toasts (notice events through the hub event path): ok toast taken down after 2630 ms, error after 6028 ms (toastGone.lifeMs); shots/parity-12-toast.jpg
 - [x] J12 Approval dialog (computer use): message, task, tool params, Deny / Allow once / Allow this session / Always allow; queue of approvals — features.ts approval dialog (allow this session)
 - [x] J13 Lightbox for images (click to enlarge, click/Esc to close) — chat.ts lightbox opens and Esc closes
-- [~] J14 Skeletons until a task's data is loaded; never the empty state for the root — skeletons until loaded; not asserted
+- [x] J14 Skeletons until a task's data is loaded; never the empty state for the root — parity::launch: skeleton rows drawn while the chat loads (feedSkeletons), the root's empty state never drawn on the real chat (feedEmpty)
 - [x] J15 Phone layout N/A on Mac → narrow-window layout: the sidebar floats over the editor below ~760 px — panels.ts narrow window sheet + Esc
 
 ## K. Tasks view (sidebar) (tasks.tsx TasksView)
 - [x] K1 Scope "here": ancestors path rows above, the current task, its subtree; "all": the whole tree from #0 — tasks here/all; tour shots
-- [~] K2 Row: chevron (collapse), status dot (idle grey, active pulsing accent, paused amber, canceled red, done green, pending hollow ring), title, line 2 `#id · $cost · active time · mode · status word (working/waiting/status)`, spinner when running; current highlighted; ended dimmed; tooltip with title/mode/status/reason/result — rows complete; dot tooltip missing (row tooltip has the details)
+- [x] K2 Row: chevron (collapse), status dot (idle grey, active pulsing accent, paused amber, canceled red, done green, pending hollow ring), title, line 2 `#id · $cost · active time · mode · status word (working/waiting/status)`, spinner when running; current highlighted; ended dimmed; tooltip with title/mode/status/reason/result — dot tooltip added (title, mode, status + reason, result, status word); the row's details tooltip moved to the title so the two don't compete. parity::tasks-panel: a click on #94's dot shows its tooltip (shots/parity-21-dot-tooltip.jpg); the chevron collapses #92's subtree (18 → 2 rows)
 - [x] K3 Toggle all/here, show/hide finished, new task (+) buttons in the sidebar head — scope / show-ended / + in the head
-- [~] K4 "no subtasks yet" hint — "no subtasks yet"; not seen in a test
-- [~] K5 Click opens the task in a tab (instant, same engine) — row click opens; switcher-open tested
+- [x] K4 "no subtasks yet" hint — parity::tasks-panel: opening a leaf task shows "no subtasks yet" (probe + tasksPanel.noKids); shots/parity-20-no-subtasks.jpg
+- [x] K5 Click opens the task in a tab (instant, same engine) — parity::tasks-panel: a click on #93's row opens it in a tab
 
 ## L. Feed (chat.tsx)
 - [x] L1 Virtualized variable-height list (gpui `list`) of turn groups; smooth scroll of 2000+ messages — gpui list; perf.ts in-app 120 Hz gesture on the 1749-message chat: work/frame p50 3.5 ms, p95 4.9 ms, max 6.6 ms; frame interval at the 60 Hz display's vsync
-- [~] L2 Groups by turnId; "Load earlier messages (N more)" (or infinite load) for older history — paging: last 120 entries + "Load earlier messages (N more)", infinite load at the top; not asserted
+- [x] L2 Groups by turnId; "Load earlier messages (N more)" (or infinite load) for older history — parity::feed-paging-follow: the main chat opens at entry 1616 of 1749; scrolling to the top loads earlier messages (from 1616 → 1415); shots/parity-24-load-earlier.jpg
 - [x] L3 User bubble (right, pre-wrap) with #i and time; note kind same style — user bubble (flow-04)
 - [x] L4 Parent bubble "↳ from #P / from you, as #P / from the main chat" (clickable), markdown body, image leaves — parent bubble (flow-02/04)
-- [~] L5 Report card `#C replied | you wrote to it | error | status`, child title, #i · time, open ↗; long bodies clipped at 320 chars, click to expand; colored by kind; image reports — report cards; expand untested
-- [~] L6 v2 work messages `[a1] …` rendered as report blocks linking to #1..#7 — v2 work rows; no test
-- [~] L7 Talk: markdown (headings, lists nested/loose, task lists, tables, code blocks with language bar + copy, inline code, links open in browser, blockquotes, emphasis, strikethrough) — markdown parse test (headings, lists, tables, code, quotes, links); render not asserted
-- [~] L8 Live streaming text with a cursor; thinking shown live (collapsible "thinking…" / "thought" with last line preview), never logged — live text + thinking; seen during smoke runs only
-- [~] L9 "waiting for the model…" and "waiting for summaries: N left (k in progress) · retrying · elapsed" states — "waiting for the model…" seen (smoke)
+- [x] L5 Report card `#C replied | you wrote to it | error | status`, child title, #i · time, open ↗; long bodies clipped at 320 chars, click to expand; colored by kind; image reports — parity::report-expand: a clipped report card (#1748) expands on click (113 → 277 px); shots/parity-25-report-expanded.jpg
+- [x] L6 v2 work messages `[a1] …` rendered as report blocks linking to #1..#7 — parity::work-rows: main chat entry 722 "[a1] …" renders as a report block; its link opens #1; shots/parity-26-work-row.jpg
+- [x] L7 Talk: markdown (headings, lists nested/loose, task lists, tables, code blocks with language bar + copy, inline code, links open in browser, blockquotes, emphasis, strikethrough) — parity::markdown: blocks para / heading / list / task list / code / table / quote and inline bold / italic / code / strike / link drawn in the feed (#70, #32, main #1596, a pending task's parent bubble); shots/parity-27/28/28b; links are not clicked (would open the browser), code "copy" not clicked (clipboard)
+- [x] L8 Live streaming text with a cursor; thinking shown live (collapsible "thinking…" / "thought" with last line preview), never logged — live::follow-stop: live text streamed with the cursor (liveSeen text + cursor) and thinking shown live then "thought" (liveSeen thinking/thought, 1555 thinking chars in the last run; Haiku does not always think); shots/live-03-streaming.jpg
+- [x] L9 "waiting for the model…" and "waiting for summaries: N left (k in progress) · retrying · elapsed" states — live::settling: "waiting for summaries: 1 left (1 in progress) · 12s" while the turn settles; "waiting for the model…" (waitingSeen); shots/live-05-settling.jpg
 - [x] L10 Tool card: chevron, name, arg preview per tool (bash command, computer title, zoom id+n@t, task_* previews…), state running (elapsed) / done / error, per-tool stop button, #i–#j, task id chips for task_* tools, expandable input/output (+ images), "shortened · show all N chars" — chat.ts: a tool card expands to its input / output; task_spawn previews from cut inputs (lenient_tests)
-- [~] L11 Echo images under their tool card; lone echoes as cards — echo images; unverified
+- [x] L11 Echo images under their tool card; lone echoes as cards — parity::echo-images: #32's computer call expands to its echo image under the tool card (shots/parity-31-echo-image.jpg); lone echoes (no tool in the group) don't occur in the copied chat — same Image/Tool row code
 - [x] L12 Image messages (blob from DB) with caption, click to lightbox — chat.ts: image message shown and opened in the lightbox
 - [x] L13 Turn foot chips: model · effort (with a → b when switched), N steps ▾ (step table: #, model if switched, stop, in, cached, write, out, cost, time; click → context), in (cached %), out, cost (amber unpriced), duration, live, stopped, context ↗ — chat.ts: steps chip opens the step table, context ↗ opens the Context view on that call
-- [~] L14 Turn error line "⚠ …" — turn error line; unverified
+- [x] L14 Turn error line "⚠ …" — parity::turn-error: #9's stopped turn shows "⚠ stopped (cancel)" (foot.err probe); shots/parity-30-turn-error.jpg
 - [x] L15 "not run yet" divider at rec.unrun — NOT RUN YET divider (flow-04)
-- [~] L16 Empty states: child "This task has no messages yet. Its first turn is starting."; root intro (only when the root really has nothing) — empty states; not seen
-- [~] L17 Follow mode: autoscroll while at the bottom; stays put when scrolled up; jump-to-bottom affordance — follow mode (bottom-pinned list), jump-to-bottom button, sending re-pins; not asserted
-- [~] L18 Cut entries (slim copy) with on-demand full text — cut texts + "show all"; untested
+- [x] L16 Empty states: child "This task has no messages yet. Its first turn is starting."; root intro (only when the root really has nothing) — parity: a fresh database shows the root intro (shots/parity-33-root-empty.jpg); a child with no messages shows "This task has no messages yet." (hook empties the loaded log, the moment before a spawned child's first message: every spawn logs its instruction first; shots/parity-32-child-empty.jpg)
+- [x] L17 Follow mode: autoscroll while at the bottom; stays put when scrolled up; jump-to-bottom affordance — parity::feed-paging-follow: scrolled up → follow off + jump button, the view stays put, the jump button pins again; live::follow-stop: stays put while text streams in
+- [x] L18 Cut entries (slim copy) with on-demand full text — parity::cut-text: #106's 5496-char output is cut with "shortened · show all N chars"; a click shows the full text; shots/parity-29-cut.jpg
 - [x] L19 Endbar for terminal tasks: dot + "This task is done: result / canceled (reason). Its memory stays readable." + "Continue as a new task" (opens dialog preset continue/prev) — flow.ts end bar + Continue; chat.ts Continue presets the dialog to continue
 
 ## M. Composer (app.tsx Composer)
@@ -204,15 +204,15 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 - [x] M2 Placeholder `Message #N…` / `Message OptChat…` — inputs.ts relaunch on #92: placeholder "Message #92…"
 - [x] M3 Buttons: attach image · spacer · Stop (running) · mic · ↑ (append, outlined; hidden while running) · → (run, primary accent) — composer buttons (smoke/flow shots)
 - [x] M4 → enabled with text/image, or runnable (unrun, pending, paused, or last turn stopped/failed); ↑ enabled only with content — run/append enable rules (flow-04)
-- [~] M5 Keys: Enter = →, Shift+Enter newline, ⌘Enter = ↑ (→ while a turn runs); IME composition respected — Enter / Shift+Enter / ⌘Enter (flow, inputs); IME not checked
-- [~] M6 Images: attach picker (NSOpenPanel), paste from clipboard, drag & drop files; downscale to 1568 px longest side; re-encode jpeg/png; thumbnails with remove ×; max 20 — attach (test hook), paste, drop, 1568 px, ×, max 20; only the hook path tested (features.ts asserts the attachment)
-- [~] M7 Error line above the composer (last engine error / dictation error) — error line (engine errors stay, dictation errors 6 s); not asserted
-- [~] M8 Focus the composer on task switch — focus on switch; inputs relaunch shows focus "composer"
-- [~] M9 Disabled until the task is loaded — disabled until loaded; untested
+- [~] M5 Keys: Enter = →, Shift+Enter newline, ⌘Enter = ↑ (→ while a turn runs); IME composition respected — Enter / Shift+Enter / ⌘Enter tested (flow, inputs, live); IME composition not verifiable here: it needs an input-source change (system setting, not allowed)
+- [x] M6 Images: attach picker (NSOpenPanel), paste from clipboard, drag & drop files; downscale to 1568 px longest side; re-encode jpeg/png; thumbnails with remove ×; max 20 — parity::composer-images: paste (the ⌘V handler fed a clipboard item built from a file — the user's clipboard is never touched), drop (the on_drop handler's add_paths with a 3000×2000 file → 1568×1045 png), 21 offered → 20 kept, × removes one; shots/parity-16-composer-images.jpg. The NSOpenPanel picker itself is not driven (out of process); it feeds the same add_paths
+- [x] M7 Error line above the composer (last engine error / dictation error) — parity::errors: an engine error event shows "#0: test engine error" in the composer error line and is still there 7 s later; dictation errors go after 6 s (I13); shots/parity-14-engine-error.jpg
+- [x] M8 Focus the composer on task switch — parity::tabs-keys: after a task switch the focus is on the composer
+- [x] M9 Disabled until the task is loaded — parity::tabs-keys: the composer drew disabled while the switched-to task loaded (composerDisabledWhileLoading)
 
 ## N. Status bar (tasks.tsx StatusBar)
-- [~] N1 Left: connection-equivalent status dot + status text (running / settling / waiting for a slot / task status), `#id mode` (child), `summarizing N` with spinner, `N working`, `N queued` — status texts; queued/slot/settling not seen
-- [~] N2 Right: cost (subtree) with budget bar (accent/amber/red) and `/ $budget`, active time `/ budget`, deadline minutes (red when passed), tokens, msgs (+inherited tooltip), depth, model select (grouped Claude Code / Codex), effort select — cost/time/tokens/msgs/depth + grouped model menu (panels-02); budget bar not seen
+- [x] N1 Left: connection-equivalent status dot + status text (running / settling / waiting for a slot / task status), `#id mode` (child), `summarizing N` with spinner, `N working`, `N queued` — live: status texts running / settling / waiting for a slot / idle (statusSeen), "#109 handoff", "1 working", "1 queued" / "2 queued" for a task waiting for its turn; summarizing N: panels screenshots; shots/live-02-queued.jpg, live-08-slot.jpg
+- [x] N2 Right: cost (subtree) with budget bar (accent/amber/red) and `/ $budget`, active time `/ budget`, deadline minutes (red when passed), tokens, msgs (+inherited tooltip), depth, model select (grouped Claude Code / Codex), effort select — parity::budget-bar: a $0.01 budget on #92 via the cost popover shows "/ $0.01" and a red bar at 100%; a larger one accent; shots/parity-23-budget-bar.jpg
 - [x] N3 Running tint (indigo) and paused tint — running/paused tints (smoke, flow-05)
 - [x] N4 Metrics popover: one row per metric own · subtree, chat · memory split rows, budget fields ($, agent-min, tokens, deadline min), Set budget / Clear, Enter/Esc — panels.ts budgets popover
 - [x] N5 Model/effort selects hidden on terminal tasks; work on pending tasks — selects hidden on done, shown on pending (flow)
@@ -220,61 +220,61 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 ## O. New-task dialog (tasks.tsx)
 - [x] O1 Title "New task under the main chat / #N title", explainer line — title + explainer (flow-01)
 - [x] O2 Mode cards handoff / fork / continue (disabled without terminal siblings) / blind with descriptions — chat.ts: each mode card selects its mode
-- [~] O3 Continue: which task select (terminal siblings) — continue's which-task select; untested
-- [~] O4 Title (≤ 80), instruction (multi-line, image paste), Attach images, thumbnails — title ≤ 80 and the growing instruction box (inputs.ts); image paste, × and the 20 cap implemented, not tested
+- [x] O3 Continue: which task select (terminal siblings) — parity::continue-select: continue without a chosen task can't start; the which-task select (keyboard in its menu) picks #1; shots/parity-18/19-continue
+- [x] O4 Title (≤ 80), instruction (multi-line, image paste), Attach images, thumbnails — parity::newtask-images: 21 images offered → 20 thumbnails, × removes one; ⌘V of an image (the dialog's paste handler fed a file-built clipboard item) attaches it; title ≤ 80 and instruction box in inputs.ts. Attach picker not driven (NSOpenPanel), same add_paths
 - [x] O5 Model select (inherited marker), $ budget, minutes — model (inherited), $ budget, minutes (flow-01)
-- [~] O6 Footer Cancel · Add (pending) · Start (primary, ⌘Enter); disabled until valid — Cancel · Add · Start, ⌘Enter; ⌘Enter untested
+- [x] O6 Footer Cancel · Add (pending) · Start (primary, ⌘Enter); disabled until valid — live::newtask-cmd-enter: ⌘Enter does nothing while invalid, then starts the task from the instruction field. Fixed: ⌘Enter inside the dialog's fields was taken by the Input (binding added for "NewTask > Input")
 - [x] O7 After spawn the new task opens in a tab — flow.ts spawned task opens in a tab
 
 ## P. Memory view (panels.tsx MemoryPanel)
-- [~] P1 Summary card: messages (own + inherited), tree nodes built, view lines (inherited count) and bytes, batches at HIGH → LOW, compactions' view lines/bytes, fill bar (amber while batching) with half marker, "batch pending" note, level legend (count × 2^l msg, level colors) — summary card (tour-memory)
-- [~] P2 Compaction jobs: running nodes in this timeline (spinner, click reveals), failed (retrying), count in other tasks — jobs chips; running/failed not seen
+- [x] P1 Summary card: messages (own + inherited), tree nodes built, view lines (inherited count) and bytes, batches at HIGH → LOW, compactions' view lines/bytes, fill bar (amber while batching) with half marker, "batch pending" note, level legend (count × 2^l msg, level colors) — parity::memory: summary numbers checked against the state (1749 messages, 3491 nodes, 182 lines / 70505 B, batches 128000 → 64000, compactions' view 63 lines, legend sums to the lines); shots/parity-02-memory.jpg
+- [x] P2 Compaction jobs: running nodes in this timeline (spinner, click reveals), failed (retrying), count in other tasks — live::memory-jobs: running jobs in this timeline (spinner chips), a click reveals the node; parity::memory: a failed node (compactor event via the hub path) shows "failed · retrying"; shots/live-06-memory-jobs.jpg, parity-03-memory-failed.jpg
 - [x] P3 Search box (Enter) over readable trees' messages; hits (latest first, kind tag, text) → reveal the path — panels.ts memory search → hit reveals message in the tree (asserted)
-- [~] P4 Toggle the view / compactions' view; "raw" shows the rendered view text, blocks, mark index, marked chars and the header — view/cview toggle, raw (feat-10 shot)
+- [x] P4 Toggle the view / compactions' view; "raw" shows the rendered view text, blocks, mark index, marked chars and the header — parity::memory: compactions' view lists its 63 lines; raw shows 71884 chars, 47 blocks, mark block, marked chars, header; shots/parity-04/05
 - [x] P5 Tree rows: chevron, level color bar, `start+n`, `@t` badge for foreign trees, text; spinner when being built; retry badge when failed; unbuilt style; open → two halves (zoom) down to the message (full text, kind, date, image) — chat.ts memory tree opened down to the message, picture shown (chat-04b-memory-image)
-- [~] P6 Rows refresh as nodes get built — rows refresh as nodes are built; no test
+- [x] P6 Rows refresh as nodes get built — live::memory-jobs: built rows 9 → 12, nodes 15 → 21 while compactions finish; shots/live-07-memory-built.jpg
 
 ## Q. Context debugger (panels.tsx ContextPanel)
-- [~] Q1 Shows the selected request (follows latest chat request unless pinned; "follow latest" button) — follows latest / pinned via context ↗ (chat.ts); "follow latest" button untested
+- [x] Q1 Shows the selected request (follows latest chat request unless pinned; "follow latest" button) — parity::context: context ↗ pins the call; "follow latest" unpins
 - [x] Q2 Header chips: model · effort, backend, status · stop, cost — header chips (panels-10)
 - [x] Q3 Usage bar (cache read green, write amber, uncached accent) and legend with reasoning tokens — usage bar + legend (panels-10)
 - [x] Q4 KV: input tokens + cached %, cost split, first token, total time, started, canonical context size — KV rows (panels-10)
-- [~] Q5 Context sent: canonical messages oldest first with context separators, roles, kinds, previews, sizes, raw marker, expandable full text, images, envelopes with children, cache breakpoint markers — canonical messages incl. image thumbnails (shared blob cache); image rows not exercised
+- [x] Q5 Context sent: canonical messages oldest first with context separators, roles, kinds, previews, sizes, raw marker, expandable full text, images, envelopes with children, cache breakpoint markers — parity::context: #8's call lists the picture as an image row; it opens to the thumbnail; shots/parity-06-context-image.jpg
 - [x] Q6 Output section; wire request (show/hide, pretty JSON) — panels.ts wire request shown (asserted)
-- [~] Q7 Running call message ("still running") — "still running" message; not exercised
+- [x] Q7 Running call message ("still running") — live::newtask-cmd-enter: the Context view shows "still running" for the call in flight; shots/live-01-context-running.jpg
 
 ## R. Log view (panels.tsx RequestsPanel + Breakdown)
 - [x] R1 Scope this task / with its subtree — panels.ts subtree toggle (asserted)
-- [~] R2 Breakdown tables by kind (memory/chat labels), by model, by source (turns, compactions, tools, children) with cost bars, tokens, time; events count — breakdown tables (panels-08)
+- [x] R2 Breakdown tables by kind (memory/chat labels), by model, by source (turns, compactions, tools, children) with cost bars, tokens, time; events count — parity::log: breakdown by kind [compact, chat, dictation], 5 models, by source [compactions, turns, tools], 35533 events; shots/parity-07-log.jpg
 - [x] R3 Totals card: cost (ledger), turns/compactions loaded, input tokens + cached %, output tokens, note — totals card (panels-08)
-- [~] R4 Filter all / chat / compact; table when · task (subtree) · model · in · cache % · out · cost; click selects → Context view — filter + click → Context; untested
+- [x] R4 Filter all / chat / compact; table when · task (subtree) · model · in · cache % · out · cost; click selects → Context view — parity::log: filters chat / compact / all show only those purposes; a row click opens that call in the Context view
 - [x] R5 Server log (in Settings > Global) — server log in Settings > Global (panels-12)
 
 ## S. Models view (models.tsx)
-- [~] S1 Providers grouped (Anthropic · Claude Code, OpenAI · Codex); count of runnable models; refresh catalog button; show/hide hidden — models panel (panels-05)
-- [~] S2 Model card: label, id, spend (ledger, tooltip calls/tokens), tags (not offered now, hidden, computer use, efforts), rate in force (in / cache read / cache write / write 1h / out), long-context line, source chip + since date + note, or "No price yet…" — model card (panels-05)
+- [x] S1 Providers grouped (Anthropic · Claude Code, OpenAI · Codex); count of runnable models; refresh catalog button; show/hide hidden — parity::models: providers anthropic + openai, 11 runnable, refresh reloads the catalogs, hide from pickers + "show 1 hidden". Fixed: the header row overflowed a narrow sidebar and pushed "show N hidden" / refresh out of view; shots/parity-08
+- [x] S2 Model card: label, id, spend (ledger, tooltip calls/tokens), tags (not offered now, hidden, computer use, efforts), rate in force (in / cache read / cache write / write 1h / out), long-context line, source chip + since date + note, or "No price yet…" — parity::models: Haiku card rate (table source), ledger calls, efforts; a rate history opens (claude-opus-5-5, 3 rows); shots/parity-09
 - [x] S3 Edit rate (fields, Anthropic ratios auto-filled from base input, note) → new manual row; history table; hide/show from pickers (pickers update) — panels.ts rate edit saved to the database (asserted in the DB)
 
 ## T. Settings (panels.tsx SettingsPanel)
 - [x] T1 Two tabs: Global and the task's ("Main chat" / "Task #N"); last tab remembered — panels.ts settings Global / Task tabs
 - [x] T2 Global: turns at once (1,2,3,4,6,8,12,16), dictation service Claude/Codex, server log, build id — turns, dictation service, server log, build (panels-12)
-- [~] T3 Global (GPUI addition): theme picker (+ follow system appearance), font size — theme picker, follow system, chat text size control (−/+/reset); size control not exercised in a test
+- [x] T3 Global (GPUI addition): theme picker (+ follow system appearance), font size — parity::settings-font: Settings text size + / − (14 → 15 → 14); theme picker / follow in features + parity::appearance
 - [x] T4 Task: instructions (saved on blur), depth select (0..parent−1, "(no task tools)"), compactor model + effort, tools toggles (core, computer with availability text, reframe MCP), computer approvals ask/always, tool list by group, working directory, view budget (≥ 2000) — task settings (panels-13)
 
 ## U. Keyboard, commands, polish (GPUI additions beyond the web app)
-- [~] U1 Command palette (⌘K / ⌘⇧P): every command (open task by title, new task, pause/resume/close/cancel, switch view, theme, toggle sidebar, focus composer, stop, models, settings) — palette: tasks, commands, themes, models, test hooks; lifecycle commands untested
-- [~] U2 App menus (OptChat, File, Edit, View, Task, Window, Help) with shortcuts — menus: OptChat (About, Settings, Services, Hide, Hide Others, Show All, Quit), File, Edit, View, Task, Window (Minimize, Zoom, Full Screen, tabs), Help (shortcuts, commands, data folder); not driven by a test (the menu bar is OS UI)
-- [~] U3 Shortcuts: ⌘B sidebar, ⌘1..⌘6 rail views, ⌘N new task, ⌘W close tab, ⌘⇧[ / ⌘⇧] prev/next tab, ⌘. stop, ⌘L focus composer, ⌘, settings, ⌘T task switcher, Esc closes dialogs/popovers — all bindings; ⌘1–6 ⌘B ⌘T ⌘W ⌘N ⌘= ⌘⇧0 ctrl-tab Esc tested; ⌘⇧[ ⌘⇧] ⌘. ⌘L ⌘, untested
+- [x] U1 Command palette (⌘K / ⌘⇧P): every command (open task by title, new task, pause/resume/close/cancel, switch view, theme, toggle sidebar, focus composer, stop, models, settings) — parity::palette-lifecycle: Pause / Close as done / Cancel / Resume (paused #106) open the ask field; New task, Show models, Focus the composer; live: Model: Claude Haiku
+- [x] U2 App menus (OptChat, File, Edit, View, Task, Window, Help) with shortcuts — parity::menus (AX of our own app): the menu bar has OptChat, File, Edit, View, Task, Window, Help with every item; Task › Pause… and View › Models picked from the real menus. Key equivalents aren't exposed in the AX text (the bindings themselves are tested)
+- [x] U3 Shortcuts: ⌘B sidebar, ⌘1..⌘6 rail views, ⌘N new task, ⌘W close tab, ⌘⇧[ / ⌘⇧] prev/next tab, ⌘. stop, ⌘L focus composer, ⌘, settings, ⌘T task switcher, Esc closes dialogs/popovers — parity::tabs-keys: ⌘⇧] / ⌘⇧[, ⌘L, ⌘, ; live::follow-stop: ⌘. stops a streaming Haiku turn; the rest in panels / inputs
 - [x] U4 Context menus: task rows / tabs (open, pause, resume, close, cancel, new subtask, copy id), messages (copy text, copy markdown), tool cards (copy input/output) — chat.ts: task row and tab menus with the web's actions (Open, Pause…, Resume…, Close…, Cancel…, New subtask…, Copy #id); messages / tool cards have Copy
-- [~] U5 Smooth animations: spinners, pulsing dots, mic pulse, popover/dialog fade, chevron rotate — spinners / pulses (12.5 Hz clock), mic pulse, toast, dialog/popover fade-in (120 ms), chevrons rotate without animation
-- [~] U6 Focus handling: dialogs trap focus, Esc returns to composer, Tab order in dialogs — Esc returns focus to the composer; focus restored to open dialogs; no Tab-order trap
+- [x] U5 Smooth animations: spinners, pulsing dots, mic pulse, popover/dialog fade, chevron rotate — chevrons now turn in 150 ms when they flip (ui::chevron: tool cards, thinking, task rows, memory and context rows); parity::tasks-panel counts 9 animated frames on a collapse; spinners / pulses / fades as before
+- [x] U6 Focus handling: dialogs trap focus, Esc returns to composer, Tab order in dialogs — parity::newtask-images: Esc closes the dialog and the focus is back on the composer; inputs.ts: Tab / Shift+Tab cycle inside the dialog's fields
 - [x] U7 Tooltips on icon buttons — tooltips on icon buttons (tour shots)
 
 ## V. Themes
 - [x] V1 Theme system with live switching (no restart) applied to every view — features.ts: every bundled theme applied live
 - [x] V2 Zed theme JSON format loader (theme family files with `themes[].appearance/style`), license noted (Zed themes: GPL/Apache per repo; noted in THEMES.md) — crates/theme Zed loader + unit tests; THEMES.md licenses
 - [x] V3 Themes: OptChat Dark (current web palette), OptChat Light, Solarized Light, Solarized Dark, Tomorrow Night, Tomorrow Night Blue, One Dark, One Light, Ayu Dark/Light/Mirage, Gruvbox Dark/Light (Zed built-ins) — 17 themes; theme::tests::all_bundled_parse_and_order
-- [~] V4 Follow system appearance by default (light/dark pair), live on appearance change — follow system by default; a live appearance flip not tested
+- [x] V4 Follow system appearance by default (light/dark pair), live on appearance change — parity::appearance: the default follows the system; the handler observe_window_appearance calls (theme::on_appearance, via a hook — the system appearance itself is not flipped) switches OptChat Light / Dark live; a picked theme ignores it; shots/parity-11
 - [x] V5 Screenshot of every theme — features.ts: all 17 bundled themes applied and screenshotted (shots/theme-*.jpg)
 
 ## W. Packaging, performance, process

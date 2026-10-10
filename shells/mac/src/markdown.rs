@@ -299,6 +299,11 @@ fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Wi
             f.style = FontStyle::Italic;
         }
         let link = st.link.as_ref().filter(|l| !l.is_empty());
+        for (on, name) in [(st.code, "code"), (st.bold, "bold"), (st.italic, "italic"), (st.strike, "strike"), (link.is_some(), "link")] {
+            if on {
+                crate::ui::seen("mdInline", name);
+            }
+        }
         let col = if link.is_some() { k.accent } else if st.code { k.text } else { color };
         runs.push(TextRun {
             len: r.end - r.start,
@@ -342,6 +347,16 @@ pub fn render(id: &str, doc: &Doc, o: &Opts, window: &Window, cx: &App) -> Div {
 }
 
 fn block(id: &str, b: &Block, o: &Opts, k: &C, window: &Window, cx: &App) -> AnyElement {
+    // UI tests: which kinds of markdown blocks the feed has drawn
+    crate::ui::seen("mdBlocks", match b {
+        Block::Para(_) => "para",
+        Block::Heading(..) => "heading",
+        Block::Code { .. } => "code",
+        Block::Rule => "rule",
+        Block::Quote(_) => "quote",
+        Block::List { items, .. } => if items.iter().any(|x| x.0.is_some()) { "tasklist" } else { "list" },
+        Block::Table { .. } => "table",
+    });
     match b {
         Block::Para(il) => styled(ElementId::Name(id.to_string().into()), il, o.size, o.color, k, window),
         Block::Heading(l, il) => {

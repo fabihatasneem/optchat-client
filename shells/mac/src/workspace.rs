@@ -40,6 +40,8 @@ actions!(
         CancelTask,
         Dismiss,
         DictateKey,
+        DictEnter,
+        DictAppend,
         OpenMainChat,
         ZoomIn,
         ZoomOut,
@@ -84,6 +86,9 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("cmd-shift-0", ZoomReset, None),
         KeyBinding::new("escape", Dismiss, Some("Workspace")),
         KeyBinding::new("m", DictateKey, Some("Workspace && !Input")),
+        // while dictating the focus may sit outside the (read-only) text field: Enter / ⌘Enter still send
+        KeyBinding::new("enter", DictEnter, Some("Workspace && !Input")),
+        KeyBinding::new("cmd-enter", DictAppend, Some("Workspace && !Input")),
     ]);
 }
 
@@ -276,13 +281,14 @@ impl Workspace {
                 "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
                 "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
                 "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window, "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window,  "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
                 "firstFrameMs": s.stats.first_frame_ms, "frames": frame_summary(), "rss": crate::ui::rss_mb(), "loadedMs": s.stats.loaded_ms, "switches": s.stats.switches, "errors": s.errors.clone(),
             });
             set_state_json(j.to_string());
+            set_state_extra("ws", serde_json::json!({"sideW": s.prefs.side_w, "maxTurns": s.global.max_turns, "running2": s.tasks.values().filter(|x| x.running).count(), "waiting": s.tasks.values().filter(|x| x.waiting).map(|x| x.task.id).collect::<Vec<_>>(), "taskStatus": s.tasks.values().map(|x| (x.task.id.to_string(), x.task.status.as_str())).collect::<std::collections::BTreeMap<_, _>>(), "pinned": s.pinned_request, "unbuilt": s.cur.view.as_ref().map(|v| v.parts.iter().filter(|p| !p.built).count()), "busy": s.busy.len(), "failed": s.failed.len(), "dictDone": s.dict.done_count, "dictText": s.dict.text.clone()}));
     }
 
     /// Redraws ambient animations (spinners, pulsing dots) at 12.5 Hz (2.5 Hz while the window is in the
@@ -635,6 +641,21 @@ impl Render for Workspace {
                 cx.notify();
             }))
             .on_action(cx.listener(Self::on_dictate_key))
+            .on_action(cx.listener(|w, _: &DictEnter, window, cx| {
+                if w.state.read(cx).dict.state == "idle" {
+                    return cx.propagate();
+                }
+                w.composer.update(cx, |c, cx| c.submit(true, window, cx));
+            }))
+            .on_action(cx.listener(|w, _: &DictAppend, window, cx| {
+                if w.state.read(cx).dict.state == "idle" {
+                    return cx.propagate();
+                }
+                w.composer.update(cx, |c, cx| {
+                    let run = c.running(cx);
+                    c.submit(run, window, cx)
+                });
+            }))
             .on_key_up(cx.listener(|w, e: &KeyUpEvent, _, cx| {
                 if e.keystroke.key == "m" {
                     if w.m_press.take().is_some() {
@@ -708,6 +729,13 @@ impl Workspace {
         let s = self.state.read(cx);
         let active = s.tasks.values().filter(|x| x.task.status == TaskStatus::Active).count();
         let compacting = !s.busy.is_empty();
+        set_state_extra("rail", serde_json::json!({ "badge": active, "memDot": compacting }));
+        if active > 0 {
+            crate::ui::seen("railSeen", "badge");
+        }
+        if compacting {
+            crate::ui::seen("railSeen", "memDot");
+        }
         let mut rail = div()
             .w(px(48.))
             .flex_none()
@@ -822,7 +850,7 @@ impl Workspace {
                 .when(!ended, |d| d.child(icon_btn("side-new", "plus", 16., cx).tooltip(tooltip("new task under the current one (⌘N)")).child(probe("side.new")).on_click(cx.listener(|w, _, window, cx| dialogs::open_new_task(w, None, window, cx)))));
         }
         if view == View::Context && pinned {
-            head = head.child(btn_small("follow", "follow latest", Tone::Ghost, cx).on_click(cx.listener(|w, _, _, cx| {
+            head = head.child(btn_small("follow", "follow latest", Tone::Ghost, cx).child(probe("ctx.follow")).on_click(cx.listener(|w, _, _, cx| {
                 w.state.update(cx, |s, cx| {
                     s.pinned_request = false;
                     cx.notify();
@@ -850,6 +878,7 @@ impl Workspace {
             .w(px(6.))
             .cursor_col_resize()
             .hover(|s| s.bg(k.accent.opacity(0.25)))
+            .child(probe("side.resizer"))
             .on_mouse_down(MouseButton::Left, cx.listener(move |ws, e: &MouseDownEvent, _, cx| {
                 ws.resizing = Some((f32::from(e.position.x), w));
                 cx.notify();

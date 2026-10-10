@@ -26,7 +26,7 @@
   (lifecycle texts, budgets, cascades, rollback, CAP split, computer lock, proxies via stub upstream, tool specs
   byte-identical to the TS, JS dates), unit tests (trim, keyterms, tools, local, rates, metrics, adapters, stt).
 - Model/network (`-- --ignored`, Haiku + GPT-6-Luna only): model_turns, lifecycle, hub_realdb, stt live.
-- UI: `deno run -A tests/e2e.ts [--offline] [suite…]` — panels, features, chat, inputs, quit, smoke, flow, perf.
+- UI: `deno run -A tests/e2e.ts [--offline] [suite…]` — panels, features, chat, inputs, quit, smoke, flow, perf, parity (no model calls), live (Haiku).
   Each suite launches dist/OptChat.app on a temp copy of data/optchat.db (removed on quit) and drives it with
   ChatGPT Computer Use (only our bundle id is approved). Results: shots/e2e-results.txt; screenshots in shots/.
 

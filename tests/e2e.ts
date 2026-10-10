@@ -18,6 +18,18 @@
 //             tabs, current task, placeholder, window size
 //   quit      ⌘Q leaves no child process behind (claude compactions, codex, bash)
 //   perf      launch, scrolling frame times on 1749 messages, task switch, memory (release build)
+//   parity    no model calls: skeletons, rail, memory summary / failed jobs / cview / raw, context image rows + follow
+//             latest, log breakdown / filters / row → context, models providers / refresh / hidden / history, text size,
+//             appearance follow (hook), toasts 2.6 / 6 s, error line (dictation 6 s, engine stays), mic tap / hold /
+//             states / audio.ms metric, composer paste / drop (1568 px) / 20 cap / ×, dialog images, continue select
+//             + continues link, task rows (open, no subtasks, chevron animation, dot tooltip), ⌘⇧[ ⌘⇧] ⌘L ⌘, middle-click,
+//             focus on switch, disabled while loading, sidebar drag 220–760, budget bar, palette lifecycle commands,
+//             menu bar (AX), load earlier + follow mode, report expand, v2 work rows, markdown blocks, cut text,
+//             turn error, echo images, dictation restart, child / root empty states (fresh database)
+//   live      Haiku children: ⌘Enter in the dialog, Context "still running", rail badge + memory dot, status texts
+//             (running, settling, waiting for a slot, #id mode, N working, N queued), live text + thinking, follow
+//             mode while streaming, ⌘. stop, Enter / ⌘Enter while dictating, "waiting for summaries", compaction jobs
+//             + memory rows refreshing
 import { ROOT } from "./lib/cua.ts";
 const ALL = [
   { name: "panels", models: false },
@@ -28,6 +40,8 @@ const ALL = [
   { name: "smoke", models: true },
   { name: "flow", models: true },
   { name: "perf", models: false },
+  { name: "parity", models: false },
+  { name: "live", models: true },
 ];
 const args = Deno.args.filter((x) => !x.startsWith("--"));
 const offline = Deno.args.includes("--offline");

@@ -151,7 +151,7 @@ pub fn task_bar(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Worksp
     crumbs = crumbs.child(div().flex_1().min_w_0().text_color(k.text).overflow_hidden().line_clamp(1).text_ellipsis().child(if t.id == 0 { "main chat".to_string() } else { format!("#{} {}", t.id, t.title) }));
     if t.mode == TaskMode::Continue {
         if let Some(p) = t.prev {
-            crumbs = crumbs.child(div().flex().gap(px(4.)).text_color(k.muted).text_size(px(11.5)).child("· continues").child(div().id("prevlink").text_color(k.accent).cursor_pointer().child(format!("#{p}")).on_click(cx.listener(move |w, _, window, cx| w.open_task(p, window, cx)))));
+            crumbs = crumbs.child(div().flex().gap(px(4.)).text_color(k.muted).text_size(px(11.5)).child("· continues").child(div().id("prevlink").text_color(k.accent).cursor_pointer().child(format!("#{p}")).child(probe("taskbar.prev")).on_click(cx.listener(move |w, _, window, cx| w.open_task(p, window, cx)))));
         }
     }
     let mut bar = base.child(crumbs);

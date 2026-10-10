@@ -223,7 +223,7 @@ impl MemoryPanel {
                 .hover(move |s| s.bg(hover))
                 .tooltip(tooltip(if l == 0 { "open the message".to_string() } else { format!("zoom: open into two lines of {}", n / 2) }))
                 .child(probe(format!("mem.{kk}")))
-                .child(icon("chevron-right", 10., k.faint).mt(px(3.)).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))))
+                .child(div().mt(px(3.)).child(chevron(format!("mem{kk}"), 10., k.faint, open)))
                 .child(div().w(px(3.)).h(px(14.)).mt(px(1.)).rounded(px(2.)).flex_none().bg(k.levels[l as usize % 8]))
                 .child(
                     div()
@@ -320,6 +320,16 @@ impl MemoryPanel {
             .child(div().relative().child(bar(&[(view.bytes as f32 / budget as f32, if view.batching { k.amber } else { k.accent })], cx)).child(div().absolute().left(relative(0.5)).top(px(6.)).h(px(10.)).w(px(1.)).bg(k.line2)))
             .when(view.batching, |d| d.child(div().text_size(px(11.5)).text_color(k.muted).child(format!("batch pending: merging toward {} as parents get built", fmt::bytes(low)))))
             .child(legend);
+        if crate::ui::probes_on() {
+            let built = if self.which_c { self.cview.iter().filter(|p| p.built).count() } else { view.parts.iter().filter(|p| p.built && self.texts.get(&(p.t, p.l, p.i)).map(|t| !t.is_empty()).unwrap_or(false)).count() };
+            crate::ui::set_state_extra("memSummary", serde_json::json!({
+                "messages": s.cur.t, "inherited": (view.g - s.cur.t).max(0), "nodes": s.cur.nodes, "lines": view.parts.len(), "inheritedLines": inherited, "bytes": view.bytes,
+                "high": budget, "low": low, "batching": view.batching, "cviewLines": view.compaction_lines, "cviewBytes": view.compaction_bytes,
+                "legend": levels.iter().map(|(l, n)| [*l as usize, *n]).collect::<Vec<_>>(),
+                "running": busy_all.len(), "failed": failed.len(), "other": other, "whichC": self.which_c, "rows": if self.which_c { self.cview.len() } else { view.parts.len() },
+                "builtRows": built, "raw": self.rendered.as_ref().map(|r| serde_json::json!({ "chars": js_len(&r.text), "blocks": r.blocks, "mark": r.mark_index, "marked": r.marked_chars, "header": r.header.len() })),
+            }));
+        }
         let mut jobs = div().flex().flex_wrap().gap(px(6.));
         if busy_all.is_empty() && failed.is_empty() {
             jobs = jobs.child(div().text_size(px(12.)).text_color(k.muted).child("nothing being summarized in this timeline"));
@@ -341,13 +351,14 @@ impl MemoryPanel {
                     .text_size(px(11.5))
                     .cursor_pointer()
                     .child(spinner(SharedString::from(format!("js{b}")), 11., k.accent))
+                    .child(probe(format!("job.{b}")))
                     .child(if l == 0 { format!("message {i}") } else { format!("{}+{}", i << l, 1i64 << l) })
                     .when(t != task, |d| d.child(div().text_color(k.violet).child(format!("@{t}"))))
                     .on_click(cx.listener(move |m, _, _, cx| m.reveal(t, i << l, cx))),
             );
         }
         for (b, e) in &failed {
-            jobs = jobs.child(chip(format!("{b} failed · retrying"), ChipTone::Red, cx).id(SharedString::from(format!("jf{b}"))).tooltip(tooltip(e.clone())));
+            jobs = jobs.child(chip(format!("{b} failed · retrying"), ChipTone::Red, cx).id(SharedString::from(format!("jf{b}"))).child(probe(format!("jobf.{b}"))).tooltip(tooltip(e.clone())));
         }
         let mut hits_el = div().flex().flex_col();
         if let Some(h) = &self.hits {
@@ -480,6 +491,7 @@ impl ContextPanel {
     fn msg_row(&self, m: &Message, indent: bool, cx: &mut Context<Self>) -> AnyElement {
         let k = c(cx).clone();
         let open = self.open.contains(&m.id);
+        let is_img = matches!(m.body, Body::Image { .. });
         let id = m.id.clone();
         let (kind, prev, full) = msg_texts(m);
         let rcol = match m.role {
@@ -504,11 +516,12 @@ impl ContextPanel {
                     .cursor_pointer()
                     .text_size(px(12.))
                     .hover(|s| s.bg(k.hover))
-                    .child(icon("chevron-right", 10., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))))
+                    .child(chevron(format!("cm{}", m.id), 10., k.faint, open))
                     .child(div().flex_none().w(px(62.)).text_color(rcol).child(format!("{:?}", m.role).to_lowercase()))
                     .child(div().flex_none().w(px(70.)).text_color(k.muted).text_size(px(11.)).child(kind))
                     .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.text2).child(prev))
                     .child(div().flex_none().text_size(px(10.5)).text_color(k.faint).child(format!("{}{}", fmt::bytes(m.bytes as usize), if m.raw.is_some() { " · raw" } else { "" })))
+                    .when(is_img, |d| d.child(probe(format!("cmimg.{}", m.id))))
                     .on_click(cx.listener(move |p, _, _, cx| {
                         if !p.open.remove(&id) {
                             p.open.insert(id.clone());
@@ -521,7 +534,7 @@ impl ContextPanel {
                     Body::Image { blob: Some(b), .. } => Some(crate::ui::blob_thumb(&self.state, b, 260., 200., None, cx)),
                     _ => None,
                 };
-                d.child(div().ml(px(18.)).mb(px(6.)).p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.5)).line_height(px(17.)).text_color(k.text2).child(full).when_some(image, |d, i| d.child(div().mt(px(6.)).child(i))))
+                d.child(div().ml(px(18.)).mb(px(6.)).p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.5)).line_height(px(17.)).text_color(k.text2).child(full).when_some(image, |d, i| d.child(div().mt(px(6.)).child(i).child(probe("ctx.thumb")))))
             })
             .into_any_element()
     }
@@ -570,11 +583,22 @@ impl Render for ContextPanel {
 }
 impl ContextPanel {
     fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        crate::ui::set_state_extra("context", serde_json::json!({ "wire": self.wire }));
         self.maybe(cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);
         let shown = s.shown_request();
+        if crate::ui::probes_on() {
+            let running = shown.as_ref().and_then(|r| s.cur.requests.get(r)).map(|r| r.status == "running").unwrap_or(false);
+            let d = self.detail.as_ref().filter(|d| Some(&d.request.id) == shown.as_ref());
+            let all: Vec<&Message> = d.map(|d| d.context.iter().flat_map(|x| match &x.3 { Some(ch) => ch.iter().collect::<Vec<_>>(), None => vec![&x.2] }).collect()).unwrap_or_default();
+            let imgs = all.iter().filter(|m| matches!(m.body, Body::Image { .. })).count();
+            let mut open: Vec<&String> = self.open.iter().collect();
+            open.sort();
+            crate::ui::set_state_extra("context", serde_json::json!({ "wire": self.wire, "pinned": s.pinned_request, "shown": shown, "stillRunning": running && d.is_none(), "rows": all.len(), "imageRows": imgs, "open": open }));
+            if running && d.is_none() {
+                crate::ui::seen("contextSeen", "stillRunning");
+            }
+        }
         let Some(rid) = shown else { return pad(div()).child(div().text_size(px(12.)).text_color(k.muted).child("Pick a model call (the “context ↗” or “steps” chips under a turn, or the Log view) to see exactly what was sent.")) };
         let status = s.cur.requests.get(&rid).map(|r| r.status.clone());
         let Some(d) = self.detail.clone().filter(|d| d.request.id == rid) else {
@@ -740,7 +764,6 @@ impl Render for LogPanel {
 }
 impl LogPanel {
     fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        crate::ui::set_state_extra("log", serde_json::json!({ "subtree": self.subtree }));
         self.maybe(cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);
@@ -749,6 +772,13 @@ impl LogPanel {
         let mut rows: Vec<RequestRecord> = all.iter().filter(|r| self.filter == "all" || r.purpose == self.filter).cloned().collect();
         rows.sort_by(|a, b| b.started_at.cmp(&a.started_at));
         rows.truncate(300);
+        if crate::ui::probes_on() {
+            let mut purposes: Vec<&str> = rows.iter().map(|r| r.purpose.as_str()).collect();
+            purposes.sort();
+            purposes.dedup();
+            let bd = self.bd.as_ref().map(|b| serde_json::json!({ "byKind": b.by_kind.iter().map(|x| x.0.clone()).collect::<Vec<_>>(), "byModel": b.by_model.len(), "bySource": b.by_source.iter().map(|x| x.0.clone()).collect::<Vec<_>>(), "events": b.events }));
+            crate::ui::set_state_extra("log", serde_json::json!({ "subtree": self.subtree, "filter": self.filter, "rows": rows.len(), "purposes": purposes, "breakdown": bd, "first": rows.first().map(|r| r.id.clone()) }));
+        }
         let (mut chat, mut comp, mut inp, mut read, mut out) = (0.0, 0.0, 0i64, 0i64, 0i64);
         for r in &all {
             let ct = r.cost.as_ref().map(|c| c.total).unwrap_or(0.0);
@@ -778,7 +808,7 @@ impl LogPanel {
             .child(div().mt(px(8.)).text_size(px(11.)).text_color(k.muted).child("API-equivalent estimates; local agents run on your subscription. Claude prices are calibrated from Claude Code's own cost report."));
         let mut table = div().flex().flex_col().text_size(px(12.));
         table = table.child(div().flex().text_size(px(10.5)).text_color(k.faint).py(px(3.)).child(div().w(px(64.)).child("when")).when(self.subtree, |d| d.child(div().w(px(36.)).child("task"))).child(div().flex_1().child("model")).child(div().w(px(48.)).flex().justify_end().child("in")).child(div().w(px(40.)).flex().justify_end().child("cache")).child(div().w(px(44.)).flex().justify_end().child("out")).child(div().w(px(58.)).flex().justify_end().child("cost")));
-        for r in rows {
+        for (n, r) in rows.into_iter().enumerate() {
             let rid = r.id.clone();
             let sel = selected.as_deref() == Some(&r.id);
             let st = self.state.clone();
@@ -800,6 +830,7 @@ impl LogPanel {
                     .child(div().w(px(40.)).flex().justify_end().child(format!("{}%", fmt::cache_pct(r.usage.as_ref()))))
                     .child(div().w(px(44.)).flex().justify_end().child(fmt::tokens(r.usage.as_ref().map(|u| u.output).unwrap_or(0))))
                     .child(div().w(px(58.)).flex().justify_end().child(fmt::cost(r.cost.as_ref())))
+                    .when(n < 5, |d| d.child(probe(format!("logrow.{n}"))))
                     .on_click(move |_, _, cx| {
                         let rid = rid.clone();
                         st.update(cx, |s, cx| {
@@ -815,7 +846,7 @@ impl LogPanel {
         let filters = ["all", "chat", "compact"];
         let mut fl = div().flex().gap(px(4.)).mb(px(8.));
         for f in filters {
-            fl = fl.child(seg(format!("lf{f}"), f, self.filter == f, cx).on_click(cx.listener(move |p, _, _, cx| {
+            fl = fl.child(seg(format!("lf{f}"), f, self.filter == f, cx).child(probe(format!("log.f.{f}"))).on_click(cx.listener(move |p, _, _, cx| {
                 p.filter = f;
                 cx.notify();
             })));
@@ -840,12 +871,13 @@ pub struct ModelsPanel {
     edit: Option<(String, [Entity<InputState>; 6])>,
     hist: HashSet<String>,
     seen: (usize, u64),
+    reloads: u64,
     _subs: Vec<Subscription>,
 }
 impl ModelsPanel {
     pub fn new(state: Entity<AppState>, _window: &mut Window, cx: &mut Context<Self>) -> ModelsPanel {
         let s = cx.observe(&state, |p: &mut ModelsPanel, _, cx| { p.maybe(cx); cx.notify(); });
-        ModelsPanel { state, rows: None, show_hidden: false, edit: None, hist: HashSet::new(), seen: (usize::MAX, 0), _subs: vec![s] }
+        ModelsPanel { state, rows: None, show_hidden: false, edit: None, hist: HashSet::new(), seen: (usize::MAX, 0), reloads: 0, _subs: vec![s] }
     }
     fn maybe(&mut self, cx: &mut Context<Self>) {
         let s = self.state.read(cx);
@@ -860,7 +892,10 @@ impl ModelsPanel {
         self.reload(cx);
     }
     fn reload(&mut self, cx: &mut Context<Self>) {
-        fetch(&self.state, cx, |h| h.models_list(), |p, r, _| p.rows = Some(r));
+        fetch(&self.state, cx, |h| h.models_list(), |p, r, _| {
+            p.rows = Some(r);
+            p.reloads += 1;
+        });
     }
     fn start_edit(&mut self, r: &ModelRow, window: &mut Window, cx: &mut Context<Self>) {
         let p = r.rate.as_ref().map(|r| r.per1m.clone());
@@ -917,16 +952,24 @@ impl ModelsPanel {
         let Some(rows) = self.rows.clone() else { return pad(div()).child(skeleton_line(None, cx)).child(skeleton_line(Some(200.), cx)) };
         let hidden = rows.iter().filter(|r| r.cat.hidden.unwrap_or(false)).count();
         let runnable = rows.iter().filter(|r| r.available && !r.cat.hidden.unwrap_or(false)).count();
+        if crate::ui::probes_on() {
+            let mut providers: Vec<String> = rows.iter().map(|r| r.cat.provider.clone()).collect();
+            providers.dedup();
+            let shown: Vec<String> = rows.iter().filter(|r| self.show_hidden || !r.cat.hidden.unwrap_or(false)).map(|r| r.cat.id.clone()).collect();
+            let haiku = rows.iter().find(|r| r.cat.id == "claude-haiku-5-5").map(|r| serde_json::json!({ "rate": r.rate.as_ref().map(|x| x.per1m.input), "source": r.rate.as_ref().map(|x| x.source.clone()), "spendCalls": r.spend_calls, "history": r.history.len(), "efforts": r.cat.efforts.clone() }));
+            let mut hist: Vec<&String> = self.hist.iter().collect();
+            hist.sort();
+            crate::ui::set_state_extra("models", serde_json::json!({ "providers": providers, "runnable": runnable, "hidden": hidden, "showHidden": self.show_hidden, "shown": shown, "haiku": haiku, "hist": hist, "reloads": self.reloads, "histCounts": rows.iter().filter(|r| r.history.len() > 1).map(|r| (r.cat.id.clone(), r.history.len())).collect::<std::collections::BTreeMap<_, _>>() }));
+        }
         let mut out = pad(div()).child(probe("models")).child(
             div()
                 .flex()
                 .items_center()
                 .gap(px(6.))
                 .mb(px(10.))
-                .child(div().text_size(px(12.)).text_color(k.muted).child(format!("{runnable} models you can run · prices per 1M tokens")))
-                .child(div().flex_1())
-                .when(hidden > 0, |d| d.child(btn_small("showhidden", format!("{} {hidden} hidden", if self.show_hidden { "hide" } else { "show" }), Tone::Ghost, cx).on_click(cx.listener(|p, _, _, cx| { p.show_hidden = !p.show_hidden; cx.notify(); }))))
-                .child(icon_btn("mrefresh", "refresh-cw", 14., cx).tooltip(tooltip("read the providers' model lists again")).on_click(cx.listener(|p, _, _, cx| {
+                .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_size(px(12.)).text_color(k.muted).child(format!("{runnable} models you can run · prices per 1M tokens")))
+                .when(hidden > 0, |d| d.child(btn_small("showhidden", format!("{} {hidden} hidden", if self.show_hidden { "hide" } else { "show" }), Tone::Ghost, cx).flex_none().child(probe("models.showhidden")).on_click(cx.listener(|p, _, _, cx| { p.show_hidden = !p.show_hidden; cx.notify(); }))))
+                .child(icon_btn("mrefresh", "refresh-cw", 14., cx).child(probe("models.refresh")).tooltip(tooltip("read the providers' model lists again")).on_click(cx.listener(|p, _, _, cx| {
                     fetch(&p.state, cx, |h| { h.refresh_catalog(); h.send(HubEvent::Models(h.models())); }, |p, _, cx| p.reload(cx));
                 }))),
         );
@@ -1019,13 +1062,13 @@ impl ModelsPanel {
                         m.start_edit(&r2, window, cx);
                     }
                 })))
-                .when(r.history.len() > 1, |d| d.child(div().id(SharedString::from(format!("hist{id}"))).cursor_pointer().child(format!("history ({})", r.history.len())).on_click(cx.listener(move |m, _, _, cx| {
+                .when(r.history.len() > 1, |d| d.child(div().id(SharedString::from(format!("hist{id}"))).cursor_pointer().child(format!("history ({})", r.history.len())).child(probe(format!("model.hist.{id}"))).on_click(cx.listener(move |m, _, _, cx| {
                     if !m.hist.remove(&id2) {
                         m.hist.insert(id2.clone());
                     }
                     cx.notify();
                 }))))
-                .child(div().id(SharedString::from(format!("hide{id}"))).cursor_pointer().child(if hidden { "show in pickers" } else { "hide from pickers" }).on_click(move |_, _, cx| {
+                .child(div().id(SharedString::from(format!("hide{id}"))).cursor_pointer().child(if hidden { "show in pickers" } else { "hide from pickers" }).child(probe(format!("model.hide.{id}"))).on_click(move |_, _, cx| {
                     let id = id3.clone();
                     st.update(cx, |s, cx| s.command(cx, true, move |h| h.hide_model(&id, !hidden)))
                 })),
@@ -1112,7 +1155,7 @@ impl SettingsPanel {
 }
 fn picker(id: &str, label: String, items: Vec<(String, String, bool)>, on: impl Fn(String, &mut App) + 'static) -> impl IntoElement {
     let on = std::rc::Rc::new(on);
-    div().flex().child(picker_btn(id, label, items, on))
+    div().flex().child(picker_btn(id, label, items, on)).child(probe(format!("picker.{id}")))
 }
 fn picker_btn(id: &str, label: String, items: Vec<(String, String, bool)>, on: std::rc::Rc<dyn Fn(String, &mut App)>) -> impl IntoElement {
     Button::new(SharedString::from(id.to_string())).outline().small().label(label).dropdown_caret(true).dropdown_menu(move |mut m, _, _| {

@@ -157,12 +157,23 @@ pub fn approval(w: &mut Workspace, a: Approval, cx: &mut Context<Workspace>) -> 
 // ---- toast ------------------------------------------------------------------------------------------------------------
 pub fn toast(w: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElement> {
     let k = c(cx).clone();
-    let (ok, msg, at) = w.state.read(cx).notice.clone()?;
+    static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let Some((ok, msg, at)) = w.state.read(cx).notice.clone() else {
+        set_state_extra("toast", serde_json::Value::Null);
+        return None;
+    };
     let ttl = if ok { 2600 } else { 6000 };
     let age = at.elapsed().as_millis() as u64;
     if age > ttl {
+        // UI tests: how long the last toast was on screen (measured when it was taken down)
+        if SHOWN.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            set_state_extra("toastGone", serde_json::json!({ "ok": ok, "message": msg.clone(), "lifeMs": age }));
+        }
+        set_state_extra("toast", serde_json::Value::Null);
         return None;
     }
+    SHOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+    set_state_extra("toast", serde_json::json!({ "ok": ok, "message": msg.clone() }));
     // re-render when it should disappear
     cx.spawn(async move |this, cx| {
         Timer::after(std::time::Duration::from_millis(ttl - age + 20)).await;
@@ -436,6 +447,9 @@ impl NewTaskDialog {
     /// ⌘V in the instruction: an image on the clipboard is attached, text is pasted
     fn on_paste(&mut self, _: &NewTaskPaste, window: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = cx.read_from_clipboard() else { return };
+        self.paste_item(item, window, cx);
+    }
+    pub fn paste_item(&mut self, item: ClipboardItem, window: &mut Window, cx: &mut Context<Self>) {
         let mut got = false;
         for e in item.entries() {
             if let ClipboardEntry::Image(img) = e {
@@ -460,32 +474,34 @@ impl NewTaskDialog {
         let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some("Attach".into()) });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = rx.await {
-                let _ = this.update(cx, |d, cx| {
-                    for p in paths {
-                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                        let mt = match ext.as_str() {
-                            "png" => "image/png",
-                            "jpg" | "jpeg" => "image/jpeg",
-                            "gif" => "image/gif",
-                            "webp" => "image/webp",
-                            _ => continue,
-                        };
-                        if let Ok(b) = std::fs::read(&p) {
-                            d.add_bytes(p.file_name().and_then(|n| n.to_str()).unwrap_or("image").into(), mt, &b);
-                        }
-                    }
-                    cx.notify();
-                });
+                let _ = this.update(cx, |d, cx| d.add_paths(paths, cx));
             }
         })
         .detach();
+    }
+    /// the files the attach picker returned (or a test hook's)
+    pub fn add_paths(&mut self, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        for p in paths {
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let mt = match ext.as_str() {
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                _ => continue,
+            };
+            if let Ok(b) = std::fs::read(&p) {
+                self.add_bytes(p.file_name().and_then(|n| n.to_str()).unwrap_or("image").into(), mt, &b);
+            }
+        }
+        cx.notify();
     }
 }
 
 impl Render for NewTaskDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let field = [&self.title, &self.instruction, &self.usd, &self.minutes].iter().position(|f| f.read(cx).focus_handle(cx).is_focused(window));
-        crate::ui::set_state_extra("newtask", serde_json::json!({ "title": self.title.read(cx).value().to_string(), "instruction": self.instruction.read(cx).value().to_string(), "images": self.images.len(), "mode": self.mode, "field": field }));
+        crate::ui::set_state_extra("newtask", serde_json::json!({ "title": self.title.read(cx).value().to_string(), "instruction": self.instruction.read(cx).value().to_string(), "images": self.images.len(), "mode": self.mode, "field": field, "prev": self.prev, "ok": self.ok(cx), "parent": self.parent }));
         let k = c(cx).clone();
         let s = self.state.read(cx);
         let parent = self.parent;
@@ -537,7 +553,7 @@ impl Render for NewTaskDialog {
         let sib2 = siblings.clone();
         let mut thumbs = div().flex().gap(px(8.)).mb(px(10.));
         for (n, a) in self.images.iter().enumerate() {
-            thumbs = thumbs.child(div().id(("ntthumb", n)).relative().size(px(56.)).rounded(px(8.)).overflow_hidden().border_1().border_color(k.line2).child(img(a.img.clone()).size_full().object_fit(ObjectFit::Cover)).child(div().absolute().top(px(3.)).right(px(3.)).size(px(16.)).rounded_full().bg(hsla(0., 0., 0., 0.6)).flex().items_center().justify_center().text_size(px(11.)).text_color(gpui::white()).child("×")).tooltip(tooltip("remove")).cursor_pointer().on_click(cx.listener(move |d, _, _, cx| {
+            thumbs = thumbs.child(div().id(("ntthumb", n)).relative().size(px(56.)).rounded(px(8.)).overflow_hidden().border_1().border_color(k.line2).child(img(a.img.clone()).size_full().object_fit(ObjectFit::Cover)).child(div().absolute().top(px(3.)).right(px(3.)).size(px(16.)).rounded_full().bg(hsla(0., 0., 0., 0.6)).flex().items_center().justify_center().text_size(px(11.)).text_color(gpui::white()).child("×").child(probe(format!("ntthumb.{n}")))).tooltip(tooltip("remove")).cursor_pointer().on_click(cx.listener(move |d, _, _, cx| {
                 if n < d.images.len() {
                     d.images.remove(n);
                 }
@@ -558,7 +574,7 @@ impl Render for NewTaskDialog {
             .child(div().text_size(px(12.)).text_color(k.muted).mb(px(12.)).child(format!("You write as its parent. Its replies come back to {pname} as reports without waking it.")))
             .child(cards)
             .when(self.mode == "continue", |d| {
-                d.child(div().mb(px(10.)).flex().flex_col().gap(px(4.)).child(div().text_size(px(11.5)).text_color(k.muted).child("continue which task")).child(Button::new("prev").outline().small().label(prev_label).dropdown_caret(true).dropdown_menu(move |mut m, _, _| {
+                d.child(div().mb(px(10.)).flex().flex_col().gap(px(4.)).child(div().text_size(px(11.5)).text_color(k.muted).child("continue which task")).child(probe("newtask.prevrow")).child(Button::new("prev").outline().small().label(prev_label).dropdown_caret(true).dropdown_menu(move |mut m, _, _| {
                     for (id, st, title) in &sib2 {
                         let me = me2.clone();
                         let id = *id;
@@ -652,6 +668,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("down", Down, Some("Palette")),
         KeyBinding::new("enter", Confirm, Some("Palette")),
         KeyBinding::new("cmd-enter", SubmitStart, Some("NewTask")),
+        // inside the dialog's fields too (an Input binds ⌘Enter itself)
+        KeyBinding::new("cmd-enter", SubmitStart, Some("NewTask > Input")),
         KeyBinding::new("cmd-v", NewTaskPaste, Some("instruction > Input")),
         // Tab / Shift+Tab move between the dialog's fields (focus stays inside the dialog)
         KeyBinding::new("tab", NextField, Some("NewTask > Input")),
@@ -769,7 +787,7 @@ impl Palette {
             }
         }
         if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && !self.tasks_only {
-            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: run a bash tool", "t-bash")] {
+            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: run a bash tool", "t-bash"), ("Test: toast ok", "t-toast-ok"), ("Test: toast error", "t-toast-err"), ("Test: engine error", "t-err"), ("Test: dictation error", "t-dict-err"), ("Test: compaction failure", "t-cfail"), ("Test: appearance light", "t-light"), ("Test: appearance dark", "t-dark"), ("Test: mic hold", "t-mic-hold"), ("Test: mic tap", "t-mic-tap"), ("Test: dictate again", "t-dict-again"), ("Test: load all history", "t-load-all"), ("Test: paste image", "t-paste"), ("Test: drop big image", "t-drop-big"), ("Test: attach 21 images", "t-attach-21"), ("Test: new task with 21 images", "t-nt-21"), ("Test: new task paste image", "t-nt-paste"), ("Test: empty feed", "t-empty"), ("Test: reveal entry", "t-reveal")] {
                 if let Some(sc) = fuzzy(&q, l) {
                     items.push((sc + 60, l.to_string(), String::new(), Cmd::Act(a)));
                 }
@@ -841,6 +859,12 @@ impl Render for Palette {
     }
 }
 
+/// a clipboard item holding OPTCHAT_TEST_IMAGE, for the paste handlers (never the user's clipboard)
+fn test_image_item() -> Option<ClipboardItem> {
+    let b = std::fs::read(std::env::var("OPTCHAT_TEST_IMAGE").ok()?).ok()?;
+    Some(ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, b)))
+}
+
 pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Context<Workspace>) {
     match cmd {
         Cmd::Open(id) => w.open_task(id, window, cx),
@@ -907,6 +931,83 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
                     h.test_bash();
                 }
             }
+            // ---- hooks that feed the app's real event paths (HubEvent through AppState::apply) -------------------
+            "t-toast-ok" | "t-toast-err" => {
+                if let Some(h) = w.state.read(cx).hub() {
+                    let ok = a == "t-toast-ok";
+                    h.send(optchat_engine::hub::HubEvent::Notice { ok, message: if ok { "test notice: done".into() } else { "test notice: it failed".into() }, spawned: None });
+                }
+            }
+            "t-err" => {
+                let s = w.state.read(cx);
+                if let Some(h) = s.hub() {
+                    h.send(optchat_engine::hub::HubEvent::Engine(optchat_engine::engine::EngineEvent::Error { task: Some(s.current), message: "test engine error".into() }));
+                }
+            }
+            "t-dict-err" => {
+                let s = w.state.read(cx);
+                if let Some(h) = s.hub() {
+                    h.send(optchat_engine::hub::HubEvent::Dictation { task: s.current, ev: optchat_engine::hub::DictEvent::Error("microphone access is blocked".into()) });
+                }
+            }
+            "t-cfail" => {
+                let s = w.state.read(cx);
+                if let Some(h) = s.hub() {
+                    let mut failed = s.failed.clone();
+                    failed.insert(format!("{}:1:0", s.current), "test: the compactor call failed".into());
+                    h.send(optchat_engine::hub::HubEvent::Engine(optchat_engine::engine::EngineEvent::Compactor { busy: s.busy.clone(), failed }));
+                }
+            }
+            // the handler GPUI's observe_window_appearance calls (theme::sync_window → on_appearance), with a given appearance
+            "t-light" => crate::theme::on_appearance(cx, WindowAppearance::Light),
+            "t-dark" => crate::theme::on_appearance(cx, WindowAppearance::Dark),
+            "t-mic-hold" => w.composer.update(cx, |c, cx| c.test_press(650, window, cx)),
+            "t-mic-tap" => w.composer.update(cx, |c, cx| c.test_press(120, window, cx)),
+            "t-dict-again" => {
+                let s = w.state.read(cx);
+                if let Some(h) = s.hub() {
+                    let task = s.current;
+                    s.rt.spawn(async move { h.dictate_start(task) });
+                }
+            }
+            "t-load-all" => w.feed.update(cx, |f, cx| f.load_all(cx)),
+            "t-reveal" => {
+                // the entry index comes from <OPTCHAT_PROBES>.arg (written by the test)
+                let i = std::env::var("OPTCHAT_PROBES").ok().and_then(|p| std::fs::read_to_string(format!("{p}.arg")).ok()).and_then(|t| t.trim().parse::<i64>().ok());
+                if let Some(i) = i {
+                    w.feed.update(cx, |f, cx| f.reveal_entry(i, cx));
+                }
+            }
+            "t-paste" => {
+                if let Some(item) = test_image_item() {
+                    w.composer.update(cx, |c, cx| c.paste_item(item, window, cx));
+                }
+            }
+            "t-drop-big" => {
+                let p = std::path::PathBuf::from(std::env::var("OPTCHAT_TEST_BIG_IMAGE").unwrap_or_default());
+                w.composer.update(cx, |c, cx| c.add_paths(vec![p], cx));
+            }
+            "t-attach-21" => {
+                let p = std::path::PathBuf::from(std::env::var("OPTCHAT_TEST_IMAGE").unwrap_or_default());
+                w.composer.update(cx, |c, cx| c.add_paths(vec![p; 21], cx));
+            }
+            "t-nt-21" | "t-nt-paste" => {
+                open_new_task(w, None, window, cx);
+                if let Some(Overlay::NewTask(d)) = w.overlay.clone() {
+                    if a == "t-nt-21" {
+                        let p = std::path::PathBuf::from(std::env::var("OPTCHAT_TEST_IMAGE").unwrap_or_default());
+                        d.update(cx, |d, cx| d.add_paths(vec![p; 21], cx));
+                    } else if let Some(item) = test_image_item() {
+                        d.update(cx, |d, cx| d.paste_item(item, window, cx));
+                    }
+                }
+            }
+            "t-empty" => w.state.update(cx, |s, cx| {
+                // as when a task is shown before its first message is in (a just-spawned child)
+                s.cur.log.clear();
+                s.feed_rev += 1;
+                cx.notify();
+            }),
             _ => {}
         },
     }

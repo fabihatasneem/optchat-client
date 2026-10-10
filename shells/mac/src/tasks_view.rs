@@ -76,11 +76,12 @@ pub fn render(w: &mut TasksPanel, _window: &mut Window, cx: &mut Context<TasksPa
     let no_kids = s.children_of(cur).is_empty();
     let up_n = if s.prefs.task_scope_all { 0 } else { s.ancestors(cur).len() };
     let scope_all = s.prefs.task_scope_all;
+    set_state_extra("tasksPanel", serde_json::json!({ "rows": rows.len(), "noKids": no_kids && !scope_all, "collapsed": w.collapsed.iter().collect::<Vec<_>>() }));
     for (x, depth, path) in rows {
         list = list.child(row(w, &x, depth, path, cx));
     }
     if no_kids && !scope_all {
-        list = list.child(div().pl(px(40. + up_n as f32 * 14.)).py(px(6.)).text_size(px(12.)).text_color(k.faint).child("no subtasks yet"));
+        list = list.child(div().pl(px(40. + up_n as f32 * 14.)).py(px(6.)).text_size(px(12.)).text_color(k.faint).child("no subtasks yet").child(probe("tasks.nokids")));
     }
     list
 }
@@ -106,6 +107,7 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
         t.result.as_ref().map(|r| format!("\n→ {r}")).unwrap_or_default()
     );
     let status_word = if x.running { "working".to_string() } else if x.waiting { "waiting".into() } else { t.status.as_str().into() };
+    let dot_tip = format!("{tip}\n{status_word}");
     let st_col = match t.status.as_str() {
         "paused" => k.amber,
         "canceled" => k.red,
@@ -146,7 +148,6 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
         .when(is_cur, |d| d.bg(k.accent_bg).text_color(k.text).child(div().absolute().left_0().top(px(6.)).bottom(px(6.)).w(px(2.)).bg(k.accent)))
         .when(!is_cur, |d| d.hover(move |s| s.bg(hover)))
         .relative()
-        .when(!w.menu_open, |d| d.tooltip(tooltip(tip)))
         .child(probe(format!("trow.{id}")))
         .child(
             div()
@@ -154,7 +155,7 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
                 .w(px(12.))
                 .flex_none()
                 .when(kids > 0, |d| {
-                    d.child(icon("chevron-right", 13., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25))))).on_click(cx.listener(move |w, _, _, cx| {
+                    d.child(chevron(format!("trow{id}"), 13., k.faint, open)).child(probe(format!("trow.chev.{id}"))).on_click(cx.listener(move |w, _, _, cx| {
                         cx.stop_propagation();
                         if !w.collapsed.remove(&id) {
                             w.collapsed.insert(id);
@@ -163,14 +164,18 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
                     }))
                 }),
         )
-        .child(status_dot(format!("tr{id}"), t.status.as_str(), 8., cx))
+        // the dot has its own tooltip: title, mode, status (with the reason) and the result
+        .child(div().id(SharedString::from(format!("trdot-{id}"))).flex_none().p(px(2.)).child(status_dot(format!("tr{id}"), t.status.as_str(), 8., cx)).child(probe(format!("trow.dot.{id}"))).when(!w.menu_open, |d| d.tooltip(tooltip(dot_tip)))) 
         .child(
             div()
+                .id(SharedString::from(format!("trtext-{id}")))
                 .flex_1()
                 .min_w_0()
                 .flex()
                 .flex_col()
                 .gap(px(1.))
+                // the details as a tooltip over the title (the dot has its own)
+                .when(!w.menu_open, |d| d.tooltip(tooltip(tip)))
                 .child(div().text_size(px(13.)).overflow_hidden().line_clamp(1).text_ellipsis().when(ended, |d| d.text_color(k.muted)).child(task_name(t)))
                 .child(meta),
         )
