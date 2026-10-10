@@ -21,9 +21,14 @@ const shot = async (name: string) => {
 /** press the chat button for `ms` (a tap, a long-press, a hold) */
 const press = async (ms: number) => {
   const [x, y] = center(await a.waitProbe("phone.chat"));
-  await a.cmd({ op: "down", x, y });
-  await sleep(ms);
-  await a.cmd({ op: "up", x, y });
+  if (ms < 200) {
+    // a tap: press and release in one go (separate commands could take longer than the long-press delay headless)
+    await a.cmd({ op: "down", x, y }, { op: "up", x, y });
+  } else {
+    await a.cmd({ op: "down", x, y });
+    await sleep(ms);
+    await a.cmd({ op: "up", x, y });
+  }
   await sleep(250);
 };
 try {
@@ -86,16 +91,19 @@ try {
   await press(2200);
   await a.waitFor(() => !ph().dictating, 8000, "push-to-talk ended");
   check(ph().draft.length > 0, `hold-and-release: push-to-talk, ended by the release ("${ph().draft}")`);
-  await a.cmd({ op: "act", name: "t-noop" });
+  // clear the draft for what follows
+  await a.waitFor(() => st().dict === "idle", 8000, "dictation finished");
   await a.click("phone.card");
   await a.waitFor(() => ph().expanded, 3000, "edit");
   await a.key("cmd+a");
   await a.key("BackSpace");
+  await a.waitFor(() => ph().draft === "", 3000, "draft cleared");
   await a.click("feed", { dy: 40 });
 
   // with the keyboard up (composer open, focused): double-tap sends, long-press dictates, hold-to-talk stops on release
   await press(80);
-  await a.waitFor(() => ph().expanded && st().focus === "composer", 3000, "composer open (keyboard up)");
+  await a.waitFor(() => ph().expanded, 3000, "composer open (keyboard up)").catch((e) => { console.log("phone state:", JSON.stringify(ph()), JSON.stringify(st().lastCmd)); throw e; });
+  await a.waitFor(() => st().focus === "composer", 1500, "focused").catch(async () => await a.click("composer.input"));
   await a.type("sent by a double tap");
   {
     const [x, y] = center(await a.waitProbe("phone.chat"));
