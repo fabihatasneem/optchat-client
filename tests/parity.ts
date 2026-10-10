@@ -17,6 +17,7 @@ const pal = (q: string) => a.palette(q);
 const keys = (pre: string) => Object.keys(a.allProbes()).filter((k) => k.startsWith(pre));
 const inside = (p: number[] | undefined, box: number[] | undefined) => !!p && !!box && p[1] >= box[1] && p[1] + p[3] <= box[1] + box[3];
 const revealSide = async (name: string) => {
+  if (a.headless) return await a.reveal(name, "sidebar");
   for (let i = 0; i < 14; i++) {
     const p = a.probe(name), side = a.probe("sidebar");
     if (inside(p, side)) return p!;

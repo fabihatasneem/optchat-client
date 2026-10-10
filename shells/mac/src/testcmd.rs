@@ -47,6 +47,11 @@ fn key_of(k: &str) -> Option<Keystroke> {
         "Up" | "Down" | "Left" | "Right" | "Home" | "End" | "PageUp" | "PageDown" | "Space" => p.to_lowercase().replace("pageup", "pageup").replace("pagedown", "pagedown"),
         "command" | "super" => "cmd".into(),
         "equal" => "=".into(),
+        "bracketright" => "]".into(),
+        "bracketleft" => "[".into(),
+        "comma" => ",".into(),
+        "period" => ".".into(),
+        "slash" => "/".into(),
         "plus" => "+".into(),
         "option" => "alt".into(),
         "control" => "ctrl".into(),
@@ -158,9 +163,34 @@ mod native {
     unsafe extern "C" {
         fn CGEventCreateScrollWheelEvent2(src: *mut std::ffi::c_void, units: u32, count: u32, w1: i32, w2: i32, w3: i32) -> *mut std::ffi::c_void;
         fn CGEventSetLocation(e: *mut std::ffi::c_void, p: CGPoint);
+        fn CGEventCreateMouseEvent(src: *mut std::ffi::c_void, kind: u32, p: CGPoint, button: u32) -> *mut std::ffi::c_void;
+        fn CGEventSetIntegerValueField(e: *mut std::ffi::c_void, field: u32, v: i64);
         fn CGMainDisplayID() -> u32;
         fn CGDisplayBounds(d: u32) -> CGRect;
         fn CFRelease(p: *const std::ffi::c_void);
+    }
+    /// a right / middle button event (NSEvent's constructor has no button number): a CGEvent with the button, made
+    /// into an NSEvent located at the view's (x, y) like `scroll`
+    pub fn button(view: *mut Object, kind: u32, button: u32, x: f32, y: f32, clicks: i64) {
+        unsafe {
+            let main = CGDisplayBounds(CGMainDisplayID()).s.y;
+            let want_y = height(view) - y as f64;
+            let ev = CGEventCreateMouseEvent(std::ptr::null_mut(), kind, CGPoint { x: x as f64, y: main - want_y }, button);
+            if ev.is_null() {
+                return;
+            }
+            CGEventSetIntegerValueField(ev, 1 /* kCGMouseEventClickState */, clicks);
+            let ns: *mut Object = msg_send![class!(NSEvent), eventWithCGEvent: ev];
+            if !ns.is_null() {
+                match kind {
+                    3 => { let _: () = msg_send![view, rightMouseDown: ns]; }
+                    4 => { let _: () = msg_send![view, rightMouseUp: ns]; }
+                    25 => { let _: () = msg_send![view, otherMouseDown: ns]; }
+                    _ => { let _: () = msg_send![view, otherMouseUp: ns]; }
+                }
+            }
+            CFRelease(ev);
+        }
     }
     /// a pixel-precise scroll at (x, y): a CGEvent made into an NSEvent whose location is that point in the window
     pub fn scroll(view: *mut Object, x: f32, y: f32, dy: f32) {
@@ -190,8 +220,17 @@ fn mouse(v: *mut objc::runtime::Object, x: f32, y: f32, button: MouseButton, cou
         _ => (1, 2),
     };
     native::mouse(v, 5, x, y, 0);
-    native::mouse(v, down, x, y, count as i64);
-    native::mouse(v, up, x, y, count as i64);
+    match button {
+        MouseButton::Left => {
+            native::mouse(v, down, x, y, count as i64);
+            native::mouse(v, up, x, y, count as i64);
+        }
+        _ => {
+            let b = if down == 3 { 1 } else { 2 };
+            native::button(v, down as u32, b, x, y, count as i64);
+            native::button(v, up as u32, b, x, y, count as i64);
+        }
+    }
 }
 
 /// native mouse input, called outside any app update (see view_of)

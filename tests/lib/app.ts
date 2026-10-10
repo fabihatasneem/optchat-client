@@ -51,14 +51,22 @@ export class App {
     return me;
   }
   headless = false;
+  #seq = 0;
   /** the test channel (OPTCHAT_TEST_HOOKS): commands run through the app's own handlers (crate::testcmd) */
   async cmd(...cmds: Record<string, unknown>[]) {
     const p = `${this.probes}.cmd`;
     for (let i = 0; i < 40; i++) { try { Deno.statSync(p); await sleep(100); } catch { break; } }
-    Deno.writeTextFileSync(`${p}.tmp`, JSON.stringify(cmds));
+    const seq = this.#seq += cmds.length;
+    Deno.writeTextFileSync(`${p}.tmp`, JSON.stringify(cmds.map((c, i) => ({ ...c, seq: seq - cmds.length + i + 1 }))));
     Deno.renameSync(`${p}.tmp`, p);
-    for (let i = 0; i < 40; i++) { try { Deno.statSync(p); await sleep(100); } catch { break; } }
-    await sleep(150);
+    // done when the app has run the last one (and published its state after it)
+    for (let i = 0; i < 40; i++) { try { Deno.statSync(p); await sleep(50); } catch { break; } }
+    for (let i = 0; i < 150; i++) {
+      const lc = this.state()?.lastCmd;
+      if ((lc?.seq ?? 0) >= seq || (i >= 4 && lc && lc.seq === undefined)) break; // (an older build: no seq)
+      await sleep(50);
+    }
+    await sleep(120);
   }
   state(): any {
     try { return JSON.parse(Deno.readTextFileSync(`${this.probes}.state.json`)); } catch { return null; }
@@ -140,7 +148,7 @@ export class App {
   async scroll(name: string, dir: "up" | "down", pages = 3) {
     const p = await this.waitProbe(name);
     if (this.headless) {
-      await this.cmd({ op: "scroll", x: p[0] + p[2] / 2, y: p[1] + p[3] / 2, dy: (dir === "up" ? 1 : -1) * 120 * pages });
+      await this.cmd({ op: "scroll", x: p[0] + p[2] / 2, y: p[1] + p[3] / 2, dy: (dir === "up" ? 1 : -1) * 800 * pages });
       await sleep(300);
       return;
     }
@@ -162,7 +170,13 @@ export class App {
       if (p && box && p[1] >= box[1] && p[1] + p[3] <= box[1] + box[3]) return p;
       if (p && box && p[3] > box[3] && p[1] <= box[1] + box[3] / 2) return p; // taller than the box: its top half is in
       if (Deno.env.get("OPTCHAT_E2E_DEBUG")) console.log("reveal", name, p, box);
-      await this.scroll(container, p && box && p[1] < box[1] ? "up" : "down", 1);
+      // not drawn yet: in the feed (opened at its bottom) it is above; elsewhere below
+      const dir = p && box ? (p[1] < box[1] ? "up" : "down") : container === "feed" ? "up" : "down";
+      if (this.headless && p && box) {
+        // headless: scroll by what it takes to center it (Computer Use scrolls by pages)
+        const dy = Math.max(-box[3] * 0.9, Math.min(box[3] * 0.9, box[1] + box[3] / 2 - (p[1] + Math.min(p[3], box[3]) / 2)));
+        await this.cmd({ op: "scroll", x: box[0] + box[2] / 2, y: box[1] + box[3] / 2, dy });
+      } else await this.scroll(container, dir, 1);
       await sleep(350);
     }
     throw new Error(`${name} not visible in ${container}`);

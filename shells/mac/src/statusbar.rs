@@ -88,6 +88,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
         let hover = k.hover.opacity(0.5);
         let mut n = item().id("sb-notices").cursor_pointer().hover(move |s| s.bg(hover)).gap(px(7.)).child(probe("status.notices"));
         let mut any = false;
+        clear_probes("status.notice.");
         for (lv, cnt, col) in [("error", u.error, k.red), ("warn", u.warn, k.amber), ("info", u.info, k.muted), ("ok", u.ok, k.green)] {
             if cnt > 0 {
                 any = true;

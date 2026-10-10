@@ -325,7 +325,7 @@ impl Workspace {
             // the state every 250 ms; with OPTCHAT_TEST_HOOKS, the test channel's commands too (crate::testcmd)
             let headless = crate::testcmd::headless();
             cx.spawn_in(window, async move |this, cx| loop {
-                Timer::after(std::time::Duration::from_millis(if headless { 100 } else { 250 })).await;
+                Timer::after(std::time::Duration::from_millis(if headless { 33 } else { 250 })).await;
                 for c in crate::testcmd::take() {
                     if crate::testcmd::is_mouse(&c) {
                         if let Ok(Some(v)) = cx.update(|window, _| crate::testcmd::view_of(window)) {
@@ -340,6 +340,7 @@ impl Workspace {
                     if headless {
                         let _ = cx.update(|window, cx| window.draw(cx).clear());
                     }
+                    crate::ui::set_state_extra("lastCmd", serde_json::json!({ "op": c["op"], "seq": c["seq"] }));
                 }
                 if headless {
                     // macOS draws nothing while the screen is locked: lay the frame out ourselves (hitboxes, focus,
@@ -798,6 +799,9 @@ impl Workspace {
         let alert_col = if s.meta.iter().any(|(kk, m)| *kk != s.active && m.unread.error > 0) { k.red } else { k.amber };
         let ws_name = s.meta.get(&s.active).map(|m| m.ws.clone()).unwrap_or("no workspace".into());
         let unread = s.unread();
+        if !alert {
+            clear_probes("logo.dot");
+        }
         set_state_extra("rail", serde_json::json!({ "badge": active, "memDot": compacting }));
         if active > 0 {
             crate::ui::seen("railSeen", "badge");

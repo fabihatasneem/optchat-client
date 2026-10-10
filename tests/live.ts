@@ -161,8 +161,9 @@ try {
   await step("slot", async () => {
     await a.key("cmd+6");
     await a.waitFor(() => st().view === "settings", 3000, "settings");
-    await a.click("settings.global");
-    await a.waitFor(() => st().settingsGlobal === true, 3000, "global");
+    await a.click("settings.workspace"); // turns at once is a workspace setting (phase 4)
+    await a.waitFor(() => st().settingsGlobal === false, 3000, "workspace tab");
+    await sleep(300);
     const p = await a.waitProbe("picker.maxturns");
     await a.clickAt(p[0] + 20, p[1] + p[3] / 2);
     await sleep(500);
