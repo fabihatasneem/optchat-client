@@ -28,7 +28,7 @@ final class PhoneGestureTests: XCTestCase {
         at(f.width / 2, f.height * 0.3).tap(); sleep(1)
         at(3, f.height * 0.5).press(forDuration: 0.02, thenDragTo: at(f.width * 0.7, f.height * 0.5), withVelocity: .fast, thenHoldForDuration: 0); sleep(2); shot("07-edge-swipe-left")
         at(f.width - 3, f.height * 0.5).press(forDuration: 0.02, thenDragTo: at(f.width * 0.3, f.height * 0.5), withVelocity: .fast, thenHoldForDuration: 0); sleep(2); shot("08-edge-swipe-right")
-        at(f.width / 2 + 60, 95).press(forDuration: 0.02, thenDragTo: at(40, 95), withVelocity: .fast, thenHoldForDuration: 0); sleep(3); shot("09-title-swipe")
+        at(f.width / 2 + 70, f.height * 0.09).press(forDuration: 0.02, thenDragTo: at(30, f.height * 0.09), withVelocity: .fast, thenHoldForDuration: 0); sleep(3); shot("09-title-swipe")
         at(f.width * 0.115, f.height - 70).tap(); sleep(2); shot("10-tab-tasks")
         at(f.width * 0.885, f.height - 70).tap(); sleep(2); shot("11-tab-more")
     }

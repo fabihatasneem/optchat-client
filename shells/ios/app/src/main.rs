@@ -2,7 +2,7 @@
 //! iOS shell. The shell adds what iOS needs around the shared workspace view: safe-area insets, keyboard avoidance
 //! (the IME inset, animated like UIKit's), and footprint logging per lifecycle phase. The GPUI patches release the
 //! drawables while backgrounded (app/patches). The connection is seeded at launch for development (OPTCHAT_SEED:
-//! base64 JSON {endpoint, workspace, token, tunnel_key}): prefs get the engine + connection, the token goes to the
+//! base64 JSON {endpoint, workspace, token}): prefs get the engine + connection, the token goes to the
 //! shared token store (Keychain), never printed.
 #[cfg(target_os = "ios")]
 mod shell {
@@ -31,9 +31,6 @@ mod shell {
         }
         let c = state::ConnPref { endpoint: endpoint.clone(), ws: ws.to_string() };
         let ok = tokens::set(&c.key(), token).is_ok();
-        if let Some(k) = v["tunnel_key"].as_str().filter(|k| !k.is_empty()) {
-            let _ = tokens::set(&format!("tunnel|{endpoint}"), k); // read by the client once it sends the tunnel cookie
-        }
         if !prefs.connections.contains(&c) { prefs.connections.push(c); }
         prefs.active.get_or_insert_with(|| client::ws_key(&endpoint, ws));
         if let Ok(s) = serde_json::to_string_pretty(&prefs) { let _ = std::fs::write(prefs_path, s); }
