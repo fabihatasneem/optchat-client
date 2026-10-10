@@ -10,7 +10,11 @@ Legend: `[ ]` open · `[x]` done and verified · `[~]` done, verification partia
 per engine and client token, carrying every connected workspace); section Z. Tests use the test workspaces
 `test-gpui-a` / `test-gpui-b` only (scoped tokens, never printed); the `?db=` test instances are gone. Toasts are
 gone (J11 → notices). Section Y's hub-era evidence stays for the record; Y1/Y6/Y7/Y9/Y11 now run over the engine
-protocol (see Z).
+protocol (see Z). Phase-4 runs (screen locked / machine in use, so **headless**: input through the app's test channel
+as native events to its own view, frames laid out by the app, captures of its own window via a 1-pt resize):
+workspaces 21/21, engine 22/22, panels 19/19, features 21/22 (22/22 alone), chat 17/17, inputs 13/13, quit 4/4,
+smoke 5/5, flow 11/11, parity 68/71 (AX menu bar needs Computer Use; models-history and report-clip intermittent,
+passed in the run before), live 19/20 (slot passed in the run before), sync 9/9 — shots/e2e-results-headless.txt.
 
 **Client mode (2026-10-10).** The app is now a pure client of the web app's hub (https://chat.reframe.dev, one
 websocket, like the browser and the phone). Sections A–H, the hub's half of I and W6 are **served by the hub**
@@ -327,7 +331,7 @@ test window being covered (macOS stops drawing it) and are listed as such in sho
 - [x] Z2 One socket per engine (`wss://<engine>/engine/ws`, `Authorization: Bearer`, Origin of the engine) multiplexing its connected workspaces: `connect {ws, task}` → hello + snapshot (with turns, requests, unread notices), `disconnect`, `disabled`, `workspaces`, `ws` on every message; blobs `GET /engine/blob/<sha>?ws=`, dictation `/engine/stt?ws=&task=`. A token is per socket: connections with different tokens to one engine get a socket each (protocol note for the orchestrator) — engine.ts (connect a, b; both open)
 - [x] Z3 Background workspaces stay subscribed (their events applied quietly to their own state); switching swaps the state in: instant — engine.ts: 4 switches 0.003 ms each (state swap; the frame after it is the usual render)
 - [x] Z4 Per-workspace tabs, task on screen, sidebar view, settings tab and composer drafts; app-level theme, zoom, window, sidebar width — engine.ts "b kept its tabs"; relaunch restores the workspace on screen
-- [x] Z5 Top-left icon → workspace menu: engines → connected workspaces (check on the current one, dot for unread errors/warnings, state: connecting / offline / disabled / no token, × disconnect), available ones → Connect asks the token, disabled ones collapsed (click to show), offline engine greyed "offline · retrying"; Add engine…; ⇧⌘O — workspaces.ts (Computer Use; shots ws-02/04/12) [visual run pending an unlocked screen: see PROGRESS]; logic in engine.ts
+- [x] Z5 Top-left icon → workspace menu: engines → connected workspaces (check on the current one, dot for unread errors/warnings, state: connecting / offline / disabled / no token, × disconnect), available ones → Connect asks the token, disabled ones collapsed (click to show), offline engine greyed "offline · retrying"; Add engine…; ⇧⌘O — workspaces.ts 21/21 (headless input, captures): shots/ws-02-menu-available, ws-04-menu-connected, ws-05-background-dot, ws-12-offline-menu (+ -1000.jpg copies)
 - [x] Z6 Add engine dialog (address, optional name; https, or http://127.0.0.1 for a local relay) and Connect dialog (masked token, Enter) — engine.ts through the dialogs' handlers
 - [x] Z7 Dot on the workspace icon for unread errors/warnings in background workspaces — engine.ts: a Haiku child with a $0.0001 budget in test-gpui-b pauses ("paused: budget exceeded") while test-gpui-a is on screen → bgAlert
 - [x] Z8 Status bar: the workspace's name (click → menu) and a dot per level with its unread count (red error, orange warn, grey info, green ok); click → Notifications — parity::notices (no toasts)

@@ -14,9 +14,11 @@ size. Code: client.rs (EngineConn + per-workspace Client), state.rs (WsData swap
 - tests/engine.ts: phase 4 end to end through the app's own handlers (22/22): add engine, connect a + b, switch,
   a Haiku child with a tiny budget in b → warning → dot on the icon, notifications read (seen read by another client),
   relaunch restores, disconnect, local relay killed twice → offline in 154 / 458 ms, back in 3.8 / 3.5 s.
-- tests/workspaces.ts: the same with Computer Use and screenshots (menu, notifications, status bar, + ~1000 px JPEG
-  copies). **Not yet run**: the screen was locked during this session (Computer Use: cgWindowNotFound; macOS draws
-  nothing). Run `deno run -A tests/workspaces.ts` (DENO_TLS_CA_STORE=system) with the screen unlocked.
+- tests/workspaces.ts: the same through the UI (clicks, keys, dialogs) with screenshots (menu, notifications, status
+  bar, + ~1000 px JPEG copies): 21/21 headless. With Computer Use it needs an uncovered window (the screen was locked,
+  then in use, during this session; one CUA attempt hit "window not drawing").
+- Headless captures: a 1-pt resize (test op `nudge`) makes AppKit draw and present the covered window; then
+  scripts/shot.sh captures our window only.
 - Headless mode (OPTCHAT_E2E_HEADLESS=1): every suite without Computer Use — input through the test channel
   (keystrokes via Window::dispatch_keystroke, mouse/scroll as NSEvents handed to our own view: GPUI's real input
   path), frames laid out by the app itself every 100 ms (Window::draw, nothing presented), no screenshots; results

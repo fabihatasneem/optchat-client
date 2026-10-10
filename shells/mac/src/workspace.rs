@@ -796,6 +796,7 @@ impl Workspace {
         let active = s.tasks.values().filter(|x| x.task.status == TaskStatus::Active).count();
         let compacting = !s.busy.is_empty();
         let alert = s.background_alert();
+        let menu_open = matches!(self.overlay, Some(crate::dialogs::Overlay::WsMenu));
         let alert_col = if s.meta.iter().any(|(kk, m)| *kk != s.active && m.unread.error > 0) { k.red } else { k.amber };
         let ws_name = s.meta.get(&s.active).map(|m| m.ws.clone()).unwrap_or("no workspace".into());
         let unread = s.unread();
@@ -832,7 +833,7 @@ impl Workspace {
                     .child(logo(24., cx))
                     .when(alert, |d| d.child(div().absolute().top(px(-3.)).right(px(-4.)).child(dot(alert_col, 9.).border_2().border_color(k.rail)).child(probe("logo.dot"))))
                     .child(probe("logo"))
-                    .tooltip(tooltip(format!("{} · workspaces (⇧⌘O)", ws_name)))
+                    .when(!menu_open, |d| d.tooltip(tooltip(format!("{} · workspaces (⇧⌘O)", ws_name))))
                     .on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_menu(w, cx))),
             );
         for v in [View::Tasks, View::Memory, View::Context, View::Log, View::Models] {

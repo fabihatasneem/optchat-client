@@ -371,6 +371,12 @@ pub fn run(w: &mut Workspace, c: &Value, window: &mut Window, cx: &mut Context<W
         }
         "close" => w.close_overlay(window, cx),
         "quit" => cx.quit(),
+        "nudge" => {
+            // a 1-pt resize and back: AppKit draws (and presents) a resized window at once, even when it is covered
+            let sz = window.viewport_size();
+            window.resize(size(sz.width + px(1.), sz.height));
+            window.resize(sz);
+        }
         other => done = serde_json::json!({ "op": other, "ok": false }),
     }
     crate::ui::set_state_extra("lastCmd", done);

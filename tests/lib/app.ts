@@ -157,7 +157,17 @@ export class App {
     await sleep(300);
   }
   async shot(name: string): Promise<string> {
-    if (this.headless) return `${SHOTS}/${name}.jpg (headless: none)`;
+    if (this.headless) {
+      // a 1-pt resize makes AppKit draw and present the window even when covered; then a capture of our window only
+      await this.cmd({ op: "nudge" });
+      await sleep(400);
+      const png = `${SHOTS}/${name}.png`, jpg = `${SHOTS}/${name}.jpg`;
+      const r = await new Deno.Command(`${ROOT}/scripts/shot.sh`, { args: [png], stdout: "null", stderr: "null" }).output();
+      if (!r.success) return `${jpg} (headless: no capture)`;
+      await new Deno.Command("sips", { args: ["-s", "format", "jpeg", png, "--out", jpg], stdout: "null", stderr: "null" }).output();
+      try { Deno.removeSync(png); } catch { /* */ }
+      return jpg;
+    }
     const r = await this.act(`await app.getScreenshot()`);
     const path = `${SHOTS}/${name}.jpg`;
     if (r.images[0]) Deno.writeFileSync(path, Uint8Array.from(atob(r.images[0]), (ch) => ch.charCodeAt(0)));
