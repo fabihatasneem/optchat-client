@@ -568,3 +568,43 @@ What GPUI on iOS still needs for the product (not performance, listed so the dev
 
 Accessibility is not a requirement (user decision), so the backend's near-empty accessibility tree no longer
 counts against it.
+
+## 13. The app shell and TestFlight (2026-10-10)
+
+Decision: GPUI. 105 MB on the device is accepted: it doesn't grow with task switches.
+
+**Layout of the repo:**
+- `app/`: the Rust app.
+  - `main.rs`: placeholder UI plus the window-shape rule and keyboard avoidance.
+  - `engine.rs`: one engine websocket; the token as a subprotocol; tunnel cookie and Origin; reconnect.
+  - `text_input.rs`: GPUI's input.
+  - `Info.plist`, `Assets.xcassets` (the desktop icon, made opaque and full-bleed), `build.sh`, `patches/`.
+- `OptChat.xcodeproj`: the wrapper. A script phase runs `app/build.sh xcode`; Xcode compiles the icon catalog and
+  signs.
+- `vendor/zed`: a worktree at the pinned commit with both patches applied.
+- `legacy-swiftui/`: the earlier prototype.
+- `bench/`: unchanged.
+
+**GPUI patches** (`app/patches/`):
+- `gpui_ios-lazy-safariservices.patch`: launch cost (§12).
+- `gpui_ios-release-drawables-when-hidden.patch`: on background the drawables and path texture shrink to 1×1, and
+  they're restored on foreground. On the iPad: 88 MB active → 28 MB measured on return from the background → 76 MB
+  active again (`Documents/lifecycle.json`).
+
+**App behaviour:**
+- **Connection:** endpoint, workspace, client token and tunnel access key are entered once and kept in the Keychain
+  (GPUI's credentials API).
+- **Dev seed:** for development, `OPTCHAT_SEED` (base64 JSON) in the launch environment seeds the same entry.
+- **Layout:** the window-shape rule. Wide (landscape, ≥ 700 pt) shows tasks beside the chat; narrow shows tasks →
+  chat with a back button.
+- **Orientation:** iPhone portrait-only; iPad landscape-only with `UIRequiresFullScreen` (best-effort, §2).
+- **Version:** 0.1.0 (`MARKETING_VERSION`). The build number is UTC `yyMMddHHmm`.
+
+**Release:**
+- `release/testflight.sh`: archive, then `-exportArchive` with `method app-store-connect` + `destination upload`,
+  signed and uploaded with the API key (`.secrets/asc.json`).
+- `release/asc.py builds com.reframe.optchat` shows processing state.
+- **Export compliance:** `ITSAppUsesNonExemptEncryption = NO`, since the app only uses the system's TLS (native-tls
+  → Security.framework).
+- **First build:** 0.1.0 (2610101509), uploaded 2026-10-10, VALID, `usesNonExemptEncryption: false`,
+  `APP_STORE_ELIGIBLE`.
