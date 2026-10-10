@@ -19,9 +19,10 @@ pub enum View {
     Models,
     Notifications,
     Settings,
+    Workspaces,
 }
 impl View {
-    pub const ALL: [View; 7] = [View::Tasks, View::Memory, View::Context, View::Log, View::Models, View::Notifications, View::Settings];
+    pub const ALL: [View; 8] = [View::Tasks, View::Memory, View::Context, View::Log, View::Models, View::Notifications, View::Settings, View::Workspaces];
     pub fn label(&self) -> &'static str {
         match self {
             View::Tasks => "Tasks",
@@ -31,6 +32,7 @@ impl View {
             View::Models => "Models",
             View::Notifications => "Notifications",
             View::Settings => "Settings",
+            View::Workspaces => "Workspaces",
         }
     }
     pub fn icon(&self) -> &'static str {
@@ -42,6 +44,7 @@ impl View {
             View::Models => "cpu",
             View::Notifications => "bell",
             View::Settings => "settings",
+            View::Workspaces => "layers",
         }
     }
 }
@@ -221,6 +224,8 @@ pub struct WsMeta {
     pub disabled: Option<String>,
     /// no token for it (in the Keychain): connect again
     pub no_token: bool,
+    /// the engine refused or dropped it (no token that reaches it, token revoked): connect again with a token
+    pub refused: Option<String>,
 }
 
 /// An engine in the workspace menu: online (a socket or the public list answers), its workspaces.
@@ -228,7 +233,7 @@ pub struct WsMeta {
 pub struct EngineView {
     pub cfg: EngineCfg,
     pub online: Option<bool>,
-    pub workspaces: Vec<(String, bool)>,
+    pub workspaces: Vec<WsEntry>,
     pub error: Option<String>,
 }
 
@@ -441,14 +446,15 @@ impl AppState {
         }));
     }
 
-    fn conn_for(&mut self, endpoint: &str, token: &str) -> Option<Arc<EngineConn>> {
-        if let Some(c) = self.conns.iter().find(|c| c.cfg.endpoint == endpoint && c.same_token(token)) {
+    /// the engine's one socket (every connected workspace of it rides on it, each with its own token)
+    fn conn_for(&mut self, endpoint: &str) -> Option<Arc<EngineConn>> {
+        if let Some(c) = self.conns.iter().find(|c| c.cfg.endpoint == endpoint) {
             return Some(c.clone());
         }
         let cfg = self.engines.iter().find(|e| e.cfg.endpoint == endpoint)?.cfg.clone();
         let tx = self.tx.clone()?;
         let _g = self.rt.enter();
-        let c = EngineConn::start(cfg, token.to_string(), tx);
+        let c = EngineConn::start(cfg, tx);
         self.conns.push(c.clone());
         Some(c)
     }
@@ -456,8 +462,8 @@ impl AppState {
     /// a connection as a background workspace (subscribed at once); without a token it stays listed, unconnected
     fn attach_ws(&mut self, endpoint: &str, ws: &str, wp: WsPrefs, token: Option<String>, _cx: &mut Context<Self>) {
         let key = ws_key(endpoint, ws);
-        let hub = token.as_deref().and_then(|t| self.conn_for(endpoint, t)).map(|c| Client::new(c, ws, wp.current));
-        self.meta.insert(key.clone(), WsMeta { endpoint: endpoint.into(), ws: ws.into(), unread: Unread::default(), conn: Conn::Connecting, disabled: None, no_token: hub.is_none() });
+        let hub = token.as_deref().and_then(|t| self.conn_for(endpoint).map(|c| Client::new(c, ws, wp.current, t)));
+        self.meta.insert(key.clone(), WsMeta { endpoint: endpoint.into(), ws: ws.into(), unread: Unread::default(), conn: Conn::Connecting, disabled: None, no_token: hub.is_none(), refused: None });
         self.bg.insert(key, WsData::new(hub, wp));
     }
 
@@ -548,6 +554,9 @@ impl AppState {
     }
 
     fn swap_ws(&mut self, d: &mut WsData) {
+        self.swap_ws_keep(d, false)
+    }
+    fn swap_ws_keep(&mut self, d: &mut WsData, keep_panel: bool) {
         use std::mem::swap;
         swap(&mut self.hub, &mut d.hub);
         swap(&mut self.conn, &mut d.conn);
@@ -571,8 +580,14 @@ impl AppState {
         swap(&mut self.notices, &mut d.notices);
         swap(&mut self.notices_loaded, &mut d.notices_loaded);
         let mine = self.wp();
+        // the Workspaces panel stays on screen across a switch (it is where the switch was made)
+        let panel = self.prefs.view == View::Workspaces && self.prefs.side_open;
         let theirs = std::mem::replace(&mut d.wp, mine);
         self.set_wp(theirs);
+        if panel && keep_panel {
+            self.prefs.view = View::Workspaces;
+            self.prefs.side_open = true;
+        }
     }
 
     /// Show another connected workspace: its state is already here (kept live in the background), so this is a swap.
@@ -582,7 +597,7 @@ impl AppState {
         }
         let Some(mut d) = self.bg.remove(key) else { return };
         let t0 = std::time::Instant::now();
-        self.swap_ws(&mut d);
+        self.swap_ws_keep(&mut d, true);
         let old = std::mem::replace(&mut self.active, key.to_string());
         if !old.is_empty() {
             self.bg.insert(old, d);
@@ -611,15 +626,16 @@ impl AppState {
                     HubEvent::EngineOnline(_) => ev.online = Some(self.conns.iter().any(|c| c.cfg.endpoint == endpoint && c.online.load(std::sync::atomic::Ordering::SeqCst))),
                     HubEvent::EngineWorkspaces(list) => {
                         // a workspace enabled again: subscribe to it again
-                        for (name, running) in &list {
+                        for w in &list {
+                            let (name, running) = (&w.name, w.running);
                             let key = ws_key(&endpoint, name);
-                            if *running && self.meta.get(&key).is_some_and(|m| m.disabled.is_some()) {
+                            if running && self.meta.get(&key).is_some_and(|m| m.disabled.is_some()) {
                                 if let Some(m) = self.meta.get_mut(&key) {
                                     m.disabled = None;
                                 }
                                 let h = if key == self.active { self.hub.clone() } else { self.bg.get(&key).and_then(|d| d.hub.clone()) };
                                 if let Some(h) = h {
-                                    h.conn.connect_ws(name, h.current_task());
+                                    h.resubscribe();
                                 }
                             }
                         }
@@ -638,6 +654,11 @@ impl AppState {
                 HubEvent::Snapshot(s) => m.unread = s.notices,
                 HubEvent::Conn(c) => m.conn = *c,
                 HubEvent::Disabled(r) => m.disabled = Some(r.clone()),
+                HubEvent::Refused(r) => {
+                    m.refused = Some(r.clone());
+                    m.conn = Conn::Closed;
+                }
+                HubEvent::Hello { .. } => m.refused = None,
                 _ => {}
             }
         } else {
@@ -1043,6 +1064,10 @@ impl AppState {
                         cx.emit(StateEvent::SpawnedOpen(id));
                     }
                 }
+            }
+            HubEvent::Refused(reason) => {
+                self.conn = Conn::Closed;
+                self.local_notice("error", format!("the engine refused this workspace's connection: {reason}"));
             }
             HubEvent::Ready | HubEvent::EngineOnline(_) | HubEvent::EngineWorkspaces(_) | HubEvent::EngineError(_) | HubEvent::Hello { .. } => {}
             HubEvent::Disabled(reason) => {

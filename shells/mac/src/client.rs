@@ -70,14 +70,13 @@ type ControlReply = oneshot::Sender<(bool, String, Option<i64>)>;
 /// its workspaces again (each answers with `hello` and a snapshot).
 pub struct EngineConn {
     pub cfg: EngineCfg,
-    token: String,
     events: mpsc::UnboundedSender<Routed>,
     out: Mutex<Option<mpsc::UnboundedSender<WsMsg>>>,
     rpcs: Mutex<HashMap<u64, RpcReply>>,
     controls: Mutex<HashMap<u64, ControlReply>>,
     next: AtomicU64,
-    /// connected workspaces → the task on screen there
-    subs: Mutex<HashMap<String, i64>>,
+    /// connected workspaces → (the task on screen there, the client token that connects it)
+    subs: Mutex<HashMap<String, (i64, String)>>,
     stopped: AtomicBool,
     pub online: AtomicBool,
     pub reconnects: AtomicU64,
@@ -85,10 +84,9 @@ pub struct EngineConn {
 }
 
 impl EngineConn {
-    pub fn start(cfg: EngineCfg, token: String, events: mpsc::UnboundedSender<Routed>) -> Arc<EngineConn> {
+    pub fn start(cfg: EngineCfg, events: mpsc::UnboundedSender<Routed>) -> Arc<EngineConn> {
         let c = Arc::new(EngineConn {
             cfg,
-            token,
             events,
             out: Mutex::new(None),
             rpcs: Mutex::new(HashMap::new()),
@@ -103,9 +101,6 @@ impl EngineConn {
         let me = c.clone();
         tokio::spawn(async move { me.run().await });
         c
-    }
-    pub fn same_token(&self, token: &str) -> bool {
-        self.token == token
     }
     fn emit(&self, ws: Option<&str>, e: HubEvent) {
         let _ = self.events.send((self.cfg.endpoint.clone(), ws.map(String::from), e));
@@ -122,7 +117,7 @@ impl EngineConn {
         let mut first = true;
         while !self.stopped.load(Ordering::SeqCst) {
             self.emit_all(|| HubEvent::Conn(Conn::Connecting));
-            match self.connect(&format!("{}/engine/ws", self.cfg.ws_base())).await {
+            match self.connect_with(&format!("{}/engine/ws", self.cfg.ws_base()), None).await {
                 Ok(ws) => {
                     retry = 0;
                     if !first {
@@ -135,8 +130,8 @@ impl EngineConn {
                     let (mut w, mut r) = ws.split();
                     let (tx, mut rx) = mpsc::unbounded_channel::<WsMsg>();
                     // every connected workspace again: each answers hello + snapshot
-                    for (ws, task) in self.subs.lock().iter() {
-                        let _ = tx.send(WsMsg::text(json!({ "type": "connect", "ws": ws, "task": task }).to_string()));
+                    for (ws, (task, token)) in self.subs.lock().iter() {
+                        let _ = tx.send(WsMsg::text(json!({ "type": "connect", "ws": ws, "task": task, "token": token }).to_string()));
                     }
                     *self.out.lock() = Some(tx);
                     let writer = tokio::spawn(async move {
@@ -183,11 +178,14 @@ impl EngineConn {
         }
     }
 
-    async fn connect(&self, url: &str) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, String> {
+    /// a socket to the engine; `token` only for a dictation socket (the engine socket's tokens come with each connect)
+    async fn connect_with(&self, url: &str, token: Option<&str>) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, String> {
         let mut req = url.into_client_request().map_err(|e| e.to_string())?;
         let h = req.headers_mut();
         h.insert("Origin", self.cfg.origin().parse().map_err(|_| "bad origin".to_string())?);
-        h.insert("Authorization", format!("Bearer {}", self.token).parse().map_err(|_| "bad token".to_string())?);
+        if let Some(t) = token {
+            h.insert("Authorization", format!("Bearer {t}").parse().map_err(|_| "bad token".to_string())?);
+        }
         let (ws, _) = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(req)).await.map_err(|_| "timed out".to_string())?.map_err(|e| match e {
             tokio_tungstenite::tungstenite::Error::Http(r) if r.status().as_u16() == 401 => "the token was refused".to_string(),
             e => e.to_string(),
@@ -229,8 +227,14 @@ impl EngineConn {
                     let _ = tx.send((false, msg, None));
                 }
             }
+            Some("error") if ws.is_some_and(|w| self.subs.lock().contains_key(w)) && m["message"].as_str().is_some_and(|t| t.starts_with("no token")) => {
+                // a connect refused (its token does not reach the workspace): stop asking for it
+                let w = ws.unwrap();
+                self.subs.lock().remove(w);
+                self.emit(Some(w), HubEvent::Refused(m["message"].as_str().unwrap_or("refused").to_string()));
+            }
             Some("workspaces") => {
-                let list = m["workspaces"].as_array().map(|a| a.iter().map(|w| (w["name"].as_str().unwrap_or("").to_string(), w["running"].as_bool().unwrap_or(false))).collect()).unwrap_or_default();
+                let list: Vec<WsEntry> = serde_json::from_value(m["workspaces"].clone()).unwrap_or_default();
                 self.emit(None, HubEvent::EngineWorkspaces(list));
             }
             Some("hello") => {
@@ -243,7 +247,13 @@ impl EngineConn {
                 }
                 self.emit(ws, HubEvent::Disabled(m["reason"].as_str().unwrap_or("disabled on the engine").into()));
             }
-            Some("disconnected") => {}
+            Some("disconnected") => {
+                // dropped by the engine (its token revoked): the reason says so; our own disconnects have none
+                if let (Some(w), Some(r)) = (ws, m["reason"].as_str()) {
+                    self.subs.lock().remove(w);
+                    self.emit(Some(w), HubEvent::Refused(r.to_string()));
+                }
+            }
             Some("snapshot") => {
                 if let Some(s) = Snapshot::parse(&m) {
                     self.emit(ws, HubEvent::Snapshot(Box::new(s)));
@@ -266,9 +276,9 @@ impl EngineConn {
             None => Err("not connected to the engine".into()),
         }
     }
-    pub fn connect_ws(&self, ws: &str, task: i64) {
-        self.subs.lock().insert(ws.to_string(), task);
-        let _ = self.send_json(json!({ "type": "connect", "ws": ws, "task": task }));
+    pub fn connect_ws(&self, ws: &str, task: i64, token: &str) {
+        self.subs.lock().insert(ws.to_string(), (task, token.to_string()));
+        let _ = self.send_json(json!({ "type": "connect", "ws": ws, "task": task, "token": token }));
     }
     pub fn disconnect_ws(&self, ws: &str) {
         self.subs.lock().remove(ws);
@@ -291,7 +301,7 @@ impl EngineConn {
 }
 
 /// GET <engine>/engine/workspaces: the engine's workspaces {name, running} (no token); Err when it is unreachable.
-pub async fn list_workspaces(cfg: &EngineCfg) -> Result<Vec<(String, bool)>, String> {
+pub async fn list_workspaces(cfg: &EngineCfg) -> Result<Vec<WsEntry>, String> {
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(4))
         .build()
@@ -306,7 +316,7 @@ pub async fn list_workspaces(cfg: &EngineCfg) -> Result<Vec<(String, bool)>, Str
     }
     let v: Value = serde_json::from_str(&r.text().await.map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let a = v.as_array().cloned().or_else(|| v["workspaces"].as_array().cloned()).unwrap_or_default();
-    Ok(a.iter().map(|w| (w["name"].as_str().unwrap_or("").to_string(), w["running"].as_bool().unwrap_or(false))).collect())
+    Ok(a.into_iter().filter_map(|w| serde_json::from_value(w).ok()).collect())
 }
 
 /// A connected workspace: the API the views use (the hub's commands and rpc), tagged with its name, on its engine's
@@ -314,14 +324,19 @@ pub async fn list_workspaces(cfg: &EngineCfg) -> Result<Vec<(String, bool)>, Str
 pub struct Client {
     pub conn: Arc<EngineConn>,
     pub ws: String,
+    token: String,
     task: AtomicI64,
     dict: Mutex<Option<Arc<DictSession>>>,
 }
 
 impl Client {
-    pub fn new(conn: Arc<EngineConn>, ws: &str, task: i64) -> Arc<Client> {
-        conn.connect_ws(ws, task);
-        Arc::new(Client { conn, ws: ws.to_string(), task: AtomicI64::new(task), dict: Mutex::new(None) })
+    pub fn new(conn: Arc<EngineConn>, ws: &str, task: i64, token: &str) -> Arc<Client> {
+        conn.connect_ws(ws, task, token);
+        Arc::new(Client { conn, ws: ws.to_string(), token: token.to_string(), task: AtomicI64::new(task), dict: Mutex::new(None) })
+    }
+    /// connect again (after a refusal or the engine dropped it), same token
+    pub fn resubscribe(&self) {
+        self.conn.connect_ws(&self.ws, self.current_task(), &self.token);
     }
     fn emit(&self, e: HubEvent) {
         self.conn.emit(Some(&self.ws), e);
@@ -440,7 +455,9 @@ impl Client {
     /// show this task: the hub answers with its snapshot (a HubEvent::Snapshot)
     pub fn open(&self, task: i64) {
         self.task.store(task, Ordering::SeqCst);
-        self.conn.subs.lock().insert(self.ws.clone(), task);
+        if let Some(s) = self.conn.subs.lock().get_mut(&self.ws) {
+            s.0 = task;
+        }
         let _ = self.send_json(json!({ "type": "open", "task": task }));
     }
 
@@ -585,7 +602,7 @@ impl Client {
     /// an image from the hub's database (GET /blob/<sha>)
     pub async fn blob(&self, sha: &str) -> Result<(String, Vec<u8>), String> {
         let url = format!("{}/engine/blob/{sha}?ws={}", self.conn.cfg.endpoint, self.ws);
-        let r = self.conn.http.get(url).header("Origin", self.conn.cfg.origin()).bearer_auth(&self.conn.token).send().await.map_err(|e| e.to_string())?;
+        let r = self.conn.http.get(url).header("Origin", self.conn.cfg.origin()).bearer_auth(&self.token).send().await.map_err(|e| e.to_string())?;
         if !r.status().is_success() {
             return Err(format!("blob {sha}: {}", r.status()));
         }
@@ -674,7 +691,7 @@ impl DictSession {
         let me = s.clone();
         tokio::spawn(async move {
             let url = format!("{}/engine/stt?ws={}&task={task}", client.conn.cfg.ws_base(), client.ws);
-            let ws = match client.conn.connect(&url).await {
+            let ws = match client.conn.connect_with(&url, Some(&client.token)).await {
                 Ok(ws) => ws,
                 Err(e) => {
                     emit(DictEvent::Error(format!("dictation could not connect: {e}")));

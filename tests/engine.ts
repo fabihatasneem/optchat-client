@@ -19,7 +19,7 @@ try {
   check(st().ready === false && (st().connected ?? []).length === 0, "a fresh app: no engine, no workspace");
   await a.cmd({ op: "addEngine", endpoint: HUB.replace(/^https:\/\//, ""), name: "reframe.dev" });
   await a.waitFor(() => st().engines?.[0]?.online === true && st().engines[0].workspaces.length > 0, 12000, "engine listed");
-  const listed = st().engines[0].workspaces as [string, boolean][];
+  const listed = (st().engines[0].workspaces as any[]).map((w) => [w.name, w.running] as [string, boolean]);
   check(listed.some(([n, r]) => n === "test-gpui-a" && r) && listed.some(([n, r]) => n === "test-gpui-b" && r), `Add engine: online, ${listed.length} workspaces listed (${listed.filter(([, r]) => !r).length} disabled)`);
   check(st().overlay === "wsmenu", "after adding, the workspace menu opens");
 
@@ -85,7 +85,7 @@ try {
 
   await a.cmd({ op: "disconnect", ws: "test-gpui-a" });
   await a.waitFor(() => !conn("test-gpui-a"), 4000, "a disconnected");
-  check(ws() === "test-gpui-b" && st().engines[0].workspaces.some(([n]: [string]) => n === "test-gpui-a"), "Disconnect test-gpui-a: gone from the app (available again), b stays");
+  check(ws() === "test-gpui-b" && st().engines[0].workspaces.some((w: any) => w.name === "test-gpui-a"), "Disconnect test-gpui-a: gone from the app (available again), b stays");
   await a.cmd({ op: "disconnect", ws: "test-gpui-b" });
   await a.waitFor(() => (st().connected ?? []).length === 0 && st().ready === false, 4000, "none");
   check(true, "Disconnect the last one: the empty state");

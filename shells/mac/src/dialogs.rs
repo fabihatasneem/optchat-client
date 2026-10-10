@@ -25,9 +25,6 @@ pub enum Overlay {
     Palette(Entity<Palette>),
     Metrics(Entity<MetricsPop>),
     Lightbox(String),
-    WsMenu,
-    AddEngine(Entity<crate::workspaces::AddEngineDialog>),
-    Connect(Entity<crate::workspaces::ConnectDialog>),
 }
 
 pub fn noop() -> Div {
@@ -117,9 +114,6 @@ pub fn render_overlay(w: &mut Workspace, o: Overlay, _window: &mut Window, cx: &
             .on_click(cx.listener(|w, _, window, cx| w.close_overlay(window, cx)))
             .child(div().id("ov-met-inner").absolute().right(px(10.)).bottom(px(32.)).on_click(|_, _, cx| cx.stop_propagation()).child(m))
             .into_any_element(),
-        Overlay::WsMenu => crate::workspaces::menu(w, cx),
-        Overlay::AddEngine(d) => crate::workspaces::render_dialog("ov-addengine", d.into(), cx),
-        Overlay::Connect(d) => crate::workspaces::render_dialog("ov-connect", d.into(), cx),
         Overlay::Lightbox(blob) => {
             let im = w.feed.read(cx).images.get(&blob).cloned().flatten();
             overlay_bg("ov-light", cx)
@@ -741,7 +735,7 @@ impl Palette {
             }
         }
         if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && !self.tasks_only {
-            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: drop the hub connection", "t-drop"), ("Test: notice ok", "t-toast-ok"), ("Test: notice error", "t-toast-err"), ("Test: engine error", "t-err"), ("Test: dictation error", "t-dict-err"), ("Test: compaction failure", "t-cfail"), ("Test: appearance light", "t-light"), ("Test: appearance dark", "t-dark"), ("Test: mic hold", "t-mic-hold"), ("Test: mic tap", "t-mic-tap"), ("Test: dictate again", "t-dict-again"), ("Test: load all history", "t-load-all"), ("Test: paste image", "t-paste"), ("Test: drop big image", "t-drop-big"), ("Test: attach 21 images", "t-attach-21"), ("Test: new task with 21 images", "t-nt-21"), ("Test: new task paste image", "t-nt-paste"), ("Test: empty feed", "t-empty"), ("Test: reveal entry", "t-reveal"), ("Test: fill token", "t-fill-token"), ("Test: workspace menu", "t-ws-menu"), ("Test: next workspace", "t-ws-next"), ("Test: notice warn", "t-notice-warn")] {
+            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: drop the hub connection", "t-drop"), ("Test: notice ok", "t-toast-ok"), ("Test: notice error", "t-toast-err"), ("Test: engine error", "t-err"), ("Test: dictation error", "t-dict-err"), ("Test: compaction failure", "t-cfail"), ("Test: appearance light", "t-light"), ("Test: appearance dark", "t-dark"), ("Test: mic hold", "t-mic-hold"), ("Test: mic tap", "t-mic-tap"), ("Test: dictate again", "t-dict-again"), ("Test: load all history", "t-load-all"), ("Test: paste image", "t-paste"), ("Test: drop big image", "t-drop-big"), ("Test: attach 21 images", "t-attach-21"), ("Test: new task with 21 images", "t-nt-21"), ("Test: new task paste image", "t-nt-paste"), ("Test: empty feed", "t-empty"), ("Test: reveal entry", "t-reveal"), ("Test: fill token", "t-fill-token"), ("Test: workspaces panel", "t-ws-menu"), ("Test: next workspace", "t-ws-next"), ("Test: notice warn", "t-notice-warn")] {
                 if let Some(sc) = fuzzy(&q, l) {
                     items.push((sc + 60, l.to_string(), String::new(), Cmd::Act(a)));
                 }
@@ -882,11 +876,9 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
             }
             "t-frames" => crate::ui::reset_frames(),
             "t-fill-token" => {
-                if let Some(Overlay::Connect(d)) = w.overlay.clone() {
-                    d.update(cx, |d, cx| d.fill_test_token(window, cx));
-                }
+                let _ = window;
             }
-            "t-ws-menu" => crate::workspaces::open_menu(w, cx),
+            "t-ws-menu" => crate::workspaces::open_panel(w, cx),
             "t-ws-next" => {
                 let s = w.state.read(cx);
                 let keys: Vec<String> = s.meta.keys().cloned().collect();

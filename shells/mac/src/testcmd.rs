@@ -309,25 +309,29 @@ pub fn run(w: &mut Workspace, c: &Value, window: &mut Window, cx: &mut Context<W
             let name: &'static str = Box::leak(str_("name").into_boxed_str());
             crate::dialogs::run_cmd(w, crate::dialogs::Cmd::Act(name), window, cx);
         }
-        "menu" => crate::workspaces::open_menu(w, cx),
+        "menu" => crate::workspaces::open_panel(w, cx),
+        "rail" => {
+            let v: View = serde_json::from_value(c["view"].clone()).unwrap_or(View::Tasks);
+            w.pick(v, cx);
+        }
         "addEngine" => {
+            // the panel's inline form, then its Add button's handler
             crate::workspaces::open_add_engine(w, window, cx);
-            if let Some(crate::dialogs::Overlay::AddEngine(d)) = w.overlay.clone() {
-                let (ep, name) = (str_("endpoint"), str_("name"));
-                d.update(cx, |d, cx| {
-                    d.endpoint.update(cx, |i, cx| i.set_value(ep, window, cx));
-                    d.set_name(&name, window, cx);
-                    d.add(cx);
-                });
-            }
+            let (ep, name) = (str_("endpoint"), str_("name"));
+            w.ws_panel.update(cx, |p, cx| {
+                p.set_add_fields(&ep, &name, window, cx);
+                p.add(cx);
+            });
         }
         "connect" => {
-            // the menu's Connect: the dialog (its token from the test file), then its Connect button's handler
+            // the panel's Connect… row (its token from the test file), then its Connect button's handler
             let ep = endpoint(w, c, cx);
-            crate::workspaces::open_connect(w, &ep, &str_("ws"), window, cx);
-            if let Some(crate::dialogs::Overlay::Connect(d)) = w.overlay.clone() {
-                d.update(cx, |d, cx| d.connect(cx));
-            }
+            let ws = str_("ws");
+            crate::workspaces::open_panel(w, cx);
+            w.ws_panel.update(cx, |p, cx| {
+                p.start_connect(&ep, &ws, window, cx);
+                p.connect(cx);
+            });
         }
         "switch" => {
             let key = crate::client::ws_key(&endpoint(w, c, cx), &str_("ws"));

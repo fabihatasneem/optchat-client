@@ -45,6 +45,7 @@ const ALL = [
   { name: "live", models: true },
   { name: "sync", models: true },
   { name: "engine", models: true },
+  { name: "panel", models: false },
 ];
 const args = Deno.args.filter((x) => !x.startsWith("--"));
 const offline = Deno.args.includes("--offline");

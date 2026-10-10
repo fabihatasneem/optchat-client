@@ -1,4 +1,6 @@
-// Phase 4 (spec-workspaces §4): engines and workspaces in the app. Through the UI only (Computer Use on probes):
+// Phase 4 (spec-workspaces §4) against the real engine: needs test workspaces and their tokens (OPTCHAT_TEST_DB /
+// data/test-tokens.json; the names below are the last ones given). The panel UI alone: tests/panel.ts (fake engine).
+// Engines and workspaces in the app. Through the UI only (Computer Use on probes):
 // add the engine, connect test-gpui-a and test-gpui-b with their tokens (prefilled from data/test-tokens.json by the
 // test hook, never printed), switch between them, run a Haiku turn in the background one (a child with a tiny budget:
 // it pauses with a warning) and see the dot on the workspace icon, read the notice in the Notifications view,
@@ -25,49 +27,49 @@ try {
   check(st().ready === false && (st().connected ?? []).length === 0, "a fresh app: no workspace, the editor says what to do");
   await a.shot("ws-01-empty");
   await a.click("empty.add");
-  await a.waitFor(() => st().overlay === "addengine", 4000, "add engine dialog");
+  await a.waitFor(() => st().wsPanel?.adding, 4000, "add engine dialog");
+  await a.click("wsp.endpoint");
   await a.type("chat.reframe.dev");
-  await a.click("addEngine.add");
-  await a.waitFor(() => st().overlay === "wsmenu", 4000, "menu after adding");
-  await a.waitFor(() => (extra("wsMenu")?.rows ?? []).some((r: any) => r.ws === "test-gpui-a" && r.kind === "available"), 12000, "engine's workspaces listed");
-  const rows = extra("wsMenu").rows;
+  await a.click("wsp.add.go");
+  await a.waitFor(() => (extra("wsPanel")?.rows ?? []).some((r: any) => r.ws === "test-gpui-a" && r.kind === "available"), 12000, "engine's workspaces listed");
+  const rows = extra("wsPanel").rows;
   check(rows.some((r: any) => r.ws === "test-gpui-b" && r.kind === "available"), "the menu lists the engine's running workspaces as available");
   check(!rows.some((r: any) => r.kind === "disabled"), "disabled workspaces are collapsed");
-  if (a.probe("wsmenu.disabled.0")) {
-    await a.click("wsmenu.disabled.0");
-    await a.waitFor(() => (extra("wsMenu")?.rows ?? []).some((r: any) => r.kind === "disabled"), 3000, "disabled expanded");
+  if (a.probe("wsp.disabled.0")) {
+    await a.click("wsp.disabled.0");
+    await a.waitFor(() => (extra("wsPanel")?.rows ?? []).some((r: any) => r.kind === "disabled"), 3000, "disabled expanded");
     check(true, "a click shows the disabled ones");
   }
   await jpg("ws-02-menu-available");
 
   // ---- connect a, then b
-  await a.click("wsmenu.connect.test-gpui-a");
-  await a.waitFor(() => st().overlay === "connect" && extra("connect")?.hasToken, 4000, "connect dialog with the test token");
+  await a.click("wsp.connect.test-gpui-a");
+  await a.waitFor(() => extra("wsPanel")?.connecting && extra("wsPanel")?.hasToken, 4000, "connect dialog with the test token");
   await a.shot("ws-03-connect");
-  await a.click("connect.go");
+  await a.click("wsp.go");
   await a.waitFor(() => wsActive() === "test-gpui-a" && st().loaded && st().ready, 20000, "test-gpui-a on screen");
   check(st().tasks > 50, `test-gpui-a connected: ${st().tasks} tasks`);
-  await a.click("logo");
-  await a.waitFor(() => st().overlay === "wsmenu", 3000, "menu");
-  await a.click("wsmenu.connect.test-gpui-b");
-  await a.waitFor(() => st().overlay === "connect" && extra("connect")?.hasToken, 4000, "connect b");
-  await a.click("connect.go");
+  if (!(st().view === "workspaces" && st().sideOpen)) await a.click("logo");
+  await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu");
+  await a.click("wsp.connect.test-gpui-b");
+  await a.waitFor(() => extra("wsPanel")?.connecting && extra("wsPanel")?.hasToken, 4000, "connect b");
+  await a.click("wsp.go");
   await a.waitFor(() => wsActive() === "test-gpui-b" && st().loaded, 20000, "test-gpui-b on screen");
   check(conn("test-gpui-a")?.conn === "open", "test-gpui-a stays connected in the background");
 
   // ---- switching is a swap: instant, with the task on screen and its tabs
-  await a.click("logo");
-  await a.waitFor(() => st().overlay === "wsmenu", 3000, "menu");
+  if (!(st().view === "workspaces" && st().sideOpen)) await a.click("logo");
+  await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu");
   await jpg("ws-04-menu-connected");
   const before = (st().wsSwitches ?? []).length;
-  await a.click("wsmenu.ws.test-gpui-a");
+  await a.click("wsp.ws.test-gpui-a");
   await a.waitFor(() => wsActive() === "test-gpui-a", 3000, "switched to a");
   check(st().loaded, "switched to test-gpui-a: its chat is there at once (no loading)");
   const ms = (st().wsSwitches ?? []).slice(before);
   check(ms.length > 0 && ms.every((m: number) => m < 16), `the switch took ${ms.map((m: number) => m.toFixed(2)).join(", ")} ms (state swap, < 1 frame)`);
   await a.key("cmd+shift+o");
-  await a.waitFor(() => st().overlay === "wsmenu", 3000, "menu by key");
-  await a.click("wsmenu.ws.test-gpui-b");
+  await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu by key");
+  await a.click("wsp.ws.test-gpui-b");
   await a.waitFor(() => wsActive() === "test-gpui-b" && st().loaded, 3000, "back to b");
   check(true, "⇧⌘O opens the menu");
 
@@ -82,18 +84,18 @@ try {
   await a.click("newtask.start");
   await a.waitFor(() => st().overlay !== "newtask" && st().current !== 0, 10000, "child spawned in b");
   const child = st().current;
-  await a.click("logo");
-  await a.waitFor(() => st().overlay === "wsmenu", 3000, "menu");
-  await a.click("wsmenu.ws.test-gpui-a");
+  if (!(st().view === "workspaces" && st().sideOpen)) await a.click("logo");
+  await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu");
+  await a.click("wsp.ws.test-gpui-a");
   await a.waitFor(() => wsActive() === "test-gpui-a", 3000, "a on screen while b works");
   await a.waitFor(() => st().bgAlert && (conn("test-gpui-b")?.unread?.warn ?? 0) + (conn("test-gpui-b")?.unread?.error ?? 0) > 0, 180000, "background warning");
   check(!!a.probe("logo.dot"), `b's #${child} paused on its budget while a is on screen: a dot on the workspace icon (b unread ${JSON.stringify(conn("test-gpui-b").unread)})`);
   await jpg("ws-05-background-dot");
-  await a.click("logo");
-  await a.waitFor(() => st().overlay === "wsmenu", 3000, "menu");
-  const brow = (extra("wsMenu")?.rows ?? []).find((r: any) => r.ws === "test-gpui-b");
+  if (!(st().view === "workspaces" && st().sideOpen)) await a.click("logo");
+  await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu");
+  const brow = (extra("wsPanel")?.rows ?? []).find((r: any) => r.ws === "test-gpui-b");
   check(brow?.alert, "the menu marks test-gpui-b with the dot");
-  await a.click("wsmenu.ws.test-gpui-b");
+  await a.click("wsp.ws.test-gpui-b");
   await a.waitFor(() => wsActive() === "test-gpui-b", 3000, "b on screen");
   check(!st().bgAlert, "on screen, b's notices move to the status bar (no dot on the icon)");
 
@@ -136,11 +138,11 @@ try {
   check(true, "relaunch: both connections back, test-gpui-b on screen");
 
   // ---- disconnect a from the menu
-  await a.click("logo");
-  await a.waitFor(() => st().overlay === "wsmenu", 3000, "menu");
-  await a.click("wsmenu.disc.test-gpui-a");
+  if (!(st().view === "workspaces" && st().sideOpen)) await a.click("logo");
+  await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu");
+  await a.click("wsp.disc.test-gpui-a");
   await a.waitFor(() => !conn("test-gpui-a"), 4000, "a disconnected");
-  check(wsActive() === "test-gpui-b" && (extra("wsMenu")?.rows ?? []).some((r: any) => r.ws === "test-gpui-a" && r.kind === "available"), "Disconnect: a is available again, b stays on screen");
+  check(wsActive() === "test-gpui-b" && (extra("wsPanel")?.rows ?? []).some((r: any) => r.ws === "test-gpui-a" && r.kind === "available"), "Disconnect: a is available again, b stays on screen");
   await a.shot("ws-11-disconnected");
   await a.quit();
 } catch (e) {
@@ -164,10 +166,9 @@ try {
   check(true, `the relay killed: offline after ${Date.now() - t0} ms`);
   await a.waitFor(() => /disconnected|connecting/.test(extra("statusbar")?.status ?? ""), 2000, "status").catch(() => {});
   check(/disconnected|connecting/.test(extra("statusbar")?.status ?? ""), `status bar: "${extra("statusbar")?.status}"`);
-  await a.click("logo");
-  await a.waitFor(() => st().overlay === "wsmenu", 3000, "menu");
+  if (!(st().view === "workspaces" && st().sideOpen)) await a.click("logo");
+  await a.waitFor(() => (st().view === "workspaces" && st().sideOpen), 3000, "menu");
   await jpg("ws-12-offline-menu");
-  await a.key("Escape");
   r = relay();
   const t1 = Date.now();
   await a.waitFor(() => st().engines?.[0]?.online === true && st().conn === "open" && st().loaded, 15000, "back online");

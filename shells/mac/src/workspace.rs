@@ -129,8 +129,7 @@ pub struct Workspace {
     pub tasks_panel: Entity<tasks_view::TasksPanel>,
     pub notices_panel: Entity<crate::notices_view::NoticesPanel>,
     /// engines whose disabled workspaces are expanded in the workspace menu
-    pub menu_disabled_open: std::collections::HashSet<String>,
-    pub overlay_subs: Vec<Subscription>,
+    pub ws_panel: Entity<crate::workspaces::WorkspacesPanel>,
     resizing: Option<(f32, f32)>,
     pub metrics_open: bool,
     pub narrow: bool,
@@ -163,6 +162,7 @@ impl Workspace {
         let ask_input = cx.new(|cx| InputState::new(window, cx).validate(move |t, _| t.encode_utf16().count() <= lim.get()));
         let tasks_panel = cx.new(|cx| tasks_view::TasksPanel::new(state.clone(), cx));
         let notices_panel = cx.new(|cx| crate::notices_view::NoticesPanel::new(state.clone(), cx));
+        let ws_panel = cx.new(|cx| crate::workspaces::WorkspacesPanel::new(state.clone(), window, cx));
         let mut subs = vec![];
         subs.push(cx.observe(&state, |_, _, cx| cx.notify()));
         subs.push(cx.subscribe_in(&feed, window, |this: &mut Workspace, _, ev: &FeedEvent, window, cx| match ev {
@@ -249,8 +249,6 @@ impl Workspace {
             let input = match &this.overlay {
                 Some(Overlay::Palette(p)) => Some(p.read(cx).input()),
                 Some(Overlay::NewTask(d)) => Some(d.read(cx).input()),
-                Some(Overlay::AddEngine(d)) => Some(d.read(cx).input()),
-                Some(Overlay::Connect(d)) => Some(d.read(cx).input()),
                 _ if this.ask.is_some() => Some(this.ask_input.clone()),
                 _ => None,
             };
@@ -276,8 +274,7 @@ impl Workspace {
             overlay: None,
             tasks_panel,
             notices_panel,
-            menu_disabled_open: Default::default(),
-            overlay_subs: vec![],
+            ws_panel,
             resizing: None,
             metrics_open: false,
             narrow: narrow_layout(window),
@@ -303,10 +300,10 @@ impl Workspace {
             let th = cx.global::<crate::theme::Themes>();
             let last_talk = s.cur.log.iter().rev().find(|e| e.kind == LogKind::Talk).map(|e| e.text.clone());
             let j = serde_json::json!({
-                "ready": s.hub.is_some(), "workspace": s.meta.get(&s.active).map(|m| m.ws.clone()), "connected": s.meta.values().map(|m| serde_json::json!({ "ws": m.ws, "conn": format!("{:?}", m.conn).to_lowercase(), "unread": m.unread, "disabled": m.disabled, "noToken": m.no_token })).collect::<Vec<_>>(), "engines": s.engines.iter().map(|e| serde_json::json!({ "name": e.cfg.name, "online": e.online, "workspaces": e.workspaces, "error": e.error })).collect::<Vec<_>>(), "noticesTop": s.notices.iter().take(8).map(|n| serde_json::json!({ "id": n.id, "level": n.level, "text": n.text, "task": n.task, "read": n.read_at.is_some() })).collect::<Vec<_>>(), "noticesLoaded": s.notices_loaded, "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
+                "ready": s.hub.is_some(), "workspace": s.meta.get(&s.active).map(|m| m.ws.clone()), "connected": s.meta.values().map(|m| serde_json::json!({ "ws": m.ws, "conn": format!("{:?}", m.conn).to_lowercase(), "unread": m.unread, "disabled": m.disabled, "noToken": m.no_token })).collect::<Vec<_>>(), "engines": s.engines.iter().map(|e| serde_json::json!({ "name": e.cfg.name, "online": e.online, "workspaces": e.workspaces, "error": e.error })).collect::<Vec<_>>(), "noticesTop": s.notices.iter().take(8).map(|n| serde_json::json!({ "id": n.id, "level": n.level, "text": n.text, "task": n.task, "read": n.read_at.is_some() })).collect::<Vec<_>>(), "noticesLoaded": s.notices_loaded, "engineSockets": s.conns.len(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
                 "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
                 "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "conn": format!("{:?}", s.conn).to_lowercase(), "reconnects": s.hub().map(|h| h.reconnects()).unwrap_or(0), "instance": s.instance, "hubBuild": s.build, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window,  "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox", Overlay::WsMenu => "wsmenu", Overlay::AddEngine(_) => "addengine", Overlay::Connect(_) => "connect" }),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "conn": format!("{:?}", s.conn).to_lowercase(), "reconnects": s.hub().map(|h| h.reconnects()).unwrap_or(0), "instance": s.instance, "hubBuild": s.build, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window,  "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notices": s.notices.len(), "unread": s.unread(), "active": s.active, "bgAlert": s.background_alert(), "wsSwitches": s.ws_switches,
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
@@ -414,7 +411,6 @@ impl Workspace {
     /// show another connected workspace (instant: its state is kept live in the background)
     pub fn switch_workspace(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay = None;
-        self.overlay_subs.clear();
         self.state.update(cx, |s, cx| s.switch_ws(key, cx));
         self.update_title(window, cx);
         self.composer.update(cx, |c, cx| c.focus(window, cx));
@@ -422,7 +418,6 @@ impl Workspace {
     }
     pub fn close_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay = None;
-        self.overlay_subs.clear();
         self.composer.update(cx, |c, cx| c.focus(window, cx));
         cx.notify();
     }
@@ -635,7 +630,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &ShowSettings, _, cx| w.pick(View::Settings, cx)))
             .on_action(cx.listener(|w, _: &ShowNotifications, _, cx| w.pick(View::Notifications, cx)))
             .on_action(cx.listener(|w, _: &AddEngine, window, cx| crate::workspaces::open_add_engine(w, window, cx)))
-            .on_action(cx.listener(|w, _: &WorkspaceMenu, _, cx| crate::workspaces::open_menu(w, cx)))
+            .on_action(cx.listener(|w, _: &WorkspaceMenu, _, cx| w.pick(View::Workspaces, cx)))
             .on_action(cx.listener(|w, _: &NewTask, window, cx| dialogs::open_new_task(w, None, window, cx)))
             .on_action(cx.listener(|w, _: &CloseTab, window, cx| {
                 let cur = w.state.read(cx).current;
@@ -693,7 +688,6 @@ impl Render for Workspace {
                     w.composer.update(cx, |c, cx| c.stop_dictation(cx));
                 } else if w.overlay.is_some() {
                     w.overlay = None;
-                    w.overlay_subs.clear();
                     w.composer.update(cx, |c, cx| c.focus(window, cx));
                 } else if w.ask.is_some() {
                     w.ask = None;
@@ -772,7 +766,7 @@ impl Render for Workspace {
         // ---- overlays
         if let Some(o) = self.overlay.clone() {
             // dialogs and popovers fade in (120 ms); the state goes with the overlay, so each opening plays it
-            let kind = match &o { Overlay::NewTask(_) => "fade-new", Overlay::Palette(_) => "fade-pal", Overlay::Metrics(_) => "fade-met", Overlay::Lightbox(_) => "fade-light", Overlay::WsMenu => "fade-wsm", Overlay::AddEngine(_) => "fade-ae", Overlay::Connect(_) => "fade-cn" };
+            let kind = match &o { Overlay::NewTask(_) => "fade-new", Overlay::Palette(_) => "fade-pal", Overlay::Metrics(_) => "fade-met", Overlay::Lightbox(_) => "fade-light" };
             let el = dialogs::render_overlay(self, o, window, cx);
             root = root.child(
                 div()
@@ -796,7 +790,7 @@ impl Workspace {
         let active = s.tasks.values().filter(|x| x.task.status == TaskStatus::Active).count();
         let compacting = !s.busy.is_empty();
         let alert = s.background_alert();
-        let menu_open = matches!(self.overlay, Some(crate::dialogs::Overlay::WsMenu));
+        let ws_on = open && view == View::Workspaces;
         let alert_col = if s.meta.iter().any(|(kk, m)| *kk != s.active && m.unread.error > 0) { k.red } else { k.amber };
         let ws_name = s.meta.get(&s.active).map(|m| m.ws.clone()).unwrap_or("no workspace".into());
         let unread = s.unread();
@@ -833,8 +827,9 @@ impl Workspace {
                     .child(logo(24., cx))
                     .when(alert, |d| d.child(div().absolute().top(px(-3.)).right(px(-4.)).child(dot(alert_col, 9.).border_2().border_color(k.rail)).child(probe("logo.dot"))))
                     .child(probe("logo"))
-                    .when(!menu_open, |d| d.tooltip(tooltip(format!("{} · workspaces (⇧⌘O)", ws_name))))
-                    .on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_menu(w, cx))),
+                    .when(ws_on, |d| d.child(div().absolute().left(px(-12.)).top(px(2.)).bottom(px(2.)).w(px(2.)).rounded(px(2.)).bg(k.accent)))
+                    .tooltip(tooltip(format!("{} · Workspaces (⇧⌘O){}", ws_name, if ws_on { " (click to hide the sidebar)" } else { "" })))
+                    .on_click(cx.listener(|w, _, _, cx| w.pick(View::Workspaces, cx))),
             );
         for v in [View::Tasks, View::Memory, View::Context, View::Log, View::Models] {
             rail = rail.child(self.rail_btn(v, open && view == v, if v == View::Tasks { active } else { 0 }, v == View::Memory && compacting, cx));
@@ -950,6 +945,7 @@ impl Workspace {
         let body: AnyElement = match view {
             View::Tasks => cached(self.tasks_panel.clone().into()),
             View::Settings if s.hub.is_none() => cached(self.settings.clone().into()),
+            View::Workspaces => cached(self.ws_panel.clone().into()),
             _ if !loaded => div().p(px(12.)).child(skeleton_line(None, cx)).child(skeleton_line(Some(160.), cx)).into_any_element(),
             View::Memory => cached(self.memory.clone().into()),
             View::Context => cached(self.context.clone().into()),
@@ -1020,7 +1016,7 @@ impl Workspace {
                             .gap(px(8.))
                             .mt(px(6.))
                             .child(btn("empty-add", "Add engine…", Tone::Primary, cx).child(probe("empty.add")).on_click(cx.listener(|w, _, window, cx| crate::workspaces::open_add_engine(w, window, cx))))
-                            .child(btn("empty-menu", "Workspaces…", Tone::Plain, cx).child(probe("empty.menu")).on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_menu(w, cx)))),
+                            .child(btn("empty-menu", "Workspaces…", Tone::Plain, cx).child(probe("empty.menu")).on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_panel(w, cx)))),
                     )
                     .child(probe("empty")),
             );

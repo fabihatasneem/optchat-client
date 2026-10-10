@@ -63,7 +63,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
                 .child(m.ws.clone())
                 .child(probe("status.ws"))
                 .tooltip(tooltip(format!("workspace {} on {engine} (click to switch)", m.ws)))
-                .on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_menu(w, cx))),
+                .on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_panel(w, cx))),
         );
     }
     left = left.child(item().child(sdot).child(status.clone()).child(probe("status.text")));

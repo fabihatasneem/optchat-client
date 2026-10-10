@@ -246,7 +246,19 @@ pub enum HubEvent {
     /// engine-level: why the socket could not connect (unreachable, token refused)
     EngineError(String),
     /// engine-level: its workspaces (name, running)
-    EngineWorkspaces(Vec<(String, bool)>),
+    EngineWorkspaces(Vec<WsEntry>),
+    /// the engine refused or dropped this workspace's connection (no token that reaches it, token revoked): the
+    /// connection stays listed, unsubscribed, until connected again with a token
+    Refused(String),
+}
+
+/// A workspace in an engine's public list: name, running, and whether it is the engine's default one.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WsEntry {
+    pub name: String,
+    pub running: bool,
+    pub default: bool,
 }
 
 /// A notice (lib/notices.ts): something the user should know about a workspace, kept on the engine with its read state.

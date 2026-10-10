@@ -23,8 +23,12 @@ size. Code: client.rs (EngineConn + per-workspace Client), state.rs (WsData swap
   (keystrokes via Window::dispatch_keystroke, mouse/scroll as NSEvents handed to our own view: GPUI's real input
   path), frames laid out by the app itself every 100 ms (Window::draw, nothing presented), no screenshots; results
   in shots/e2e-results-headless.txt. AX menu-bar checks need Computer Use.
-- Protocol note: a client token authenticates the whole socket, so two connections with different tokens to one
-  engine need two sockets; a token per `connect` would allow one socket per engine as the spec intends.
+- One socket per engine since engine build 2026-10-10.21-connect-tokens: each `connect` carries its workspace's token;
+  refused / revoked tokens drop only that workspace ("token refused" in the panel).
+- Workspaces panel (rail view, user decision; replaced the popup menu and dialogs): workspaces.rs. tests/panel.ts runs
+  it against tests/lib/fake-engine.ts (127.0.0.1, names from argv; no real workspace), 16/16 headless.
+- Test workspaces test-gpui-a/b are purged: engine.ts / workspaces.ts (and the suites on a real workspace) need new
+  ones from the orchestrator (OPTCHAT_TEST_DB + data/test-tokens.json; hub.ts's TEST_WORKSPACES list).
 
 ## Client mode (hub era)
 The app is a pure client of the web app's hub (https://chat.reframe.dev): one websocket like the browser's page
