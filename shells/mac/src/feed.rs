@@ -877,7 +877,7 @@ impl Feed {
                     .on_click(cx.listener(move |_, _, _, cx| cx.emit(FeedEvent::OpenTask(id))))
                     .child(div().font_family("Menlo").font_weight(FontWeight::BOLD).text_color(k.violet).child(format!("#{id}")))
                     .child(div().text_color(kcol).child(klabel))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(k.text2).child(child))
+                    .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.text2).child(child))
                     .child(div().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{} · {}", e.i, fmt::time(&e.date))))
                     .child(div().text_size(zx(11.)).text_color(k.accent).child("open ↗")),
             )
@@ -1017,7 +1017,7 @@ impl Feed {
                     }))
                     .child(icon("chevron-right", 12., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))))
                     .child(div().font_family("Menlo").text_size(zx(12.)).text_color(k.cyan).whitespace_nowrap().child(name.clone()))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().font_family("Menlo").text_size(zx(12.)).text_color(k.text2).child(arg_preview(&name, &input)))
+                    .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().font_family("Menlo").text_size(zx(12.)).text_color(k.text2).child(arg_preview(&name, &input)))
                     .child(div().text_size(zx(11.)).whitespace_nowrap().text_color(scol).child(stext))
                     .when(can_stop, |d| {
                         d.child(btn_small(ElementId::Name(format!("stop{}", e.i).into()), "stop", Tone::Danger, cx).on_click(move |_, _, cx| {
@@ -1161,7 +1161,7 @@ impl Feed {
                                 .child(icon("chevron-right", 11., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))))
                                 .when(live_now, |d| d.child(pulse(ElementId::Name(format!("thp{rid}").into()), dot(k.accent, 7.))).child("thinking…"))
                                 .when(!live_now, |d| d.child("thought"))
-                                .when(!open, |d| d.child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().italic().child(last))),
+                                .when(!open, |d| d.child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().italic().child(last))),
                         )
                         .when(open, |dd| dd.child(div().mt(zx(6.)).pl(zx(12.)).border_l_2().border_color(k.line2).italic().text_size(zx(13.)).line_height(zx(20.)).text_color(k.muted).child(thinking.clone()))),
                 );

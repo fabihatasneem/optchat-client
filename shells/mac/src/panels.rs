@@ -370,7 +370,7 @@ impl MemoryPanel {
                         .child(probe(format!("hit.{t}.{i}")))
                         .child(div().flex_none().font_family("Menlo").text_color(k.muted).child(format!("{i}{}", if t != task { format!("@{t}") } else { String::new() })))
                         .child(div().flex_none().px(px(4.)).rounded(px(3.)).bg(k.panel2).text_size(px(10.5)).text_color(k.muted).child(x.kind.clone()))
-                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(k.text2).child(x.text.replace('\n', " ").chars().take(160).collect::<String>()))
+                        .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.text2).child(x.text.replace('\n', " ").chars().take(160).collect::<String>()))
                         .on_click(cx.listener(move |m, _, _, cx| m.reveal(t, i, cx))),
                 );
             }
@@ -507,7 +507,7 @@ impl ContextPanel {
                     .child(icon("chevron-right", 10., k.faint).when(open, |s| s.with_transformation(Transformation::rotate(percentage(0.25)))))
                     .child(div().flex_none().w(px(62.)).text_color(rcol).child(format!("{:?}", m.role).to_lowercase()))
                     .child(div().flex_none().w(px(70.)).text_color(k.muted).text_size(px(11.)).child(kind))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(k.text2).child(prev))
+                    .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.text2).child(prev))
                     .child(div().flex_none().text_size(px(10.5)).text_color(k.faint).child(format!("{}{}", fmt::bytes(m.bytes as usize), if m.raw.is_some() { " · raw" } else { "" })))
                     .on_click(cx.listener(move |p, _, _, cx| {
                         if !p.open.remove(&id) {
@@ -721,7 +721,7 @@ impl LogPanel {
                     .flex()
                     .items_center()
                     .py(px(3.))
-                    .child(div().flex_1().min_w_0().relative().child(div().absolute().left_0().top_0().bottom_0().w(relative((usd as f32 / total as f32).max(0.02))).bg(k.accent_bg).rounded(px(3.))).child(div().relative().px(px(4.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(k.text2).child(label(key))))
+                    .child(div().flex_1().min_w_0().relative().child(div().absolute().left_0().top_0().bottom_0().w(relative((usd as f32 / total as f32).max(0.02))).bg(k.accent_bg).rounded(px(3.))).child(div().relative().px(px(4.)).overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.text2).child(label(key))))
                     .child(div().w(px(70.)).flex().justify_end().child(fmt::usd(usd as f64 / 1e6)))
                     .child(div().w(px(64.)).flex().justify_end().text_color(k.muted).child(fmt::tokens(tok)))
                     .child(div().w(px(64.)).flex().justify_end().text_color(k.muted).child(fmt::ms(*v.get("time.model").unwrap_or(&0)))),
@@ -795,7 +795,7 @@ impl LogPanel {
                     .text_color(k.text2)
                     .child(div().w(px(64.)).child(format!("{}{}", fmt::time(&r.started_at), if r.purpose == "compact" { " · c" } else { "" })))
                     .when(self.subtree, |d| d.child(div().w(px(36.)).font_family("Menlo").child(format!("#{}", r.task.unwrap_or(0)))))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(format!("{}{}", r.model.replace("claude-", ""), if r.status == "running" { " …" } else { "" })))
+                    .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().child(format!("{}{}", r.model.replace("claude-", ""), if r.status == "running" { " …" } else { "" })))
                     .child(div().w(px(48.)).flex().justify_end().child(fmt::tokens(r.usage.as_ref().map(|u| u.input).unwrap_or(0))))
                     .child(div().w(px(40.)).flex().justify_end().child(format!("{}%", fmt::cache_pct(r.usage.as_ref()))))
                     .child(div().w(px(44.)).flex().justify_end().child(fmt::tokens(r.usage.as_ref().map(|u| u.output).unwrap_or(0))))
@@ -1045,7 +1045,7 @@ impl ModelsPanel {
         if hist_open {
             let mut h = div().flex().flex_col().mt(px(8.)).text_size(px(11.5));
             for x in r.history.iter().rev() {
-                h = h.child(div().flex().gap(px(8.)).py(px(2.)).child(div().w(px(90.)).child(fmt::day(&x.from))).child(div().w(px(70.)).text_color(k.muted).child(x.source.clone())).child(div().w(px(90.)).child(format!("{} / {}", fmt::price(Some(x.per1m.input)), fmt::price(Some(x.per1m.out))))).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(k.muted).child(x.note.clone().unwrap_or_default())));
+                h = h.child(div().flex().gap(px(8.)).py(px(2.)).child(div().w(px(90.)).child(fmt::day(&x.from))).child(div().w(px(70.)).text_color(k.muted).child(x.source.clone())).child(div().w(px(90.)).child(format!("{} / {}", fmt::price(Some(x.per1m.input)), fmt::price(Some(x.per1m.out))))).child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.muted).child(x.note.clone().unwrap_or_default())));
             }
             cardv = cardv.child(h);
         }

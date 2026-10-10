@@ -807,7 +807,7 @@ impl Render for Palette {
                     .cursor_pointer()
                     .when(on, |d| d.bg(k.accent_bg))
                     .hover(|s| s.bg(k.hover))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(label.clone()))
+                    .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().child(label.clone()))
                     .child(div().text_size(px(11.)).text_color(k.muted).child(hint.clone()))
                     .on_click(cx.listener(move |_, _, _, cx| cx.emit(PaletteEvent::Run(cmd.clone())))),
             );

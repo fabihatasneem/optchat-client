@@ -65,7 +65,7 @@ pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Works
                 .when(!menu_open, |d| d.tooltip(tooltip(tip)))
                 .child(probe(format!("tab.{id}")))
                 .child(lead)
-                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
+                .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().child(title))
                 .when(x.as_ref().map(|x| x.running).unwrap_or(false), |d| d.child(spinner(SharedString::from(format!("tabspin{id}")), 12., k.accent)))
                 .child(
                     div()
@@ -145,10 +145,10 @@ pub fn task_bar(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Worksp
         let id = x.task.id;
         let label = if id == 0 { "main chat".to_string() } else { format!("#{id} {}", x.task.title) };
         crumbs = crumbs
-            .child(div().id(SharedString::from(format!("crumb{id}"))).text_color(k.muted).cursor_pointer().hover(|s| s.text_color(k.text)).max_w(px(240.)).overflow_hidden().text_ellipsis().child(label).on_click(cx.listener(move |w, _, window, cx| w.open_task(id, window, cx))))
+            .child(div().id(SharedString::from(format!("crumb{id}"))).text_color(k.muted).cursor_pointer().hover(|s| s.text_color(k.text)).max_w(px(240.)).min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().child(label).on_click(cx.listener(move |w, _, window, cx| w.open_task(id, window, cx))))
             .child(icon("chevron-right", 12., k.faint));
     }
-    crumbs = crumbs.child(div().text_color(k.text).overflow_hidden().text_ellipsis().child(if t.id == 0 { "main chat".to_string() } else { format!("#{} {}", t.id, t.title) }));
+    crumbs = crumbs.child(div().flex_1().min_w_0().text_color(k.text).overflow_hidden().line_clamp(1).text_ellipsis().child(if t.id == 0 { "main chat".to_string() } else { format!("#{} {}", t.id, t.title) }));
     if t.mode == TaskMode::Continue {
         if let Some(p) = t.prev {
             crumbs = crumbs.child(div().flex().gap(px(4.)).text_color(k.muted).text_size(px(11.5)).child("· continues").child(div().id("prevlink").text_color(k.accent).cursor_pointer().child(format!("#{p}")).on_click(cx.listener(move |w, _, window, cx| w.open_task(p, window, cx)))));
@@ -156,14 +156,14 @@ pub fn task_bar(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Worksp
     }
     let mut bar = base.child(crumbs);
     if let Some(r) = &t.result {
-        bar = bar.child(div().max_w(relative(0.5)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(k.green).child(format!("→ {r}")).child(probe("taskbar.why")));
+        bar = bar.child(div().max_w(relative(0.5)).overflow_hidden().line_clamp(1).text_ellipsis().text_color(k.green).child(format!("→ {r}")).child(probe("taskbar.why")));
     } else if let Some(r) = &t.reason {
         let col = match t.status {
             TaskStatus::Paused => k.amber,
             TaskStatus::Canceled => k.red,
             _ => k.muted,
         };
-        bar = bar.child(div().max_w(relative(0.5)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(col).child(format!("{}: {r}", t.status.as_str())).child(probe("taskbar.why")));
+        bar = bar.child(div().max_w(relative(0.5)).overflow_hidden().line_clamp(1).text_ellipsis().text_color(col).child(format!("{}: {r}", t.status.as_str())).child(probe("taskbar.why")));
     }
     bar.into_any_element()
 }

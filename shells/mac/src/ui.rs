@@ -389,7 +389,7 @@ pub fn rss_mb() -> f64 {
 
 /// The scroll container of a sidebar panel (inside its cached view).
 pub fn scroll_body(id: &'static str, body: AnyElement) -> impl IntoElement {
-    div().id(SharedString::from(format!("scroll-{id}"))).size_full().overflow_y_scroll().child(body)
+    div().id(SharedString::from(format!("scroll-{id}"))).size_full().overflow_y_scroll().child(div().w_full().min_w_0().child(body))
 }
 
 // ---- chat zoom (⌘= / ⌘- / ⌘⇧0): the feed's sizes are multiplied by font_size / 14, like a browser's zoom ----

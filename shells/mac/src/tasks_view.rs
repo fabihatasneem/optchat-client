@@ -129,8 +129,11 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
     }
     let me = cx.entity().downgrade();
     let status = t.status;
-    div().id(SharedString::from(format!("trow-k-{id}"))).child(div()
+    // w_full + min_w_0 down the chain: a long title truncates with "…" instead of widening the row
+    div().id(SharedString::from(format!("trow-k-{id}"))).w_full().min_w_0().child(div()
         .id(SharedString::from(format!("trow-{id}")))
+        .w_full()
+        .min_w_0()
         .flex()
         .items_center()
         .gap(px(7.))
@@ -168,7 +171,7 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
                 .flex()
                 .flex_col()
                 .gap(px(1.))
-                .child(div().text_size(px(13.)).overflow_hidden().whitespace_nowrap().text_ellipsis().when(ended, |d| d.text_color(k.muted)).child(task_name(t)))
+                .child(div().text_size(px(13.)).overflow_hidden().line_clamp(1).text_ellipsis().when(ended, |d| d.text_color(k.muted)).child(task_name(t)))
                 .child(meta),
         )
         .when(x.running, |d| d.child(spinner(SharedString::from(format!("trs{id}")), 13., k.accent)))
