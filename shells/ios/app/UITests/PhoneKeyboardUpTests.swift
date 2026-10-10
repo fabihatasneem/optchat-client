@@ -20,6 +20,17 @@ final class PhoneKeyboardUpTests: XCTestCase {
         if env["MODE"] == "measure" {
             clearDraft(); app.typeText("measure"); sleep(1); shot("20-measure"); clearDraft(); return
         }
+        // 0. Paste: a test string on the clipboard (replaces the device's clipboard), long-press in the field → the
+        //    Paste pill above the touch → tap it; then clear (nothing is sent)
+        if env["PASTE"] == "1" {
+            UIPasteboard.general.string = "pasted by the OptChat test"
+            clearDraft(); sleep(1)
+            let fieldY = f.height * 0.393
+            at(f.width * 0.4, fieldY).press(forDuration: 0.8); sleep(1); shot("27-paste-pill")
+            at(f.width * 0.4, fieldY - 44).tap(); sleep(2); shot("28-after-paste-tap")
+            if app.keyboards.count == 0 { chat.tap(); sleep(2) }
+            clearDraft(); sleep(1)
+        }
         // 1. double-tap send with the keyboard up
         clearDraft(); app.typeText(env["MESSAGE"] ?? ""); sleep(1); shot("21-typed")
         let chatUp = at(f.width / 2, app.keyboards.firstMatch.frame.minY - 22) // the bottom bar sits on the keyboard
