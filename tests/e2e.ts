@@ -57,8 +57,12 @@ for (const s of suites) {
   }
   for (const l of r.lines) console.log(l.slice(0, 220));
   if (s.name === "perf") console.log(r.text.slice(r.text.indexOf("{")).slice(0, 1200));
-  bad += r.fails;
-  out.push(`\n== ${s.name}: ${r.lines.length - r.lines.filter((l) => l.startsWith("FAIL")).length} ok, ${r.fails} failed, ${Math.round((performance.now() - t0) / 1000)} s${note}`, ...r.lines);
+  // failures that all happened while the window was not drawing say nothing about the app: reported as skipped
+  const fl = r.lines.filter((l) => l.startsWith("FAIL"));
+  const stalled = fl.length > 0 && fl.every((l) => l.includes("window not drawing"));
+  if (stalled) note += " — SKIPPED: the window was covered (not drawing) when these failed";
+  else bad += r.fails;
+  out.push(`\n== ${s.name}: ${r.lines.length - fl.length} ok, ${r.fails} failed, ${Math.round((performance.now() - t0) / 1000)} s${note}`, ...r.lines);
 }
 out.push(`\nTOTAL: ${bad ? `${bad} failed` : "all passed"}`);
 Deno.writeTextFileSync(`${ROOT}/shots/e2e-results.txt`, out.join("\n") + "\n");

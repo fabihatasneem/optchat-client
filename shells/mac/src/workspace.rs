@@ -130,6 +130,8 @@ pub struct Workspace {
     bounds_seq: u64,
     title: String,
     task_menu: Option<(Entity<gpui_component::menu::PopupMenu>, Point<Pixels>, Subscription)>,
+    pub tab_scroll: ScrollHandle,
+    pub tab_scrolled_to: Option<i64>,
 }
 
 impl Workspace {
@@ -213,6 +215,12 @@ impl Workspace {
         // a closed menu or a removed element leaves nothing focused, and then no workspace key works:
         // give focus back to the workspace (its keys, M to dictate)
         subs.push(cx.on_focus_lost(window, |this: &mut Workspace, window, cx| {
+            if let Some((menu, _, _)) = &this.task_menu {
+                // an open task menu keeps the focus (so Esc and the arrows reach it)
+                let m = menu.clone();
+                m.update(cx, |m, cx| m.focus_handle(cx).focus(window));
+                return;
+            }
             let input = match &this.overlay {
                 Some(Overlay::Palette(p)) => Some(p.read(cx).input()),
                 Some(Overlay::NewTask(d)) => Some(d.read(cx).input()),
@@ -253,6 +261,8 @@ impl Workspace {
             bounds_seq: 0,
             title: String::new(),
             task_menu: None,
+            tab_scroll: ScrollHandle::new(),
+            tab_scrolled_to: None,
         }
     }
 
@@ -601,6 +611,11 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|w, _: &Dismiss, window, cx| {
+                if w.task_menu.is_some() {
+                    w.close_task_menu(cx);
+                    w.composer.update(cx, |c, cx| c.focus(window, cx));
+                    return;
+                }
                 if w.state.read(cx).dict.state != "idle" {
                     // Esc stops dictation and keeps the text
                     w.composer.update(cx, |c, cx| c.stop_dictation(cx));
@@ -668,7 +683,16 @@ impl Render for Workspace {
 
         // ---- overlays
         if let Some(o) = self.overlay.clone() {
-            root = root.child(dialogs::render_overlay(self, o, window, cx));
+            // dialogs and popovers fade in (120 ms); the state goes with the overlay, so each opening plays it
+            let kind = match &o { Overlay::NewTask(_) => "fade-new", Overlay::Palette(_) => "fade-pal", Overlay::Metrics(_) => "fade-met", Overlay::Lightbox(_) => "fade-light" };
+            let el = dialogs::render_overlay(self, o, window, cx);
+            root = root.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .child(el)
+                    .with_animation(kind, Animation::new(std::time::Duration::from_millis(120)).with_easing(ease_out_quint()), |d, t| d.opacity(t)),
+            );
         }
         if let Some(a) = self.state.read(cx).approvals.first().cloned() {
             root = root.child(dialogs::approval(self, a, cx));

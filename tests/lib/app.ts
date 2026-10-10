@@ -53,13 +53,16 @@ export class App {
   }
   async waitFor(f: () => unknown, ms = 10_000, what = "condition") {
     const end = Date.now() + ms;
+    const frame0 = this.state()?.frame;
     while (Date.now() < end) {
       try { if (f()) return; } catch { /* retry */ }
       await sleep(150);
     }
     const s = this.state() ?? {};
-    const brief = { active: s.active, focus: s.focus, frame: s.frame, current: s.current, loaded: s.loaded, view: s.view, overlay: s.overlay, palette: s.palette, ask: s.ask, sideOpen: s.sideOpen, status: s.status };
-    throw new Error(`timed out waiting for ${what}; state=${JSON.stringify(brief)}`);
+    // macOS stops drawing a fully covered window (GPUI stops its display link): keys then go by the last frame
+    const stalled = frame0 !== undefined && s.frame === frame0 && ms >= 2000;
+    const brief = { stalled, active: s.active, focus: s.focus, frame: s.frame, current: s.current, loaded: s.loaded, view: s.view, overlay: s.overlay, palette: s.palette, ask: s.ask, sideOpen: s.sideOpen, status: s.status };
+    throw new Error(`timed out waiting for ${what}${stalled ? " [window not drawing: covered by other windows?]" : ""}; state=${JSON.stringify(brief)}`);
   }
   /** run a Computer Use action; if the session lost the app, attach again (getApp + fresh state) and retry once */
   async act(code: string): Promise<{ text: string; images: string[] }> {

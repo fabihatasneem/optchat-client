@@ -33,6 +33,10 @@ try {
     await a.type("x".repeat(100));
     await a.waitFor(() => (st().newtask?.title ?? "").length > 0, 3000, "title typed");
     check(st().newtask.title.length === 80, `the title stops at 80 characters (${st().newtask.title.length})`);
+    const order: number[] = [];
+    for (let i = 0; i < 4; i++) { await a.key("Tab"); await sleep(250); order.push(st().newtask.field); }
+    await a.key("shift+Tab"); await sleep(250);
+    check(JSON.stringify(order) === "[1,2,3,0]" && st().newtask.field === 3, `Tab moves title → instruction → $ → minutes → title, Shift+Tab back (${JSON.stringify(order)}, then ${st().newtask.field})`);
     await a.click("newtask.instruction");
     const i0 = h("newtask.instruction");
     for (let i = 1; i <= 9; i++) { await a.type(`step ${i}`); await a.key("Return"); } // Return is a newline here

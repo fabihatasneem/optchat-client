@@ -21,7 +21,14 @@ pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Works
     let info = s.info().cloned();
     let st = info.as_ref().map(|i| i.task.status);
     let root = info.as_ref().map(|i| i.task.parent.is_none()).unwrap_or(true);
-    let mut strip = div().id("tabscroll").flex().flex_1().min_w_0().h_full().overflow_x_scroll();
+    // the current tab is scrolled into view when it changes
+    if w.tab_scrolled_to != Some(cur) {
+        if let Some(ix) = tabs.iter().position(|t| *t == cur) {
+            w.tab_scroll.scroll_to_item(ix);
+        }
+        w.tab_scrolled_to = Some(cur);
+    }
+    let mut strip = div().id("tabscroll").flex().flex_1().min_w_0().h_full().overflow_x_scroll().track_scroll(&w.tab_scroll);
     for id in tabs {
         let x = s.tasks.get(&id).cloned();
         let on = id == cur;

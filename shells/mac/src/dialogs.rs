@@ -43,9 +43,10 @@ pub fn cycle_tab(w: &mut Workspace, d: i64, window: &mut Window, cx: &mut Contex
 }
 
 pub fn zoom(w: &mut Workspace, d: f32, cx: &mut Context<Workspace>) {
-    w.state.update(cx, |s, _| {
+    w.state.update(cx, |s, cx| {
         s.prefs.font_size = if d == 0.0 { 14.0 } else { (s.prefs.font_size + d).clamp(11.0, 20.0) };
         s.save_prefs();
+        cx.notify();
     });
     let size = w.state.read(cx).prefs.font_size;
     gpui_component::Theme::global_mut(cx).font_size = px(size - 0.5);
@@ -347,7 +348,7 @@ pub struct NewTaskDialog {
     focus: FocusHandle,
 }
 impl EventEmitter<DismissEvent> for NewTaskDialog {}
-actions!(newtask, [SubmitStart, NewTaskPaste]);
+actions!(newtask, [SubmitStart, NewTaskPaste, NextField, PrevField]);
 
 pub fn open_new_task(w: &mut Workspace, preset: Option<(String, Option<i64>, i64)>, window: &mut Window, cx: &mut Context<Workspace>) {
     let s = w.state.read(cx);
@@ -414,6 +415,13 @@ impl NewTaskDialog {
         });
         cx.emit(DismissEvent);
     }
+    fn move_focus(&mut self, d: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let fields = [self.title.clone(), self.instruction.clone(), self.usd.clone(), self.minutes.clone()];
+        let at = fields.iter().position(|f| f.read(cx).focus_handle(cx).is_focused(window)).unwrap_or(0) as isize;
+        let next = (at + d).rem_euclid(fields.len() as isize) as usize;
+        fields[next].update(cx, |i, cx| i.focus(window, cx));
+        cx.notify();
+    }
     /// at most 20 images, downscaled to 1568 px and re-encoded like the composer's
     fn add_bytes(&mut self, name: String, mt: &str, bytes: &[u8]) {
         if self.images.len() >= 20 {
@@ -475,8 +483,9 @@ impl NewTaskDialog {
 }
 
 impl Render for NewTaskDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        crate::ui::set_state_extra("newtask", serde_json::json!({ "title": self.title.read(cx).value().to_string(), "instruction": self.instruction.read(cx).value().to_string(), "images": self.images.len(), "mode": self.mode }));
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let field = [&self.title, &self.instruction, &self.usd, &self.minutes].iter().position(|f| f.read(cx).focus_handle(cx).is_focused(window));
+        crate::ui::set_state_extra("newtask", serde_json::json!({ "title": self.title.read(cx).value().to_string(), "instruction": self.instruction.read(cx).value().to_string(), "images": self.images.len(), "mode": self.mode, "field": field }));
         let k = c(cx).clone();
         let s = self.state.read(cx);
         let parent = self.parent;
@@ -541,6 +550,8 @@ impl Render for NewTaskDialog {
             .track_focus(&self.focus)
             .on_action(cx.listener(|d, _: &SubmitStart, _, cx| d.create(true, cx)))
             .on_action(cx.listener(Self::on_paste))
+            .on_action(cx.listener(|d, _: &NextField, window, cx| d.move_focus(1, window, cx)))
+            .on_action(cx.listener(|d, _: &PrevField, window, cx| d.move_focus(-1, window, cx)))
             .overflow_y_scroll()
             .child(probe("newtask"))
             .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).mb(px(6.)).child(format!("New task under {ptitle}")))
@@ -642,6 +653,9 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("enter", Confirm, Some("Palette")),
         KeyBinding::new("cmd-enter", SubmitStart, Some("NewTask")),
         KeyBinding::new("cmd-v", NewTaskPaste, Some("instruction > Input")),
+        // Tab / Shift+Tab move between the dialog's fields (focus stays inside the dialog)
+        KeyBinding::new("tab", NextField, Some("NewTask > Input")),
+        KeyBinding::new("shift-tab", PrevField, Some("NewTask > Input")),
     ]);
 }
 
@@ -755,7 +769,7 @@ impl Palette {
             }
         }
         if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && !self.tasks_only {
-            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast")] {
+            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: run a bash tool", "t-bash")] {
                 if let Some(sc) = fuzzy(&q, l) {
                     items.push((sc + 60, l.to_string(), String::new(), Cmd::Act(a)));
                 }
@@ -888,6 +902,11 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
             "t-wide" => window.resize(size(px(1360.), px(880.))),
             "t-scroll" => w.feed.update(cx, |f, cx| f.test_gesture(6.0, 14.0, cx)),
             "t-scroll-fast" => w.feed.update(cx, |f, cx| f.test_gesture(4.0, 60.0, cx)),
+            "t-bash" => {
+                if let Some(h) = w.state.read(cx).hub() {
+                    h.test_bash();
+                }
+            }
             _ => {}
         },
     }

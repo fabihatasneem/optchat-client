@@ -1159,6 +1159,7 @@ impl SettingsPanel {
         let field = |label: &str| div().text_size(px(11.5)).text_color(k.muted).mb(px(4.)).child(label.to_string());
         if global_tab {
             let g = s.global.clone();
+            let font_size = s.prefs.font_size;
             let themes: Vec<(String, String, bool)> = {
                 let th = cx.global::<Themes>();
                 th.all.iter().map(|t| (t.id.clone(), t.name.clone(), t.id == th.active)).collect()
@@ -1223,6 +1224,24 @@ impl SettingsPanel {
                                         });
                                     }
                                 })),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .mt(px(10.))
+                                .child(div().text_size(px(13.)).child("Chat text size").child(div().text_size(px(11.)).text_color(k.muted).child("⌘= bigger · ⌘- smaller · ⌘⇧0 actual size")))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.))
+                                        .child(btn_small("fs-minus", "−", Tone::Plain, cx).child(probe("settings.font.minus")).on_click(|_, window, cx| window.dispatch_action(Box::new(crate::workspace::ZoomOut), cx)))
+                                        .child(div().w(px(34.)).text_center().text_size(px(12.5)).child(format!("{font_size:.0}")))
+                                        .child(btn_small("fs-plus", "+", Tone::Plain, cx).child(probe("settings.font.plus")).on_click(|_, window, cx| window.dispatch_action(Box::new(crate::workspace::ZoomIn), cx)))
+                                        .child(btn_small("fs-reset", "reset", Tone::Ghost, cx).on_click(|_, window, cx| window.dispatch_action(Box::new(crate::workspace::ZoomReset), cx))),
+                                ),
                         ),
                 )
                 .child(section(cx).child(section_title("performance", cx)).child(card(cx).child(kv_row("first frame", stats.first_frame_ms.map(|m| format!("{m:.0} ms after launch")).unwrap_or("—".into()), cx)).child(kv_row("chat loaded", stats.loaded_ms.map(|m| format!("{m:.0} ms after launch")).unwrap_or("—".into()), cx)).child(kv_row("events applied", stats.events.to_string(), cx))))

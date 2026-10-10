@@ -173,9 +173,11 @@ try {
       check(st().memory?.hit === `${t}:0:${i}`, `the hit reveals message ${i} in the tree (${st().memory?.hit})`);
     }
   });
+  // the rate saved through the UI is in the app's database copy (read before quitting: quit removes the copy)
+  await step("rate-in-db", async () => {
+    const out = new Deno.Command("sqlite3", { args: [a.db, "select data from rate where model='claude-haiku-5-5'"] }).outputSync();
+    const rate = new TextDecoder().decode(out.stdout);
+    check(/"in":1\.25/.test(rate), `the rate saved through the UI is in the database (${rate.split("\n").filter((l) => l.includes("1.25"))[0]?.slice(0, 120)})`);
+  });
 } catch (e) { check(false, String(e)); await a.shot("panels-fail"); } finally { await a.quit(); }
-// the rate saved through the UI is in the app's database copy
-const out = new Deno.Command("sqlite3", { args: [a.db, "select data from rate where model='claude-haiku-5-5'"] }).outputSync();
-const rate = new TextDecoder().decode(out.stdout);
-check(/1\.25/.test(rate), `rate saved to the database (${rate.trim().slice(0, 160)})`);
 Deno.exit(failed() ? 1 : 0);

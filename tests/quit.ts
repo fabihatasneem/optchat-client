@@ -1,8 +1,9 @@
 // The engine log file; quitting stops every child process: claude turns/compactions (summaries start at launch on the copied chat),
-// the codex app-server, bash tools. No model turn is started here; launch-time compactions use Haiku.
+// the codex app-server, bash tools (a test hook runs `sleep 120` through the engine's bash tool). No model turn.
 import { App, check, failed } from "./lib/app.ts";
 import { sleep } from "./lib/cua.ts";
-const a = await App.launch();
+const a = await App.launch({ env: { OPTCHAT_TEST_HOOKS: "1" } });
+try { await a.palette("Test: run a bash tool"); } catch (e) { check(false, String(e).slice(0, 300)); } // a tool process group, like a turn's bash call
 let kids: string[] = [];
 for (let i = 0; i < 60 && kids.length === 0; i++) { await sleep(500); kids = a.children(); }
 const names = kids.map((p) => new TextDecoder().decode(new Deno.Command("ps", { args: ["-o", "comm=", "-p", p] }).outputSync().stdout).trim().split("/").pop());
