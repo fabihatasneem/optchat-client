@@ -1,7 +1,7 @@
 # OptChat for iPhone and iPad: plan
 
-Status: draft, 2026-10-10. The simulator runs and the Rust-for-iOS build test are waiting for approval to download
-the iOS 27 Simulator runtime and the Rust iOS targets. Sections marked **(pending)** get filled in after that.
+Status: 2026-10-10. Prototype in this repo, verified in the iOS 27 Simulator (iPhone 18 Pro, iPad Pro 11-inch M5)
+and against the hub. Screenshots are in `docs/shots/` (§11).
 
 ## 1. Recommendation
 
@@ -24,11 +24,12 @@ Why:
 - **iOS networking should be the system's.** `URLSessionWebSocketTask` and Network.framework handle cellular
   bring-up, VPN-on-demand, proxies, path changes and ATS. Apple documents that plain BSD sockets, which is what a
   Rust tokio/tungstenite stack uses, don't get these. So even a Rust core would want Swift to own the socket.
-- **GPUI on iOS is not available.** The pinned GPUI is crates.io 0.2.2 (2025-10-22), which has no iOS platform
-  module. Upstream, `gpui_ios` is an unmerged PR (zed-industries/zed#63068, opened 2026-08-22, merge state "blocked")
-  that leaves out momentum scrolling, edit menus and keyboard accessories. Only the groundwork merged (#64990, a
-  shared Metal renderer and dispatcher, 2026-09-30). Building on it means tracking an unmerged fork and writing the
-  iOS text input, IME, dictation and scrolling physics ourselves.
+- **GPUI on iOS exists and works, but not for us yet** (full findings in §1a). Zedra ships a GPUI app on the App
+  Store from its own Zed fork, and upstream has an unmerged `gpui_ios` PR that builds and runs in the simulator.
+  But the desktop pins crates.io gpui 0.2.2 and gpui-component 0.5.0. Sharing its UI with iOS would first mean
+  moving the desktop to current GPUI (603 commits on `crates/gpui` since 0.2.2, a split into platform crates, API
+  changes; gpui-component is at 0.7.1 on `gpui-pre` 0.3.8), then onto an unmerged backend. That backend exposes
+  next to no accessibility tree and leaves keyboard avoidance and edit menus to the app.
 - **A WKWebView wrapper of the web page is the fastest path, but a weaker app.** The page already has a phone
   layout and dictation over getUserMedia. The drawbacks:
   - The JS is suspended in the background, and every return reloads or resnapshots in a web view.
@@ -45,9 +46,55 @@ Why:
 |---|---|---|---|---|---|---|
 | **SwiftUI + UIKit, Swift protocol** | best | fixtures only | native, best | system sockets, APNs | M | low (one Swift app) |
 | SwiftUI over a Rust core (UniFFI) | best (UI is Swift) | proto + reducer, after a desktop refactor | native | Rust sockets lose iOS network behaviour, or Swift owns the socket anyway | M–L | FFI + xcframework build in CI |
-| GPUI on iOS | unknown; no momentum scroll yet | full | IME/dictation to write | to write | L+, blocked upstream | track an unmerged fork |
+| GPUI on iOS (zed#63068 / Zedra fork) | runs; fling present; no keyboard avoidance | full UI, after a desktop migration off 0.2.2 | typing, accents, IME marked text work; dictation and edit menus partial | to write | L+ (desktop migration + unmerged backend) | track an unmerged backend; near-empty accessibility tree |
 | WKWebView of the web page | OK at best | none (shares with web) | web-grade | JS suspended, reload | S | low, but web limits stay |
 | React Native | good with FlashList | with web (TS) only | modules | modules | L | third UI stack |
+
+## 1a. GPUI on iOS: what exists (searched 2026-10-10) and what was tried
+
+Projects found on GitHub (searches: gpui ios, gpui_ios, gpui-mobile, gpui uikit, forks of zed with `crates/gpui_ios`):
+
+| project | what | state | license |
+|---|---|---|---|
+| **deltaqdev/zedra** (240★) | Mobile remote for AI coding agents; GPUI UI. **On the App Store and Google Play.** | Uses `vendor/zed` = tanlethanh/zed `feat/gpui-mobile`: `crates/gpui_ios` is about 428 KB of source (UITextInput with marked text, `insertDictationResult`, keyboard accessory, touch fling), plus gpui_android and gpui_wgpu. The fork is 115 commits ahead and **2,757 behind** zed main (merge base 2026-05-08). | MIT |
+| **zed-industries/zed#63068** `gpui_ios` | The upstream version of that backend ("does not include Delta-specific UI", i.e. Zedra's). UIKit scene/window, CoreText, Metal, safe area and keyboard insets, native text input, Keychain, touch + direct-drag scrolling. | Open, merge state "blocked"; prerequisite #64990 merged 2026-09-30. Explicitly leaves out custom momentum, edit menus and keyboard accessories. | Apache-2.0 |
+| itsbalamurali/gpui-mobile (413★) | iOS (wgpu/Metal) + Android platform crate; claims momentum scrolling and keyboard support; Flutter-like plugin features. | Pins zed rev `5688167` (2026-04-14). | repo: AGPL-3.0; Cargo: GPL/AGPL/Apache-2.0 |
+| Glass-HQ/gpui (138★) | GPUI fork with an iOS host shell (`cargo gpui run ios`). | Last push 2026-05-16. | — |
+| maddada/Ghostex (910★) | Agent workspace (GPUI desktop). **Its shipped mobile app is React Native (Expo)**. `apps/gpui-mobile-poc` is a proof of concept: the desktop's GPUI chat transcript renderer drawn inside an RN screen, with a native composer below, on a vendored gpui-mobile. | PoC | — |
+
+**Built and run here:** zed#63068's branch (shallow clone in `vendor-probe/zed-gpui-ios`, not committed).
+- The example build script only runs `cargo build`, copies the binary into an .app and ad-hoc signs it.
+- Needed: zed's pinned toolchain (Rust 1.98.1, auto-installed by rustup), the `aarch64-apple-ios-sim` target, and
+  `--features gpui_platform/runtime_shaders`. Without that feature the build needs Apple's separate Metal Toolchain
+  download.
+- First build ~5 min, target dir 2.1 GB.
+- I replaced the example with a probe (`vendor-probe/gpui_ios_probe_example.rs`): GPUI's own `TextInput` (from
+  `examples/input.rs`, with IME marked text) above a 2,000-row `uniform_list`.
+- Results, from XCUITest on the iPhone 18 Pro simulator (`testGPUIProbe`, `testNativeFlickReference`):
+  - Renders, at the right safe-area insets. Taps work: Send clears the input and the counter updates.
+  - A tap on the input brings up the **system keyboard**. Typing "Hello wörld, café" works, including accents.
+  - The list **does not move out of the keyboard's way**: content stays under it. That is the app's job, done by
+    hand.
+  - Fast flick: the list is still moving 0.15–0.75 s after release, so there is a fling. A native UIKit list
+    (Settings) under the same flick is also still moving then. Flicks travelled about 10–22 rows. Fling quality
+    against UIScrollView (deceleration curve, rubber-banding, scroll-to-top tap) still needs a device check.
+  - **Accessibility:** with the keyboard down, XCUITest sees about 5 elements for the whole GPUI window. VoiceOver,
+    Voice Control and UI tests get next to nothing; text is pixels to the system.
+  - API drift seen right away: `flex_grow()` takes an argument upstream and none in 0.2.2.
+  - Screenshots: `docs/shots/gpui-ios-probe.png`, `gpui-probe-strip.png` (launch, two flicks, typing).
+
+**Judgement.** GPUI on iOS is real: Zedra proves it in production on its own fork, and the upstream PR runs.
+- A shared GPUI UI would mean, in order:
+  1. Migrate the desktop from gpui 0.2.2 / gpui-component 0.5.0 to current GPUI. That is a project of its own;
+     gpui-component's iOS behaviour is untested.
+  2. Adopt an unmerged backend: the PR, or Zedra's fork, which is 2,757 commits behind main.
+  3. Own the iOS polish ourselves: keyboard avoidance, edit menus, dictation UX, accessibility, and fling tuning.
+- So it does not change the recommendation now. The recommendation changes when (a) `gpui_ios` merges upstream and
+  (b) the desktop is on current GPUI.
+- At that point the cheapest step is Ghostex's hybrid: **the GPUI feed renderer embedded as one view inside the
+  native app**, with the native composer, keyboard, dictation and navigation kept. Desktop and phone then share the
+  transcript (the costliest UI to build twice) without giving GPUI the parts iOS does best.
+- The Swift protocol layer and the window-shape layout rule stay valid either way.
 
 ## 2. Orientation locks (one universal app)
 
@@ -65,9 +112,33 @@ Why:
     `NavigationSplitView`, which collapses to one column below regular width, so that already works.
   - App Store risk: the console says "Support for all orientations will soon be required". If review starts to
     enforce it, the fallback is a letterboxed landscape layout, or accepting portrait on iPad.
-- Simulator verification **(pending runtime)**: launch on an iPhone and an iPad, take screenshots, and run
-  `-probeRotate 1`, which makes the app call `requestGeometryUpdate` with the forbidden orientation and log whether
-  it is refused. The physical-rotation behaviour (Device → Rotate) also gets checked.
+**Layout rule (user decision, 2026-10-10): the layout follows the window's shape, not the device.**
+
+- Wide (landscape, width ≥ 700 pt) → the desktop/iPad layout (`NavigationSplitView`: tasks beside the chat).
+- Narrow or portrait (an iPad in portrait, Slide Over, a narrow split or window, later a narrow desktop window) →
+  the phone layout (`NavigationStack`: tasks → chat; the design agent's phone design).
+- The iPad landscape lock is therefore best-effort: whatever shape the system hands us renders correctly.
+- iPhone stays portrait-only. If landscape ever shows anyway, a "Rotate to portrait" screen.
+- Implemented as one pure function at the root, `layoutFor(size:idiom:)` in `UI/RootView.swift`, re-evaluated on
+  every size change.
+
+**Verified in the iOS 27 Simulator** (XCUITest `testOrientationAndLayout`, `testWindowedNarrow`, plus the app's
+`-probeRotate 1` probe and its `layout-state` label):
+
+| device | what was done | result |
+|---|---|---|
+| iPhone 18 Pro | device rotated portrait → landscapeLeft → landscapeRight → upside down | stays **portrait**, 402×778, phone layout every time; the rotate-back screen never needed |
+| iPhone 18 Pro | `requestGeometryUpdate(landscapeRight)` | refused: "None of the requested orientations are supported… Supported: portrait" |
+| iPad Pro 11" | device rotated through all four | stays **landscape** (landscapeRight/Left), wide layout, 1210×782–804 |
+| iPad Pro 11" | `requestGeometryUpdate(portrait)` | refused: "Supported: landscapeLeft, landscapeRight" |
+| iPad Pro 11" | window corner dragged left (iPadOS 27 windowing) | **window resized to 375×782 → phone layout**, although `UIRequiresFullScreen = YES` |
+
+The last row confirms TN3192: with the iOS 27 SDK, `UIRequiresFullScreen` no longer prevents resizing, so the
+window-shape rule is what keeps the iPad right. Plan: keep the per-idiom orientation keys (the lock held in full
+screen), drop `UIRequiresFullScreen` before the App Store (deprecated, and the ~ipad landscape-only keys will be
+flagged "support all orientations"). If review insists on all orientations, declare them; the layout rule already
+renders an iPad in portrait as the phone layout. Screenshots: `docs/shots/iphone-device-*.png`,
+`ipad-device-*.png`, `ipad-narrow-window.png`.
 
 ## 3. Reaching the engine from a device
 
@@ -94,12 +165,13 @@ via `?key=`), every request gets a 401 "locked". What the client needs:
    endpoint, workspace and token. The token is shown once on the page and never typed.
 2. **Headers.** For the WebSocket: `Origin: https://chat.tunnel.reframe.sh` (the tunnel requires its own origin
    and rewrites it to the upstream one) and `Cookie: reframe_tunnel_key=…`. The same cookie goes on `/blob` GETs.
-3. **Gap found in `~/.reframe/local/tunnel.ts`.** `relayWebSocket` forwards only `origin`, `cookie`, `user-agent`
-   and the subprotocols to the upstream socket, so an `Authorization: Bearer <client token>` on `/engine/ws` would be
-   dropped at the tunnel. Either the tunnel forwards `authorization` on WebSocket upgrades (a one-line change; HTTP
-   requests already pass it), or the engine also accepts the token as a subprotocol (`optchat-bearer.<token>`, the
-   pattern ChatGPT's dictation endpoint uses). Recommendation: forward `authorization`, and let the engine token
-   replace the tunnel's access key for native clients later, so a phone holds one secret, not two.
+3. **Gap found in `~/.reframe/local/tunnel.ts`, now handled engine-side.** `relayWebSocket` forwards only
+   `origin`, `cookie`, `user-agent` and the subprotocols, so an `Authorization: Bearer` on `/engine/ws` is dropped at
+   the tunnel. The engine (`lib/routes.ts tokenOf`) now also accepts the token as the subprotocol
+   `optchat.token.<token>` and answers with `optchat`. The prototype sends it that way
+   (`Sec-WebSocket-Protocol: optchat, optchat.token.<t>`), so the same client works direct and through the tunnel.
+   Still open: let the engine token replace the tunnel's access key for native clients, so a phone holds one secret,
+   not two.
 4. **Reconnect.** Same rule as the page and GPUI: 0.4 s doubling to 5 s. In addition, reconnect at once on an
    `NWPathMonitor` change (Wi-Fi to cellular) and when the scene becomes active. A 15 s ping notices a half-open
    socket, since iOS doesn't always report a dead connection after a network switch. Every reconnect resnapshots;
@@ -131,6 +203,11 @@ What is shared with the desktop:
 - **The client model.** spec-workspaces §4 (engines, workspaces, tokens, notices, switching) is implemented the same
   way: the same states, the same names, the same keyboard-free flows.
 - **Not shared:** rendering and the reducer code. The reducer is ~150 lines per client.
+- **Measured:** `optchat-mac-gpui/crates/proto` builds unchanged for `aarch64-apple-ios-sim` (12 s) and
+  `aarch64-apple-ios` (6 s) (`cargo build -p optchat-proto --release --target …`, a 5.7 MB rlib). So a shared Rust
+  core is technically cheap at the proto level. The cost is in the rest: UniFFI, the xcframework, extracting the
+  client and state code out of the GPUI app, and the socket. This is why it's deferred, not rejected; if the GPUI
+  feed is ever embedded (§1a), proto comes along for free.
 
 The prototype's `OptChat/Core` is that package's seed. `tools/probe` compiles the same files for macOS.
 
@@ -217,8 +294,10 @@ Notices (spec §3) are the payload.
 
 ## 9. Phases and verification
 
-0. **Prototype (this repo).** Universal app; locks; connect; task list; chat; send → reply.
-   - Verified on macOS via the probe. Simulator screenshots on iPhone and iPad are **(pending runtime)**.
+0. **Prototype (this repo).** Universal app; locks plus the window-shape layout; connect (page `/ws?db=` or
+   engine `/engine/ws` + token); task list; chat; send → reply.
+   - Protocol verified on macOS via the probe. Layouts and locks verified in the Simulator on iPhone and iPad (§2).
+   - A Simulator send needs an engine workspace token (§11).
 1. **OptChatKit + fixtures.** Move `Core` into a Swift package with XCTest. Capture fixtures from a test workspace;
    add the same fixture tests to `optchat-proto`.
    - Verify: both suites pass; the probe runs in CI against a test workspace.
@@ -254,3 +333,27 @@ Notices (spec §3) are the payload.
   before Send on remote engines.
 - **No background sockets.** Notices must come by push; without the APNs phase the phone only knows what happened
   when it is opened.
+
+## 11. Prototype: how to run, and what is verified
+
+- `./build.sh` builds the universal app for the Simulator.
+- Install and launch:
+  `xcrun simctl install <dev> build/dd/Build/Products/Debug-iphonesimulator/OptChat.app`, then
+  `xcrun simctl launch <dev> com.reframe.optchat.ios -ws test-<id>`, with `SIMCTL_CHILD_OPTCHAT_TOKEN=<token>` set
+  once to seed the Keychain. The older page socket: `-db t<id>`.
+- The app refuses `main` and anything without a test workspace.
+- UI tests: `TEST_RUNNER_SHOTS=$PWD/docs/shots TEST_RUNNER_OPTCHAT_ARGS="-ws test-<id>" TEST_RUNNER_OPTCHAT_TOKEN=…
+  [TEST_RUNNER_SEND_TASK=n TEST_RUNNER_SEND_TEXT=…] [TEST_RUNNER_GPUI_PROBE=1] [TEST_RUNNER_WINDOWED=1]
+  xcodebuild -project OptChat.xcodeproj -scheme OptChat -destination id=<udid> test`.
+- Protocol probe (macOS, the app's own `Core`): `tools/probe/run.sh -db t<id>` or `-ws test-<id>` with
+  `OPTCHAT_TOKEN` in the environment (never written to the login keychain).
+
+Screenshots (`docs/shots/`):
+
+| file | shows |
+|---|---|
+| `iphone-tasks.png` | iPhone, phone layout, rotation probe refused |
+| `iphone-device-landscapeLeft.png` (… `-portrait`, `-landscapeRight`, `-upsideDown`) | iPhone rotated: app stays portrait |
+| `ipad-device-portrait.png` (… `-landscapeLeft`, `-landscapeRight`, `-upsideDown`) | iPad rotated: app stays landscape, wide layout |
+| `ipad-narrow-window.png` | iPad window resized to 375 pt: phone layout |
+| `gpui-ios-probe.png`, `gpui-probe-strip.png` | GPUI on iOS (zed#63068): launch, flicks, typing |
