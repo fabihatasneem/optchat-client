@@ -2,45 +2,10 @@
 //! an equal of the browser and the phone: one websocket, everything in sync. The connection runs on its own tokio
 //! runtime; this process draws the UI with GPUI and never blocks its thread on I/O.
 #![recursion_limit = "256"] // the test state's json! literal
-mod client;
-mod composer;
-mod dialogs;
-mod feed;
-mod fmt;
-mod kit;
-mod markdown;
-mod media;
-mod mic;
-mod notices_view;
-mod testcmd;
-mod tokens;
-mod workspaces;
-mod panels;
-mod state;
-mod statusbar;
-mod tabs;
-mod tasks_view;
-mod theme;
-mod ui;
-mod workspace;
-
 use gpui::*;
-use std::sync::OnceLock;
-
-pub static LAUNCH: OnceLock<std::time::Instant> = OnceLock::new();
-
-mod assets {
-    include!(concat!(env!("OUT_DIR"), "/assets.rs"));
-}
-struct Assets;
-impl AssetSource for Assets {
-    fn load(&self, path: &str) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
-        Ok(assets::ASSETS.iter().find(|(p, _)| *p == path).map(|(_, b)| std::borrow::Cow::Borrowed(*b)))
-    }
-    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        Ok(assets::ASSETS.iter().filter(|(p, _)| p.starts_with(path)).map(|(p, _)| SharedString::from(*p)).collect())
-    }
-}
+use optchat_ui::*;
+use optchat_ui::{assets, Assets};
+use optchat_client::LAUNCH;
 
 actions!(app, [Quit, Hide, HideOthers, ShowAll]);
 
@@ -87,7 +52,11 @@ fn main() {
 
     gpui_platform::application().with_assets(Assets).run(move |cx: &mut App| {
         kit::init(cx);
+        let t0 = std::time::Instant::now();
         ui::register_fonts(cx, assets::ASSETS);
+        if std::env::var("OPTCHAT_TIMING").is_ok() {
+            eprintln!("fonts registered in {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
+        }
         ui::set_executor(cx.background_executor().clone());
         let prefs: state::Prefs = std::fs::read_to_string(&prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         theme::init(cx, prefs.theme.clone(), prefs.follow_system, cx.window_appearance());

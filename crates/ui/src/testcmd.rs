@@ -33,9 +33,17 @@ pub fn is_mouse(c: &Value) -> bool {
 }
 /// our window's NSView (as an address, to use outside the app's update: AppKit hands the events to GPUI, which must
 /// not be borrowed then)
+#[cfg(target_os = "macos")]
 pub fn view_of(window: &Window) -> Option<usize> {
     native::view(window).map(|v| v as usize)
 }
+/// (platform module: native test input is AppKit-only)
+#[cfg(not(target_os = "macos"))]
+pub fn view_of(_window: &Window) -> Option<usize> {
+    None
+}
+#[cfg(not(target_os = "macos"))]
+pub fn mouse_input(_c: &Value, _view: usize) {}
 
 fn key_of(k: &str) -> Option<Keystroke> {
     // Computer Use names (cmd+shift+p, Return, Escape) → GPUI's (cmd-shift-p, enter, escape)
@@ -75,6 +83,7 @@ fn key_of(k: &str) -> Option<Keystroke> {
     Some(ks)
 }
 
+#[cfg(target_os = "macos")]
 /// Native mouse events (NSEvent) handed to our own window's view, as AppKit would: GPUI's real input path
 /// (handle_view_event → hit test of the last frame). Our window only, never another app.
 mod native {
@@ -214,6 +223,7 @@ mod native {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn mouse(v: *mut objc::runtime::Object, x: f32, y: f32, button: MouseButton, count: usize) {
     let (down, up) = match button {
         MouseButton::Right => (3, 4),
@@ -235,6 +245,7 @@ fn mouse(v: *mut objc::runtime::Object, x: f32, y: f32, button: MouseButton, cou
 }
 
 /// native mouse input, called outside any app update (see view_of)
+#[cfg(target_os = "macos")]
 pub fn mouse_input(c: &Value, view: usize) {
     let v = view as *mut objc::runtime::Object;
     let f = |k: &str| c[k].as_f64().unwrap_or(0.0) as f32;

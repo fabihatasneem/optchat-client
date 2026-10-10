@@ -7,7 +7,7 @@ import { ROOT, sleep } from "./cua.ts";
 export const HUB = Deno.env.get("OPTCHAT_HUB") ?? "https://chat.reframe.dev";
 /** the scoped test tokens ({name: token}, 0600, git-ignored): the only workspaces tests may use */
 export const TOKENS = `${ROOT}/data/test-tokens.json`;
-export const TEST_WORKSPACES = ["test-gpui-c", "test-gpui-d"];
+export const TEST_WORKSPACES = ["test-gpui-e", "test-gpui-f"];
 
 export function checkTestDb(db: string) {
   if (!TEST_WORKSPACES.includes(db)) throw new Error(`not a test workspace: ${db} (tests never use the live chat)`);

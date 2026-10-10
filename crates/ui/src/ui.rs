@@ -528,18 +528,7 @@ impl Render for TooltipView {
     }
 }
 
-// ---- timers: gpui's background executor (set once at launch) ----------------------------------------------------------
-thread_local!(static EXEC: std::cell::RefCell<Option<BackgroundExecutor>> = const { std::cell::RefCell::new(None) });
-pub fn set_executor(e: BackgroundExecutor) {
-    EXEC.with(|x| *x.borrow_mut() = Some(e));
-}
-pub struct Timer;
-impl Timer {
-    /// a future that completes after `d` (create it on the main thread)
-    pub fn after(d: Duration) -> Task<()> {
-        EXEC.with(|x| x.borrow().as_ref().expect("executor set at launch").timer(d))
-    }
-}
+pub use optchat_client::timer::{set_executor, Timer};
 
 // ---- fonts: bundled (IBM Plex Sans, Lilex; OFL, assets/fonts), registered at launch; named system fonts are not
 // relied on (they do not resolve on iOS, and the current GPUI drew no text with them on macOS) ----------------------

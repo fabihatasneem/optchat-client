@@ -9,7 +9,7 @@
 import { App, SHOTS, testDb } from "./lib/app.ts";
 import { sleep } from "./lib/cua.ts";
 const t0 = performance.now();
-const a = await App.launch({ db: testDb("test-gpui-c"), env: { OPTCHAT_TEST_HOOKS: "1", OPTCHAT_TIMING: "1" } });
+const a = await App.launch({ db: testDb("test-gpui-e"), env: { OPTCHAT_TEST_HOOKS: "1", OPTCHAT_TIMING: "1" } });
 const wall = performance.now() - t0;
 const st = () => a.state();
 const out: Record<string, unknown> = {};

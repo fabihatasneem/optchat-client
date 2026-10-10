@@ -5,7 +5,7 @@ import { App, check, failed, testDb } from "./lib/app.ts";
 import { sleep } from "./lib/cua.ts";
 import { Peer } from "./lib/hub.ts";
 
-const db = testDb("test-gpui-d");
+const db = testDb("test-gpui-f");
 const peer = await Peer.connect(db, 0);
 await peer.useHaiku(0);
 const a = await App.launch({ db, env: { OPTCHAT_TEST_HOOKS: "1" } });
