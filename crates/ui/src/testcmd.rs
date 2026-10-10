@@ -333,23 +333,28 @@ pub fn run(w: &mut Workspace, c: &Value, window: &mut Window, cx: &mut Context<W
             w.pick(v, cx);
         }
         "addEngine" => {
-            // the panel's inline form, then its Add button's handler
+            // the panel's Add engine form (a token, an optional name), then its Add button's handler
             crate::workspaces::open_add_engine(w, window, cx);
-            let (ep, name) = (str_("endpoint"), str_("name"));
+            let (token, name) = (str_("token"), str_("name"));
             w.ws_panel.update(cx, |p, cx| {
-                p.set_add_fields(&ep, &name, window, cx);
+                p.set_add_fields(&token, &name, window, cx);
                 p.add(cx);
             });
         }
+        "addEndpoint" => {
+            // an engine by its address alone (older per-workspace tokens; tests on real workspaces)
+            let (ep, name) = (str_("endpoint"), str_("name"));
+            let _ = w.state.update(cx, |s, cx| s.add_engine(&ep, &name, cx));
+            crate::workspaces::open_panel(w, cx);
+        }
         "connect" => {
-            // the panel's Connect… row (its token from the test file), then its Connect button's handler
+            // a workspace with its own token (OPTCHAT_TEST_TOKENS {name: token}): the older per-workspace path
             let ep = endpoint(w, c, cx);
             let ws = str_("ws");
+            let m: std::collections::BTreeMap<String, String> = std::env::var("OPTCHAT_TEST_TOKENS").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+            let t = m.get(&ws).cloned().unwrap_or_default();
             crate::workspaces::open_panel(w, cx);
-            w.ws_panel.update(cx, |p, cx| {
-                p.start_connect(&ep, &ws, window, cx);
-                p.connect(cx);
-            });
+            let _ = w.state.update(cx, |s, cx| s.connect_ws(&ep, &ws, &t, cx));
         }
         "switch" => {
             let key = crate::client::ws_key(&endpoint(w, c, cx), &str_("ws"));

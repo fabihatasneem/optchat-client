@@ -419,7 +419,7 @@ fn card(w: &mut Workspace, dr: &str, dict: bool, cx: &mut Context<Workspace>) ->
         .border_1()
         .border_color(k.line2)
         .cursor_pointer()
-        .child(div().flex().items_center().gap(px(6.)).text_size(px(11.5)).text_color(if dict { k.red } else { k.muted }).when(dict, |d| d.child(pulse("ph-rec", dot(k.red, 7.)))).child(if dict { "Listening".to_string() } else { to }))
+        .child(div().flex().items_center().gap(px(6.)).text_size(px(11.5)).text_color(if dict { k.red } else { k.muted }).when(dict, |d| d.child(pulse("ph-rec", dot(k.red, 7.)))).child(if dict { if s.dict.state == "finishing" { "Finishing…".to_string() } else { "Listening".to_string() } } else { to }))
         .child(div().mt(px(3.)).text_size(px(14.5)).line_height(px(20.)).text_color(k.text).max_h(px(84.)).overflow_hidden().child(if shown.is_empty() { "…".to_string() } else { shown }))
         .child(probe("phone.card"))
         .on_click(cx.listener(|w, _, window, cx| {

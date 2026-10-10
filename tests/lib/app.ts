@@ -33,6 +33,8 @@ export class App {
     for (const w of o.also ?? []) checkTestDb(w);
     try { Deno.removeSync(me.probes); } catch { /* none */ }
     try { Deno.removeSync(`${me.probes}.state.json`); } catch { /* none */ }
+    // a command left over from an app that was gone before it read it (a "quit") would end this one at once
+    try { Deno.removeSync(`${me.probes}.cmd`); } catch { /* none */ }
     const conn = o.bare ? {} : { OPTCHAT_ENGINE: HUB, OPTCHAT_ENGINE_NAME: "reframe.dev", OPTCHAT_CONNECT: [me.db, ...(o.also ?? [])].join(",") };
     const hl = o.headless || Deno.env.get("OPTCHAT_E2E_HEADLESS") ? { OPTCHAT_HEADLESS: "1", OPTCHAT_TEST_HOOKS: "1" } : {};
     // never the engine's real local client token: a test names its own file (or none)

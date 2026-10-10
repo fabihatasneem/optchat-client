@@ -132,6 +132,26 @@ try {
   await a.waitFor(() => !ph().dictating, 8000, "stopped");
   await press(80); // ^ sends what was said
   await a.waitFor(() => ph().draft === "", 5000, "sent");
+  // the final text never comes (the engine hangs after stop): a second ✕ ends the dictation on screen anyway
+  await fetch(`http://127.0.0.1:${PORT}/test/stt-hang?on=1`).then((r) => r.text());
+  await press(700);
+  await a.waitFor(() => ph().dictating, 5000, "dictating again");
+  await sleep(1200);
+  await press(80);
+  await sleep(1500);
+  check(ph().dictating, "a ✕ with no final text coming: still finishing (waiting for it)");
+  await press(80);
+  await a.waitFor(() => !ph().dictating, 3000, "a second ✕ ends it");
+  check(true, "a second ✕ ends a dictation whose final text never comes");
+  await fetch(`http://127.0.0.1:${PORT}/test/stt-hang?on=0`).then((r) => r.text());
+  if (ph().draft) {
+    await a.click("phone.card");
+    await a.waitFor(() => ph().expanded, 3000, "edit");
+    await a.key("cmd+a");
+    await a.key("BackSpace");
+    await a.click("feed", { dy: 40 });
+  }
+  await a.waitFor(() => ph().draft === "", 5000, "sent");
   await press(80);
   await a.waitFor(() => ph().expanded, 3000, "open again");
   await press(2200);

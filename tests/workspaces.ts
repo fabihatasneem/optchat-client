@@ -1,3 +1,5 @@
+// NOTE (spec-workspaces §6): the per-workspace Connect… UI this suite drives is gone; it needs an oc1 engine token
+// for test workspaces to be rewritten (tests/panel.ts covers the new flow against the fake engine).
 // Phase 4 (spec-workspaces §4) against the real engine: needs test workspaces and their tokens (OPTCHAT_TEST_DB /
 // data/test-tokens.json; the names below are the last ones given). The panel UI alone: tests/panel.ts (fake engine).
 // Engines and workspaces in the app. Through the UI only (Computer Use on probes):

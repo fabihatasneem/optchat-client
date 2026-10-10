@@ -26,7 +26,7 @@ fn test_bootstrap(prefs_path: &str) {
     let mut prefs: state::Prefs = std::fs::read_to_string(prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     if !prefs.engines.iter().any(|e| e.endpoint == endpoint) {
         let name = std::env::var("OPTCHAT_ENGINE_NAME").unwrap_or_else(|_| endpoint.split("://").nth(1).unwrap_or("engine").to_string());
-        prefs.engines.push(client::EngineCfg { endpoint: endpoint.clone(), name });
+        prefs.engines.push(client::EngineCfg { endpoint: endpoint.clone(), name, ..Default::default() });
     }
     let tokens: std::collections::BTreeMap<String, String> = std::env::var("OPTCHAT_TEST_TOKENS").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     for ws in std::env::var("OPTCHAT_CONNECT").unwrap_or_default().split(',').map(str::trim).filter(|w| !w.is_empty()) {
@@ -54,6 +54,10 @@ fn main() {
         kit::init(cx);
         let t0 = std::time::Instant::now();
         ui::register_fonts(cx, assets::ASSETS);
+        // tests: a QR "scanner" returning OPTCHAT_TEST_QR (the iOS shell installs the camera one)
+        if let Ok(q) = std::env::var("OPTCHAT_TEST_QR") {
+            platform::install(cx, std::rc::Rc::new(platform::TestScanner(q)));
+        }
         if std::env::var("OPTCHAT_TIMING").is_ok() {
             eprintln!("fonts registered in {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
         }

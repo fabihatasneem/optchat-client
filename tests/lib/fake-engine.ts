@@ -11,6 +11,13 @@ const big = Deno.args.includes("--big");
 const port = Number(Deno.args[0] ?? 18790);
 const list = Deno.args.slice(1).filter((a) => !a.startsWith("--")).map((a, i) => ({ name: a.split(":")[0], running: !a.endsWith(":off"), ...(i === 0 ? { default: true } : {}) }));
 const sockets = new Set<WebSocket>();
+let sttHang = false;
+// spec-workspaces §6 tokens: oc1.<b64url {v,urls,id}>.<secret>; this engine's oc1 tokens reach `scope`
+// (--scope a,b; default every workspace), changed live by GET /test/scope?set=a,b
+const scopeArg = Deno.args.find((a) => a.startsWith("--scope="));
+let scope = new Set<string>(scopeArg ? scopeArg.slice(8).split(",").filter(Boolean) : list.map((w) => w.name));
+const subsOf = new Map<WebSocket, Set<string>>();
+const reaches = (token: string | undefined, ws: string) => !!token && token !== "bad" && (!token.startsWith("oc1.") || (token.endsWith(".s3cret") && scope.has(ws)));
 const settings = { model: "claude-haiku-5-5", effort: "low", compactorModel: "claude-haiku-5-5", compactorEffort: "low", cwd: "/tmp", tools: { core: true, computer: false, mcp: false }, computerApproval: "ask", viewBudget: 128000, instructions: "", depth: 2 };
 const now = new Date().toISOString();
 const notices = (ws: string) => [
@@ -64,10 +71,20 @@ const snapshot = (ws: string, task0: number) => {
 Deno.serve({ hostname: "127.0.0.1", port, onListen: () => console.log(`fake engine on ${port}`) }, (req) => {
   const url = new URL(req.url);
   if (url.pathname === "/engine/workspaces") return Response.json(list);
+  if (url.pathname === "/test/scope") {
+    const next = new Set((url.searchParams.get("set") ?? "").split(",").filter(Boolean));
+    for (const [sock, subs] of subsOf) {
+      for (const ws of [...subs]) if (!next.has(ws) && scope.has(ws)) { subs.delete(ws); sock.send(JSON.stringify({ type: "disconnected", ws, reason: "removed from token" })); }
+    }
+    scope = next;
+    for (const sock of sockets) sock.send(JSON.stringify({ type: "workspaces", workspaces: list }));
+    return new Response("ok");
+  }
   if (url.pathname === "/test/revoke") {
     for (const s of sockets) s.send(JSON.stringify({ type: "disconnected", ws: url.searchParams.get("ws"), reason: "token revoked" }));
     return new Response("ok");
   }
+  if (url.pathname === "/test/stt-hang") { sttHang = url.searchParams.get("on") === "1"; return new Response("ok"); }
   if (url.pathname === "/engine/stt") {
     // dictation: ready, then words while audio comes in, done on stop (a fixed sentence)
     const { socket, response } = Deno.upgradeWebSocket(req);
@@ -77,6 +94,7 @@ Deno.serve({ hostname: "127.0.0.1", port, onListen: () => console.log(`fake engi
     socket.onmessage = (e) => {
       if (typeof e.data === "string") {
         const m = JSON.parse(e.data);
+        if (m.type === "stop" && sttHang) return; // a final text that never comes
         if (m.type === "stop") { socket.send(JSON.stringify({ type: "done", text: words.slice(0, Math.max(n, 3)).join(" "), service: "fake", audioMs: chunks * 100 })); socket.close(); }
         return;
       }
@@ -88,16 +106,17 @@ Deno.serve({ hostname: "127.0.0.1", port, onListen: () => console.log(`fake engi
   if (url.pathname !== "/engine/ws") return new Response("not found", { status: 404 });
   const { socket, response } = Deno.upgradeWebSocket(req);
   sockets.add(socket);
-  socket.onclose = () => sockets.delete(socket);
+  subsOf.set(socket, new Set());
+  socket.onclose = () => { sockets.delete(socket); subsOf.delete(socket); };
   const send = (m: unknown) => { try { socket.send(JSON.stringify(m)); } catch { /* closed */ } };
   socket.onopen = () => send({ type: "workspaces", workspaces: list });
   socket.onmessage = (e) => {
     const m = JSON.parse(String(e.data));
     const ws = m.ws;
-    if (m.type === "connect" && (!m.token || m.token === "bad")) {
+    if (m.type === "connect" && !reaches(m.token, ws)) {
       send({ type: "error", ws, message: `no token that reaches workspace ${ws}` });
     } else if (m.type === "connect" || m.type === "open") {
-      if (m.type === "connect") send({ type: "hello", ws, version: "fake", build: "fake", running: true });
+      if (m.type === "connect") { subsOf.get(socket)?.add(ws); send({ type: "hello", ws, version: "fake", build: "fake", running: true }); }
       send(snapshot(ws, m.task ?? 0));
     } else if (m.type === "disconnect") send({ type: "disconnected", ws });
     else if (m.type === "rpc") send({ type: "rpc", ws, id: m.id, result: m.method === "notices" ? notices(ws).map((n) => ({ ...n, readAt: read.has(n.id) ? now : null })) : m.method === "log.range" ? (logs[m.params?.task ?? 0] ?? []).filter((e) => e.i >= (m.params?.from ?? 0) && e.i < (m.params?.to ?? 1e9)) : [] });

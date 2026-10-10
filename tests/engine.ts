@@ -17,7 +17,7 @@ let peer: Peer | null = null;
 
 try {
   check(st().ready === false && (st().connected ?? []).length === 0, "a fresh app: no engine, no workspace");
-  await a.cmd({ op: "addEngine", endpoint: HUB.replace(/^https:\/\//, ""), name: "reframe.dev" });
+  await a.cmd({ op: "addEndpoint", endpoint: HUB.replace(/^https:\/\//, ""), name: "reframe.dev" });
   await a.waitFor(() => st().engines?.[0]?.online === true && st().engines[0].workspaces.length > 0, 12000, "engine listed");
   const listed = (st().engines[0].workspaces as any[]).map((w) => [w.name, w.running] as [string, boolean]);
   check(listed.some(([n, r]) => n === "test-gpui-g" && r) && listed.some(([n, r]) => n === "test-gpui-h" && r), `Add engine: online, ${listed.length} workspaces listed (${listed.filter(([, r]) => !r).length} disabled)`);

@@ -235,6 +235,8 @@ pub struct EngineView {
     pub online: Option<bool>,
     pub workspaces: Vec<WsEntry>,
     pub error: Option<String>,
+    /// token-scoped engines: workspaces the token does not reach (refused; tried again when the list changes)
+    pub out_of_scope: std::collections::HashSet<String>,
 }
 
 pub struct AppState {
@@ -282,6 +284,9 @@ pub struct AppState {
     tx: Option<tokio::sync::mpsc::UnboundedSender<Routed>>,
     _pump: Option<Task<()>>,
     _poll: Option<Task<()>>,
+    /// Add engine in progress (the token's addresses are being tried) and its last error
+    pub adding_engine: bool,
+    pub add_engine_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -314,7 +319,7 @@ impl AppState {
             active: String::new(),
             bg: HashMap::new(),
             meta: BTreeMap::new(),
-            engines: prefs.engines.iter().map(|c| EngineView { cfg: c.clone(), online: None, workspaces: vec![], error: None }).collect(),
+            engines: prefs.engines.iter().map(|c| EngineView { cfg: c.clone(), online: None, workspaces: vec![], error: None, out_of_scope: Default::default() }).collect(),
             conns: vec![],
             notices: vec![],
             notices_loaded: false,
@@ -352,6 +357,8 @@ impl AppState {
             tx: None,
             _pump: None,
             _poll: None,
+            adding_engine: false,
+            add_engine_error: None,
         }
     }
     fn wp(&self) -> WsPrefs {
@@ -385,6 +392,17 @@ impl AppState {
     /// they send: the active workspace's events, the background ones' quietly, batched per frame.
     pub fn start(&mut self, tx: tokio::sync::mpsc::UnboundedSender<Routed>, mut rx: tokio::sync::mpsc::UnboundedReceiver<Routed>, cx: &mut Context<Self>) {
         self.tx = Some(tx);
+        // the local engine on this Mac connects by itself (its local client token reaches every workspace)
+        // (tests: OPTCHAT_LOCAL_ENGINE names a fake local engine instead)
+        let local_ep = std::env::var("OPTCHAT_LOCAL_ENGINE").unwrap_or_else(|_| "https://chat.reframe.dev".into());
+        let local = local_ep.as_str();
+        if crate::tokens::local_token(local).is_some() {
+            match self.prefs.engines.iter_mut().find(|e| e.endpoint == local) {
+                Some(e) => e.auto = true,
+                None => self.prefs.engines.push(EngineCfg { endpoint: local.into(), name: "This Mac".into(), urls: vec![local.into()], auto: true }),
+            }
+            self.engines = self.prefs.engines.iter().map(|c| EngineView { cfg: c.clone(), online: None, workspaces: vec![], error: None, out_of_scope: Default::default() }).collect();
+        }
         let active = self.prefs.active.clone();
         let wp_active = self.wp();
         for c in self.prefs.connections.clone() {
@@ -392,6 +410,11 @@ impl AppState {
             let wp = if Some(&key) == active.as_ref() { wp_active.clone() } else { self.prefs.ws.get(&key).cloned().unwrap_or_default() };
             let token = crate::tokens::get(&key).or_else(|| crate::tokens::local_token(&c.endpoint));
             self.attach_ws(&c.endpoint, &c.ws, wp, token, cx);
+        }
+        for ep in self.engines.iter().filter(|e| e.cfg.auto).map(|e| e.cfg.endpoint.clone()).collect::<Vec<_>>() {
+            if self.engine_token(&ep).is_some() {
+                self.conn_for(&ep);
+            }
         }
         if let Some(a) = active.filter(|a| self.bg.contains_key(a)) {
             self.switch_ws(&a, cx);
@@ -455,7 +478,10 @@ impl AppState {
         let cfg = self.engines.iter().find(|e| e.cfg.endpoint == endpoint)?.cfg.clone();
         let tx = self.tx.clone()?;
         let _g = self.rt.enter();
-        let c = EngineConn::start(cfg, tx);
+        // a token-scoped engine's socket opens with its token: the engine then lists only the token's workspaces
+        // (the local engine's own token goes with each connect instead: a rotated file is picked up per workspace)
+        let socket_token = if cfg.auto { crate::tokens::get(&engine_token_key(endpoint)) } else { None };
+        let c = EngineConn::start(cfg, socket_token, tx);
         self.conns.push(c.clone());
         Some(c)
     }
@@ -468,6 +494,119 @@ impl AppState {
         self.bg.insert(key, WsData::new(hub, wp));
     }
 
+    /// spec-workspaces §6: add an engine with only a token (oc1: it carries the engine's addresses; the first that
+    /// answers wins) and an optional name (else the host it connected through). The token goes to the Keychain;
+    /// every workspace in its scope then connects by itself.
+    pub fn add_engine_token(&mut self, name: &str, token: &str, cx: &mut Context<Self>) {
+        let token = token.trim().to_string();
+        let parsed = match crate::client::parse_engine_token(&token) {
+            Ok(p) => p,
+            Err(e) => {
+                self.add_engine_error = Some(e);
+                cx.notify();
+                return;
+            }
+        };
+        self.adding_engine = true;
+        self.add_engine_error = None;
+        cx.notify();
+        let name = name.trim().to_string();
+        let urls = parsed.urls.clone();
+        let tok = token.clone();
+        let (txr, rxr) = tokio::sync::oneshot::channel();
+        self.rt.spawn(async move {
+            let _ = txr.send(crate::client::pick_url(&urls, &tok).await);
+        });
+        cx.spawn(async move |this, cx| {
+            let r = rxr.await.unwrap_or_else(|_| Err("cancelled".into()));
+            let _ = this.update(cx, move |s, cx| {
+            s.adding_engine = false;
+            let url = match r {
+                Ok(u) => u,
+                Err(e) => {
+                    s.add_engine_error = Some(e);
+                    return;
+                }
+            };
+            if let Some(e) = s.engines.iter().find(|e| e.cfg.endpoint == url) {
+                // the same engine again: the new token replaces the old one
+                let ep = e.cfg.endpoint.clone();
+                s.remove_engine(&ep, cx);
+            }
+            if let Err(e) = crate::tokens::set(&engine_token_key(&url), &token) {
+                s.add_engine_error = Some(e);
+                return;
+            }
+            let host = url.split("://").nth(1).unwrap_or(&url).trim_end_matches('/').to_string();
+            let cfg = EngineCfg { endpoint: url.clone(), name: if name.is_empty() { host } else { name.clone() }, urls: parsed.urls.clone(), auto: true };
+            s.prefs.engines.push(cfg.clone());
+            s.engines.push(EngineView { cfg, online: None, workspaces: vec![], error: None, out_of_scope: Default::default() });
+            s.save_prefs();
+            s.conn_for(&url);
+            cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// the token a token-scoped engine connects its workspaces with: its own (Keychain), else the local engine's
+    pub fn engine_token(&self, endpoint: &str) -> Option<String> {
+        if !self.engines.iter().any(|e| e.cfg.endpoint == endpoint && e.cfg.auto) {
+            return None;
+        }
+        crate::tokens::get(&engine_token_key(endpoint)).or_else(|| crate::tokens::local_token(endpoint))
+    }
+
+    /// a token-scoped engine's list: connect every running workspace not connected yet (the token's scope decides:
+    /// refused ones are out of scope and stay hidden)
+    fn auto_connect(&mut self, endpoint: &str, list: &[WsEntry], cx: &mut Context<Self>) {
+        let Some(token) = self.engine_token(endpoint) else { return };
+        if let Some(ev) = self.engines.iter_mut().find(|e| e.cfg.endpoint == endpoint) {
+            ev.out_of_scope.clear(); // a changed list: try again (a token's scope may have grown)
+        }
+        for w in list.iter().filter(|w| w.running) {
+            let key = ws_key(endpoint, &w.name);
+            if self.meta.contains_key(&key) {
+                continue;
+            }
+            let wp = self.prefs.ws.get(&key).cloned().unwrap_or_default();
+            self.attach_ws(endpoint, &w.name, wp, Some(token.clone()), cx);
+            if self.active.is_empty() || self.prefs.active.as_deref() == Some(key.as_str()) && self.active != key {
+                self.switch_ws(&key, cx);
+            }
+        }
+    }
+
+    /// a token-scoped engine's workspace the token does not reach (refused, or removed from the token): gone
+    fn drop_out_of_scope(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(m) = self.meta.get(key).cloned() else { return };
+        if key == self.active {
+            let next = self.meta.keys().find(|k| *k != key).cloned();
+            match next {
+                Some(n) => self.switch_ws(&n, cx),
+                None => {
+                    let mut d = WsData::new(None, WsPrefs::default());
+                    self.swap_ws(&mut d);
+                    self.active = String::new();
+                    self.bg.insert(key.to_string(), d);
+                    self.feed_rev += 1;
+                    self.open_seq += 1;
+                    cx.emit(StateEvent::WsSwitched);
+                }
+            }
+        }
+        if let Some(d) = self.bg.remove(key) {
+            if let Some(h) = d.hub {
+                h.disconnect();
+            }
+        }
+        self.meta.remove(key);
+        if let Some(ev) = self.engines.iter_mut().find(|e| e.cfg.endpoint == m.endpoint) {
+            ev.out_of_scope.insert(m.ws.clone());
+        }
+        cx.notify();
+    }
+
     /// Add an engine (endpoint, name); its workspaces show in the menu once its public list answers.
     pub fn add_engine(&mut self, endpoint: &str, name: &str, cx: &mut Context<Self>) -> Result<String, String> {
         let endpoint = EngineCfg::normalize(endpoint)?;
@@ -475,9 +614,9 @@ impl AppState {
             return Err(format!("{endpoint} is already added"));
         }
         let name = if name.trim().is_empty() { endpoint.split("://").nth(1).unwrap_or(&endpoint).to_string() } else { name.trim().to_string() };
-        let cfg = EngineCfg { endpoint: endpoint.clone(), name };
+        let cfg = EngineCfg { endpoint: endpoint.clone(), name, ..Default::default() };
         self.prefs.engines.push(cfg.clone());
-        self.engines.push(EngineView { cfg, online: None, workspaces: vec![], error: None });
+        self.engines.push(EngineView { cfg, online: None, workspaces: vec![], error: None, out_of_scope: Default::default() });
         self.save_prefs();
         cx.notify();
         Ok(endpoint)
@@ -488,6 +627,14 @@ impl AppState {
         }
         self.prefs.engines.retain(|e| e.endpoint != endpoint);
         self.engines.retain(|e| e.cfg.endpoint != endpoint);
+        crate::tokens::delete(&engine_token_key(endpoint));
+        self.conns.retain(|c| {
+            let keep = c.cfg.endpoint != endpoint;
+            if !keep {
+                c.shutdown();
+            }
+            keep
+        });
         self.save_prefs();
         cx.notify();
     }
@@ -642,7 +789,8 @@ impl AppState {
                                 }
                             }
                         }
-                        ev.workspaces = list;
+                        ev.workspaces = list.clone();
+                        self.auto_connect(&endpoint, &list, cx);
                     }
                     HubEvent::EngineError(m) => ev.error = if m.is_empty() { None } else { Some(m) },
                     _ => {}
@@ -651,6 +799,19 @@ impl AppState {
             return;
         };
         let key = ws_key(&endpoint, &ws);
+        // a token-scoped engine: a workspace its token does not reach (or no longer: removed from the token) is gone
+        if let HubEvent::Refused(_) = &e {
+            if crate::tokens::get(&key).is_none() && self.engine_token(&endpoint).is_some() {
+                let rotated = crate::tokens::local_token(&endpoint).filter(|t| {
+                    let h = if key == self.active { self.hub.clone() } else { self.bg.get(&key).and_then(|d| d.hub.clone()) };
+                    h.is_some_and(|h| !h.uses_token(t))
+                });
+                if rotated.is_none() {
+                    self.drop_out_of_scope(&key, cx);
+                    return;
+                }
+            }
+        }
         // refused while on the local engine's token, which was rotated since: connect again with the new one
         if let HubEvent::Refused(_) = &e {
             if crate::tokens::get(&key).is_none() {
@@ -1239,4 +1400,9 @@ pub fn task_name(t: &TaskRecord) -> String {
 
 pub fn new_state(cx: &mut App, rt: tokio::runtime::Handle, prefs_path: String) -> Entity<AppState> {
     cx.new(|_| AppState::new(rt, prefs_path))
+}
+
+/// the Keychain key of a token-scoped engine's token
+pub fn engine_token_key(endpoint: &str) -> String {
+    format!("engine|{endpoint}")
 }

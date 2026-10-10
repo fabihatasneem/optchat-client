@@ -1,7 +1,8 @@
-//! Engines and workspaces in the UI (spec-workspaces §4): the Workspaces panel, a rail view opened by the top-left
-//! icon (and ⇧⌘O): engines → workspaces (connected ones with a check on the one on screen and a dot for unread
-//! errors/warnings, available ones to connect with a token typed inline, disabled ones collapsed, an offline engine
-//! greyed and retried), Add engine inline, Disconnect. No workspace name is special.
+//! Engines and workspaces in the UI (spec-workspaces §4, §6): the Workspaces panel, a rail view opened by the top-left
+//! icon (and ⇧⌘O): engines → their connected workspaces (a check on the one on screen, a dot for unread
+//! errors/warnings, an offline engine greyed and retried). Add engine asks only for a token (pasted, masked; on phones
+//! and tablets also scanned from the admin page's QR) and an optional name: the token carries the engine's addresses,
+//! and every workspace in its scope connects by itself. No workspace name is special.
 use crate::client::ws_key;
 use crate::state::*;
 use crate::theme::c;
@@ -31,137 +32,80 @@ pub struct WorkspacesPanel {
     pub state: Entity<AppState>,
     /// engines whose disabled workspaces are expanded
     disabled_open: std::collections::HashSet<String>,
-    /// the workspace whose Connect row is open: (endpoint, name)
-    pub connecting: Option<(String, String)>,
-    pub token: Entity<InputState>,
     pub adding: bool,
-    pub endpoint: Entity<InputState>,
+    /// the engine token (oc1…), masked
+    pub token: Entity<InputState>,
+    /// a name for the engine (optional: else the host it connected through)
     pub name: Entity<InputState>,
-    err: Option<String>,
-    /// (workspace key, local token) pairs already tried: a refused one asks for a token instead of trying again
-    tried_local: std::collections::HashSet<(String, String)>,
+    /// an Add in flight (the token's addresses being tried)
+    pending: bool,
     _subs: Vec<Subscription>,
 }
 
 impl WorkspacesPanel {
     pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> WorkspacesPanel {
-        let token = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("client token"));
-        let endpoint = cx.new(|cx| InputState::new(window, cx).placeholder("chat.example.dev (or http://127.0.0.1:port)"));
+        let token = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("engine token (oc1…)"));
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("name (optional)"));
-        let mut subs = vec![cx.observe(&state, |_, _, cx| cx.notify())];
-        subs.push(cx.subscribe(&token, |p: &mut WorkspacesPanel, _, e: &InputEvent, cx| {
-            if let InputEvent::PressEnter { .. } = e {
-                p.connect(cx);
+        let mut subs = vec![cx.observe(&state, |p: &mut WorkspacesPanel, s, cx| {
+            // an Add finished: close the form when it worked
+            if p.pending && !s.read(cx).adding_engine {
+                p.pending = false;
+                if s.read(cx).add_engine_error.is_none() {
+                    p.adding = false;
+                }
             }
-        }));
-        for i in [&endpoint, &name] {
+            cx.notify()
+        })];
+        for i in [&token, &name] {
             subs.push(cx.subscribe(i, |p: &mut WorkspacesPanel, _, e: &InputEvent, cx| {
                 if let InputEvent::PressEnter { .. } = e {
                     p.add(cx);
                 }
             }));
         }
-        WorkspacesPanel { state, disabled_open: Default::default(), connecting: None, token, adding: false, endpoint, name, err: None, tried_local: Default::default(), _subs: subs }
+        WorkspacesPanel { state, disabled_open: Default::default(), adding: false, token, name, pending: false, _subs: subs }
     }
     pub fn start_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.adding = true;
-        self.connecting = None;
-        self.err = None;
-        self.endpoint.update(cx, |i, cx| i.focus(window, cx));
+        self.state.update(cx, |s, _| s.add_engine_error = None);
+        self.token.update(cx, |i, cx| i.focus(window, cx));
         cx.notify();
     }
-    /// Connect…: on the local engine with its local client token, at once (no field); else the token field inline
-    pub fn connect_or_ask(&mut self, endpoint: &str, ws: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let key = ws_key(endpoint, ws);
-        if let Some(t) = crate::tokens::local_token(endpoint).filter(|t| !self.tried_local.contains(&(key.clone(), t.clone()))) {
-            self.tried_local.insert((key, t));
-            let (ep, w) = (endpoint.to_string(), ws.to_string());
-            match self.state.update(cx, |s, cx| s.connect_ws(&ep, &w, "", cx)) {
-                Ok(()) => {
-                    self.connecting = None;
-                    self.err = None;
-                    cx.notify();
-                    return;
-                }
-                Err(e) => self.err = Some(e),
-            }
-        }
-        self.start_connect(endpoint, ws, window, cx);
-    }
-    pub fn start_connect(&mut self, endpoint: &str, ws: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.connecting = Some((endpoint.to_string(), ws.to_string()));
-        self.adding = false;
-        self.err = None;
-        self.token.update(cx, |i, cx| {
-            i.set_value("", window, cx);
-            i.focus(window, cx);
-        });
-        // UI tests (OPTCHAT_TEST_HOOKS): the workspace's token from OPTCHAT_TEST_TOKENS ({name: token}), never shown
-        if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() {
-            let m: std::collections::BTreeMap<String, String> = std::env::var("OPTCHAT_TEST_TOKENS").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-            if let Some(t) = m.get(ws).cloned() {
-                self.token.update(cx, |i, cx| i.set_value(t, window, cx));
-            }
-        }
-        cx.notify();
-    }
-    pub fn set_add_fields(&mut self, endpoint: &str, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let (e, n) = (endpoint.to_string(), name.to_string());
-        self.endpoint.update(cx, |i, cx| i.set_value(e, window, cx));
+    pub fn set_add_fields(&mut self, token: &str, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (t, n) = (token.to_string(), name.to_string());
+        self.token.update(cx, |i, cx| i.set_value(t, window, cx));
         self.name.update(cx, |i, cx| i.set_value(n, window, cx));
     }
     pub fn add(&mut self, cx: &mut Context<Self>) {
-        let ep = self.endpoint.read(cx).value().to_string();
+        let token = self.token.read(cx).value().to_string();
         let name = self.name.read(cx).value().to_string();
-        match self.state.update(cx, |s, cx| s.add_engine(&ep, &name, cx)) {
-            Ok(_) => {
-                self.adding = false;
-                self.err = None;
-            }
-            Err(e) => self.err = Some(e),
-        }
-        cx.notify();
-    }
-    pub fn connect(&mut self, cx: &mut Context<Self>) {
-        let Some((ep, ws)) = self.connecting.clone() else { return };
-        let t = self.token.read(cx).value().to_string();
-        match self.state.update(cx, |s, cx| s.connect_ws(&ep, &ws, &t, cx)) {
-            Ok(()) => {
-                self.connecting = None;
-                self.err = None;
-            }
-            Err(e) => self.err = Some(e),
-        }
+        self.pending = true;
+        self.state.update(cx, |s, cx| s.add_engine_token(&name, &token, cx));
         cx.notify();
     }
     pub fn cancel(&mut self, cx: &mut Context<Self>) {
-        self.connecting = None;
         self.adding = false;
-        self.err = None;
+        self.pending = false;
+        self.state.update(cx, |s, _| s.add_engine_error = None);
         cx.notify();
     }
-
-    /// the token field, inline under the workspace being connected
-    fn token_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let k = c(cx).clone();
-        div()
-            .mx(px(6.))
-            .ml(px(34.))
-            .mb(px(6.))
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(div().child(Input::new(&self.token).small()).child(probe("wsp.token")))
-            .child(div().text_size(px(11.)).text_color(k.faint).child("a client token for this workspace (from its admin page); kept in the Keychain"))
-            .when_some(self.err.clone(), |d, e| d.child(div().text_size(px(11.5)).text_color(k.red).child(e)))
-            .child(
-                div()
-                    .flex()
-                    .gap(px(6.))
-                    .child(btn_small("wsp-go", "Connect", Tone::Primary, cx).child(probe("wsp.go")).on_click(cx.listener(|p, _, _, cx| p.connect(cx))))
-                    .child(btn_small("wsp-cancel", "Cancel", Tone::Ghost, cx).on_click(cx.listener(|p, _, _, cx| p.cancel(cx)))),
-            )
-            .into_any_element()
+    fn scan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let me = cx.entity().downgrade();
+        crate::platform::scan_qr(
+            window,
+            cx,
+            Box::new(move |text, window, cx| {
+                // the scanner may answer at once (from inside this panel's own update): set the field afterwards
+                if let Some(t) = text {
+                    window.defer(cx, move |window, cx| {
+                        let _ = me.update(cx, |p, cx| {
+                            p.token.update(cx, |i, cx| i.set_value(t.trim().to_string(), window, cx));
+                            cx.notify();
+                        });
+                    });
+                }
+            }),
+        );
     }
 
     fn row_base(id: SharedString, cx: &App) -> Stateful<Div> {
@@ -177,17 +121,18 @@ impl Render for WorkspacesPanel {
         let s = self.state.read(cx);
         let engines = s.engines.clone();
         let meta: Vec<WsMeta> = s.meta.values().cloned().collect();
-        // a local token that got a workspace connected may be tried again later (after a refusal of another one)
-        self.tried_local.retain(|(k, _)| !meta.iter().any(|m| ws_key(&m.endpoint, &m.ws) == *k && m.conn == Conn::Open));
         let active = s.active.clone();
+        let (busy, add_err) = (s.adding_engine, s.add_engine_error.clone());
         let mut col = div().flex().flex_col().pb(px(16.));
         let mut rows_state = vec![];
         if engines.is_empty() && !self.adding {
-            col = col.child(div().px(px(14.)).py(px(8.)).text_size(px(12.)).text_color(k.muted).child("No engine yet. Add one, then connect a workspace with its client token."));
+            col = col.child(div().px(px(14.)).py(px(8.)).text_size(px(12.)).text_color(k.muted).child("No engine yet. Add one with a token from its admin page: its workspaces connect by themselves."));
         }
         for (ei, e) in engines.iter().enumerate() {
             let online = e.online != Some(false);
             let fg = if online { k.text } else { k.faint };
+            let ep = e.cfg.endpoint.clone();
+            let st = self.state.clone();
             col = col.child(
                 div()
                     .flex()
@@ -204,6 +149,15 @@ impl Render for WorkspacesPanel {
                         None => "…",
                         _ => "",
                     }))
+                    .child(
+                        icon_btn(SharedString::from(format!("wsp-rm-{ei}")), "x", 12., cx)
+                            .tooltip(tooltip(format!("Remove {}", e.cfg.name)))
+                            .child(probe(format!("wsp.remove.{ei}")))
+                            .on_click(move |_, _, cx| {
+                                let ep = ep.clone();
+                                st.update(cx, |s, cx| s.remove_engine(&ep, cx))
+                            }),
+                    )
                     .child(probe(format!("wsp.engine.{ei}"))),
             );
             let connected: Vec<&WsMeta> = meta.iter().filter(|m| m.endpoint == e.cfg.endpoint).collect();
@@ -227,11 +181,10 @@ impl Render for WorkspacesPanel {
                 } else {
                     None
                 };
+                // a connection of its own (an older per-workspace token) can be disconnected alone
+                let own = crate::tokens::get(&key).is_some() || !e.cfg.auto;
                 rows_state.push(serde_json::json!({ "ws": m.ws, "engine": ei, "kind": "connected", "on": on, "alert": alert, "state": state }));
                 let (key2, key3, name) = (key.clone(), key.clone(), m.ws.clone());
-                let needs_token = m.refused.is_some() || m.no_token;
-                let (ep4, ws4) = (m.endpoint.clone(), m.ws.clone());
-                let asking = self.connecting.as_ref().is_some_and(|(ep, w)| *ep == m.endpoint && *w == m.ws);
                 col = col.child(
                     Self::row_base(SharedString::from(format!("wsp-{key}")), cx)
                         .cursor_pointer()
@@ -240,51 +193,29 @@ impl Render for WorkspacesPanel {
                         .child(div().flex_1().min_w_0().flex().items_center().gap(px(6.)).text_size(px(13.)).text_color(if state.is_some() { k.muted } else { fg }).child(m.ws.clone()).when(is_default(&m.ws), |d| d.child(div().text_size(px(10.5)).text_color(k.faint).child("default"))))
                         .when_some(state, |d, st| d.child(div().text_size(px(11.)).text_color(k.faint).child(st)))
                         .when(alert, |d| d.child(dot(acol, 7.)))
-                        .child(
-                            icon_btn(SharedString::from(format!("wsp-x-{key}")), "x", 12., cx)
-                                .tooltip(tooltip(format!("Disconnect {name}")))
-                                .child(probe(format!("wsp.disc.{}", m.ws)))
-                                .on_click(cx.listener(move |p, _, _, cx| {
-                                    cx.stop_propagation();
-                                    let key = key3.clone();
-                                    p.state.update(cx, |s, cx| s.disconnect_ws(&key, cx));
-                                })),
-                        )
+                        .when(own, |d| {
+                            d.child(
+                                icon_btn(SharedString::from(format!("wsp-x-{key}")), "x", 12., cx)
+                                    .tooltip(tooltip(format!("Disconnect {name}")))
+                                    .child(probe(format!("wsp.disc.{}", m.ws)))
+                                    .on_click(cx.listener(move |p, _, _, cx| {
+                                        cx.stop_propagation();
+                                        let key = key3.clone();
+                                        p.state.update(cx, |s, cx| s.disconnect_ws(&key, cx));
+                                    })),
+                            )
+                        })
                         .child(probe(format!("wsp.ws.{}", m.ws)))
-                        .on_click(cx.listener(move |p, _, window, cx| {
+                        .on_click(cx.listener(move |p, _, _, cx| {
                             let key = key2.clone();
                             p.state.update(cx, |s, cx| s.switch_ws(&key, cx));
-                            // no token, or the engine refused it: the field to give one
-                            if needs_token {
-                                p.connect_or_ask(&ep4, &ws4, window, cx);
-                            }
                         })),
                 );
-                if asking {
-                    col = col.child(self.token_row(cx));
-                }
             }
-            let avail: Vec<String> = e.workspaces.iter().filter(|w| w.running && !connected.iter().any(|m| m.ws == w.name)).map(|w| w.name.clone()).collect();
+            if connected.is_empty() && online && e.online.is_some() {
+                col = col.child(div().pl(px(38.)).py(px(4.)).text_size(px(12.)).text_color(k.faint).child(if e.cfg.auto { "no workspace in this token's scope" } else { "no workspace connected" }));
+            }
             let disabled: Vec<String> = e.workspaces.iter().filter(|w| !w.running && !connected.iter().any(|m| m.ws == w.name)).map(|w| w.name.clone()).collect();
-            for n in &avail {
-                rows_state.push(serde_json::json!({ "ws": n, "engine": ei, "kind": "available" }));
-                let open = self.connecting.as_ref().is_some_and(|(ep, w)| *ep == e.cfg.endpoint && w == n);
-                let (ep, name) = (e.cfg.endpoint.clone(), n.clone());
-                col = col.child(
-                    Self::row_base(SharedString::from(format!("wsp-a-{ei}-{n}")), cx)
-                        .when(online && !open, |d| d.cursor_pointer())
-                        .child(div().w(px(14.)))
-                        .child(div().flex_1().min_w_0().flex().items_center().gap(px(6.)).text_size(px(13.)).text_color(k.muted).child(n.clone()).when(is_default(n), |d| d.child(div().text_size(px(10.5)).text_color(k.faint).child("default"))))
-                        .when(!open, |d| d.child(div().text_size(px(11.5)).text_color(if online { k.accent } else { k.faint }).child("Connect…")))
-                        .child(probe(format!("wsp.connect.{n}")))
-                        .when(online && !open, |d| {
-                            d.on_click(cx.listener(move |p, _, window, cx| p.connect_or_ask(&ep, &name, window, cx)))
-                        }),
-                );
-                if open {
-                    col = col.child(self.token_row(cx));
-                }
-            }
             if !disabled.is_empty() {
                 let open = self.disabled_open.contains(&e.cfg.endpoint);
                 let ep = e.cfg.endpoint.clone();
@@ -310,8 +241,9 @@ impl Render for WorkspacesPanel {
                 }
             }
         }
-        // Add engine: inline form
+        // Add engine: a token (pasted or scanned) and an optional name
         col = col.child(div().h(px(1.)).bg(k.line).mx(px(14.)).my(px(10.)));
+        let can_scan = crate::platform::can_scan_qr(cx);
         if self.adding {
             col = col.child(
                 div()
@@ -320,14 +252,38 @@ impl Render for WorkspacesPanel {
                     .flex_col()
                     .gap(px(6.))
                     .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child("Add engine"))
-                    .child(div().child(Input::new(&self.endpoint).small()).child(probe("wsp.endpoint")))
-                    .child(div().child(Input::new(&self.name).small()))
-                    .when_some(self.err.clone().filter(|_| self.connecting.is_none()), |d, e| d.child(div().text_size(px(11.5)).text_color(k.red).child(e)))
+                    .child(div().text_size(px(11.)).text_color(k.faint).child("Paste a token from the engine's admin page (Copy token)."))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .child(div().flex_1().min_w_0().child(Input::new(&self.token).small()).child(probe("wsp.token")))
+                            .when(can_scan, |d| {
+                                d.child(
+                                    div()
+                                        .id("wsp-scan")
+                                        .flex_none()
+                                        .size(px(44.))
+                                        .rounded(px(8.))
+                                        .bg(k.panel2)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .cursor_pointer()
+                                        .child(icon("scan-text", 18., k.text2))
+                                        .child(probe("wsp.scan"))
+                                        .on_click(cx.listener(|p, _, window, cx| p.scan(window, cx))),
+                                )
+                            }),
+                    )
+                    .child(div().child(Input::new(&self.name).small()).child(probe("wsp.name")))
+                    .when_some(add_err.clone(), |d, e| d.child(div().text_size(px(11.5)).text_color(k.red).child(e)))
                     .child(
                         div()
                             .flex()
                             .gap(px(6.))
-                            .child(btn_small("wsp-add-go", "Add", Tone::Primary, cx).child(probe("wsp.add.go")).on_click(cx.listener(|p, _, _, cx| p.add(cx))))
+                            .child(btn_small("wsp-add-go", if busy { "Adding…" } else { "Add" }, Tone::Primary, cx).child(probe("wsp.add.go")).when(!busy, |d| d.on_click(cx.listener(|p, _, _, cx| p.add(cx)))))
                             .child(btn_small("wsp-add-cancel", "Cancel", Tone::Ghost, cx).on_click(cx.listener(|p, _, _, cx| p.cancel(cx)))),
                     ),
             );
@@ -343,8 +299,8 @@ impl Render for WorkspacesPanel {
         }
         set_state_extra(
             "wsPanel",
-            serde_json::json!({ "rows": rows_state, "connecting": self.connecting.as_ref().map(|c| c.1.clone()), "hasToken": !self.token.read(cx).value().is_empty(), "adding": self.adding, "err": self.err,
-                "engines": engines.iter().map(|e| serde_json::json!({ "name": e.cfg.name, "online": e.online, "workspaces": e.workspaces.len() })).collect::<Vec<_>>() }),
+            serde_json::json!({ "rows": rows_state, "hasToken": !self.token.read(cx).value().is_empty(), "adding": self.adding, "busy": busy, "err": add_err, "canScan": can_scan,
+                "engines": engines.iter().map(|e| serde_json::json!({ "name": e.cfg.name, "endpoint": e.cfg.endpoint, "online": e.online, "auto": e.cfg.auto, "workspaces": e.workspaces.len() })).collect::<Vec<_>>() }),
         );
         crate::ui::scroll_body("WorkspacesPanel", col.child(probe("wspanel")).into_any_element())
     }

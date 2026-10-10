@@ -19,10 +19,67 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
 /// An engine: where it is (https://<host>, or http://127.0.0.1:<port> for a local relay in tests) and its name.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct EngineCfg {
+    /// the address in use (for a token-added engine: the first of its urls that answered)
     pub endpoint: String,
     pub name: String,
+    /// spec-workspaces §6: the addresses the engine's token carries, in order of preference
+    #[serde(default)]
+    pub urls: Vec<String>,
+    /// added with an engine token (or the local engine): the token's workspaces connect by themselves
+    #[serde(default)]
+    pub auto: bool,
+}
+
+/// What an `oc1` token says (spec-workspaces §6): `oc1.<base64url(JSON {v:1, urls:[...], id})>.<secret>`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EngineToken {
+    pub urls: Vec<String>,
+    pub id: String,
+}
+pub fn parse_engine_token(t: &str) -> Result<EngineToken, String> {
+    use base64::Engine;
+    let t = t.trim();
+    let mut parts = t.splitn(3, '.');
+    if parts.next() != Some("oc1") {
+        return Err("not an engine token (they start with oc1.)".into());
+    }
+    let payload = parts.next().ok_or("an incomplete token")?;
+    if parts.next().map(|s| s.is_empty()).unwrap_or(true) {
+        return Err("an incomplete token".into());
+    }
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload.trim_end_matches('='))
+        .map_err(|_| "a damaged token (its address part is not base64url)".to_string())?;
+    let v: Value = serde_json::from_slice(&raw).map_err(|_| "a damaged token (its address part is not JSON)".to_string())?;
+    if v["v"].as_i64() != Some(1) {
+        return Err(format!("a token of a version this app does not know ({})", v["v"]));
+    }
+    let urls: Vec<String> = v["urls"].as_array().map(|a| a.iter().filter_map(|u| u.as_str()).filter_map(|u| EngineCfg::normalize(u).ok()).collect()).unwrap_or_default();
+    if urls.is_empty() {
+        return Err("the token carries no engine address".into());
+    }
+    Ok(EngineToken { urls, id: v["id"].as_str().unwrap_or("").to_string() })
+}
+
+/// protocol-tokens-v1: try the token's addresses in order (GET /engine/workspaces with the token) and keep the first
+/// that answers; on the same Mac the local address wins when it answers too
+pub async fn pick_url(urls: &[String], token: &str) -> Result<String, String> {
+    let mut last = String::from("no address");
+    let mut ok: Vec<String> = vec![];
+    for u in urls {
+        let cfg = EngineCfg { endpoint: u.clone(), ..Default::default() };
+        match list_workspaces_with(&cfg, Some(token)).await {
+            Ok(_) => ok.push(u.clone()),
+            Err(e) if e.contains("refused") => return Err(format!("the engine refused the token ({u})")),
+            Err(e) => last = format!("{u}: {e}"),
+        }
+    }
+    if let Some(local) = ok.iter().find(|u| crate::tokens::is_local(u)) {
+        return Ok(local.clone());
+    }
+    ok.into_iter().next().ok_or_else(|| format!("no address of the engine answers ({last})"))
 }
 impl EngineCfg {
     pub fn normalize(endpoint: &str) -> Result<String, String> {
@@ -69,6 +126,8 @@ type ControlReply = oneshot::Sender<(bool, String, Option<i64>)>;
 /// connected to (`connect {ws}` / `disconnect {ws}`; `ws` on every message). Reconnects with backoff and connects
 /// its workspaces again (each answers with `hello` and a snapshot).
 pub struct EngineConn {
+    /// the token the socket itself opens with (a token-scoped engine: the engine then lists only its workspaces)
+    socket_token: Option<String>,
     pub cfg: EngineCfg,
     events: mpsc::UnboundedSender<Routed>,
     out: Mutex<Option<mpsc::UnboundedSender<WsMsg>>>,
@@ -84,8 +143,9 @@ pub struct EngineConn {
 }
 
 impl EngineConn {
-    pub fn start(cfg: EngineCfg, events: mpsc::UnboundedSender<Routed>) -> Arc<EngineConn> {
+    pub fn start(cfg: EngineCfg, socket_token: Option<String>, events: mpsc::UnboundedSender<Routed>) -> Arc<EngineConn> {
         let c = Arc::new(EngineConn {
+            socket_token,
             cfg,
             events,
             out: Mutex::new(None),
@@ -117,7 +177,7 @@ impl EngineConn {
         let mut first = true;
         while !self.stopped.load(Ordering::SeqCst) {
             self.emit_all(|| HubEvent::Conn(Conn::Connecting));
-            match self.connect_with(&format!("{}/engine/ws", self.cfg.ws_base()), None).await {
+            match self.connect_with(&format!("{}/engine/ws", self.cfg.ws_base()), self.socket_token.as_deref()).await {
                 Ok(ws) => {
                     retry = 0;
                     if !first {
@@ -302,15 +362,23 @@ impl EngineConn {
 
 /// GET <engine>/engine/workspaces: the engine's workspaces {name, running} (no token); Err when it is unreachable.
 pub async fn list_workspaces(cfg: &EngineCfg) -> Result<Vec<WsEntry>, String> {
-    let r = reqwest::Client::builder()
+    list_workspaces_with(cfg, None).await
+}
+/// GET /engine/workspaces with a token: only the token's workspaces (401: the token is refused)
+pub async fn list_workspaces_with(cfg: &EngineCfg, token: Option<&str>) -> Result<Vec<WsEntry>, String> {
+    let mut rb = reqwest::Client::builder()
         .timeout(Duration::from_secs(4))
         .build()
         .map_err(|e| e.to_string())?
         .get(format!("{}/engine/workspaces", cfg.endpoint))
-        .header("Origin", cfg.origin())
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+        .header("Origin", cfg.origin());
+    if let Some(t) = token {
+        rb = rb.bearer_auth(t);
+    }
+    let r = rb.send().await.map_err(|e| e.to_string())?;
+    if r.status().as_u16() == 401 {
+        return Err("the token was refused".into());
+    }
     if !r.status().is_success() {
         return Err(format!("{}", r.status()));
     }
@@ -637,12 +705,21 @@ impl Client {
         *self.dict.lock() = Some(s);
     }
     /// stop listening and keep the text (the final text comes as Done)
+    /// A second stop (the final text never came) or a stop with no session left ends it at once on screen.
     pub fn dictate_stop(&self) {
-        if let Some(s) = self.dict.lock().clone() {
-            if !s.stopped.load(Ordering::SeqCst) {
+        let cur = self.dict.lock().clone();
+        match cur {
+            Some(s) if !s.stopped.load(Ordering::SeqCst) => {
                 self.emit(HubEvent::Dictation { task: s.task, ev: DictEvent::State("finishing".into()) });
+                s.stop();
             }
-            s.stop();
+            Some(s) => {
+                // already stopped and still waiting for its final text: give up waiting (what was said stays)
+                s.stop();
+                *self.dict.lock() = None;
+                self.emit(HubEvent::Dictation { task: s.task, ev: DictEvent::State("idle".into()) });
+            }
+            None => self.emit(HubEvent::Dictation { task: self.current_task(), ev: DictEvent::State("idle".into()) }),
         }
     }
     fn dict_ended(&self, s: &Arc<DictSession>) {
@@ -772,5 +849,20 @@ impl DictSession {
         self.release();
         let _ = self.tx.send(WsMsg::text(json!({ "type": "stop" }).to_string()));
         let _ = self.task;
+    }
+}
+
+#[cfg(test)]
+mod engine_token_tests {
+    use super::*;
+    #[::core::prelude::v1::test]
+    fn parses_oc1() {
+        use base64::Engine;
+        let p = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"v":1,"urls":["https://tunnel.example","https://chat.reframe.dev"],"id":"ab12"}"#);
+        let t = parse_engine_token(&format!("oc1.{p}.s3cret")).unwrap();
+        assert_eq!(t.urls, vec!["https://tunnel.example".to_string(), "https://chat.reframe.dev".to_string()]);
+        assert_eq!(t.id, "ab12");
+        assert!(parse_engine_token("oct_plain").is_err());
+        assert!(parse_engine_token(&format!("oc1.{p}.")).is_err());
     }
 }
