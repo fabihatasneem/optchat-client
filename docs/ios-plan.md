@@ -297,7 +297,12 @@ Notices (spec §3) are the payload.
 0. **Prototype (this repo).** Universal app; locks plus the window-shape layout; connect (page `/ws?db=` or
    engine `/engine/ws` + token); task list; chat; send → reply.
    - Protocol verified on macOS via the probe. Layouts and locks verified in the Simulator on iPhone and iPad (§2).
-   - A Simulator send needs an engine workspace token (§11).
+   - **Send → reply verified in the Simulator over `/engine/ws` + token on workspace `test-ios`** (task #106, Haiku,
+     one message per device; XCUITest `testSendMessage`):
+     - iPhone: task tap → composer 3.4 s (XCUITest overhead included); Send → turn running 1.7 s; reply ("pong")
+       finished 4.8 s after Send.
+     - iPad: 3.6 s / 1.6 s / 2.7 s.
+     - Both replies confirmed through the protocol (`log.range`).
 1. **OptChatKit + fixtures.** Move `Core` into a Swift package with XCTest. Capture fixtures from a test workspace;
    add the same fixture tests to `optchat-proto`.
    - Verify: both suites pass; the probe runs in CI against a test workspace.
@@ -345,6 +350,9 @@ Notices (spec §3) are the payload.
 - UI tests: `TEST_RUNNER_SHOTS=$PWD/docs/shots TEST_RUNNER_OPTCHAT_ARGS="-ws test-<id>" TEST_RUNNER_OPTCHAT_TOKEN=…
   [TEST_RUNNER_SEND_TASK=n TEST_RUNNER_SEND_TEXT=…] [TEST_RUNNER_GPUI_PROBE=1] [TEST_RUNNER_WINDOWED=1]
   xcodebuild -project OptChat.xcodeproj -scheme OptChat -destination id=<udid> test`.
+  Other switches: `TEST_RUNNER_SHOW_TASK=n` (open a chat and take a screenshot) and `TEST_RUNNER_RESTORE=1`.
+- Gotcha: iPadOS remembers a resized window per bundle id even across uninstall. A window narrowed by the corner-drag
+  test stays narrow; the full-width screenshots were taken on a second iPad simulator.
 - Protocol probe (macOS, the app's own `Core`): `tools/probe/run.sh -db t<id>` or `-ws test-<id>` with
   `OPTCHAT_TOKEN` in the environment (never written to the login keychain).
 
@@ -352,8 +360,10 @@ Screenshots (`docs/shots/`):
 
 | file | shows |
 |---|---|
-| `iphone-tasks.png` | iPhone, phone layout, rotation probe refused |
+| `iphone-tasks.png`, `iphone-chat.png`, `iphone-chat-typing.png` | iPhone on `test-ios`: task list, task #106 after the two Haiku replies, composer with the keyboard |
+| `ipad-tasks.png`, `ipad-chat.png` | iPad Pro 13" on `test-ios`: wide layout, task list beside #106's chat |
 | `iphone-device-landscapeLeft.png` (… `-portrait`, `-landscapeRight`, `-upsideDown`) | iPhone rotated: app stays portrait |
 | `ipad-device-portrait.png` (… `-landscapeLeft`, `-landscapeRight`, `-upsideDown`) | iPad rotated: app stays landscape, wide layout |
 | `ipad-narrow-window.png` | iPad window resized to 375 pt: phone layout |
 | `gpui-ios-probe.png`, `gpui-probe-strip.png` | GPUI on iOS (zed#63068): launch, flicks, typing |
+| `jpg/*.jpg` | phone-legible copies (~1000 px), one device per image |
