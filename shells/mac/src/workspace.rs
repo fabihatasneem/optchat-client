@@ -26,6 +26,9 @@ actions!(
         ShowLog,
         ShowModels,
         ShowSettings,
+        ShowNotifications,
+        AddEngine,
+        WorkspaceMenu,
         NewTask,
         CloseTab,
         NextTab,
@@ -67,6 +70,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("cmd-5", ShowModels, None),
         KeyBinding::new("cmd-,", ShowSettings, None),
         KeyBinding::new("cmd-6", ShowSettings, None),
+        KeyBinding::new("cmd-shift-n", ShowNotifications, None),
+        KeyBinding::new("cmd-shift-o", WorkspaceMenu, None),
         KeyBinding::new("cmd-n", NewTask, None),
         KeyBinding::new("cmd-w", CloseTab, None),
         KeyBinding::new("cmd-shift-]", NextTab, None),
@@ -122,6 +127,10 @@ pub struct Workspace {
     pub ask_input: Entity<InputState>,
     pub overlay: Option<Overlay>,
     pub tasks_panel: Entity<tasks_view::TasksPanel>,
+    pub notices_panel: Entity<crate::notices_view::NoticesPanel>,
+    /// engines whose disabled workspaces are expanded in the workspace menu
+    pub menu_disabled_open: std::collections::HashSet<String>,
+    pub overlay_subs: Vec<Subscription>,
     resizing: Option<(f32, f32)>,
     pub metrics_open: bool,
     pub narrow: bool,
@@ -153,6 +162,7 @@ impl Workspace {
         let lim = ask_limit.clone();
         let ask_input = cx.new(|cx| InputState::new(window, cx).validate(move |t, _| t.encode_utf16().count() <= lim.get()));
         let tasks_panel = cx.new(|cx| tasks_view::TasksPanel::new(state.clone(), cx));
+        let notices_panel = cx.new(|cx| crate::notices_view::NoticesPanel::new(state.clone(), cx));
         let mut subs = vec![];
         subs.push(cx.observe(&state, |_, _, cx| cx.notify()));
         subs.push(cx.subscribe_in(&feed, window, |this: &mut Workspace, _, ev: &FeedEvent, window, cx| match ev {
@@ -170,6 +180,9 @@ impl Workspace {
                 tasks_view::TasksEvent::Menu(id, status, pos) => this.open_task_menu(*id, *status, *pos, window, cx),
             }
         }));
+        subs.push(cx.subscribe_in(&notices_panel, window, |this: &mut Workspace, _, ev: &crate::notices_view::NoticesEvent, window, cx| match ev {
+            crate::notices_view::NoticesEvent::Open(id) => this.open_task(*id, window, cx),
+        }));
         subs.push(cx.subscribe_in(&ask_input, window, |this: &mut Workspace, _, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { .. } = ev {
                 this.confirm_ask(window, cx);
@@ -181,6 +194,13 @@ impl Workspace {
             }
             if let StateEvent::Opened(_) = ev {
                 this.update_title(window, cx);
+            }
+            if let StateEvent::WsSwitched = ev {
+                this.ask = None;
+                this.metrics_open = false;
+                this.composer.update(cx, |c, cx| c.workspace_switched(window, cx));
+                this.update_title(window, cx);
+                cx.notify();
             }
         }));
         crate::ui::anim::set_window_active(window.is_window_active());
@@ -210,7 +230,7 @@ impl Workspace {
                 });
             })
             .detach();
-            let narrow = f32::from(window.bounds().size.width) < 760.0;
+            let narrow = narrow_layout(window);
             if narrow != this.narrow {
                 this.narrow = narrow;
                 this.sheet = false;
@@ -229,6 +249,8 @@ impl Workspace {
             let input = match &this.overlay {
                 Some(Overlay::Palette(p)) => Some(p.read(cx).input()),
                 Some(Overlay::NewTask(d)) => Some(d.read(cx).input()),
+                Some(Overlay::AddEngine(d)) => Some(d.read(cx).input()),
+                Some(Overlay::Connect(d)) => Some(d.read(cx).input()),
                 _ if this.ask.is_some() => Some(this.ask_input.clone()),
                 _ => None,
             };
@@ -253,9 +275,12 @@ impl Workspace {
             ask_input,
             overlay: None,
             tasks_panel,
+            notices_panel,
+            menu_disabled_open: Default::default(),
+            overlay_subs: vec![],
             resizing: None,
             metrics_open: false,
-            narrow: f32::from(window.bounds().size.width) < 760.0,
+            narrow: narrow_layout(window),
             sheet: false,
             m_press: None,
             _subs: subs,
@@ -278,11 +303,11 @@ impl Workspace {
             let th = cx.global::<crate::theme::Themes>();
             let last_talk = s.cur.log.iter().rev().find(|e| e.kind == LogKind::Talk).map(|e| e.text.clone());
             let j = serde_json::json!({
-                "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
+                "ready": s.hub.is_some(), "workspace": s.meta.get(&s.active).map(|m| m.ws.clone()), "connected": s.meta.values().map(|m| serde_json::json!({ "ws": m.ws, "conn": format!("{:?}", m.conn).to_lowercase(), "unread": m.unread, "disabled": m.disabled, "noToken": m.no_token })).collect::<Vec<_>>(), "engines": s.engines.iter().map(|e| serde_json::json!({ "name": e.cfg.name, "online": e.online, "workspaces": e.workspaces, "error": e.error })).collect::<Vec<_>>(), "noticesTop": s.notices.iter().take(8).map(|n| serde_json::json!({ "id": n.id, "level": n.level, "text": n.text, "task": n.task, "read": n.read_at.is_some() })).collect::<Vec<_>>(), "noticesLoaded": s.notices_loaded, "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
                 "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
                 "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "conn": format!("{:?}", s.conn).to_lowercase(), "reconnects": s.hub().map(|h| h.reconnects.load(std::sync::atomic::Ordering::SeqCst)).unwrap_or(0), "instance": s.instance, "hubBuild": s.build, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window,  "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
-                "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "conn": format!("{:?}", s.conn).to_lowercase(), "reconnects": s.hub().map(|h| h.reconnects()).unwrap_or(0), "instance": s.instance, "hubBuild": s.build, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window,  "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox", Overlay::WsMenu => "wsmenu", Overlay::AddEngine(_) => "addengine", Overlay::Connect(_) => "connect" }),
+                "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notices": s.notices.len(), "unread": s.unread(), "active": s.active, "bgAlert": s.background_alert(), "wsSwitches": s.ws_switches,
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
                 "firstFrameMs": s.stats.first_frame_ms, "frames": frame_summary(), "rss": crate::ui::rss_mb(), "loadedMs": s.stats.loaded_ms, "switches": s.stats.switches, "switchesFull": s.stats.switches_full, "errors": s.errors.clone(),
@@ -294,12 +319,17 @@ impl Workspace {
     /// Redraws ambient animations (spinners, pulsing dots) at 12.5 Hz (2.5 Hz while the window is in the
     /// background), only in the views that drew one. Every redraw re-encodes the whole window, so this is what
     /// an idle window with a "summarizing" spinner costs.
-    pub fn start_ticker(&mut self, cx: &mut Context<Self>) {
+    pub fn start_ticker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::ui::anim;
         if probes_on() {
-            cx.spawn(async move |this, cx| loop {
+            // the state every 250 ms; with OPTCHAT_TEST_HOOKS, the test channel's commands too (crate::testcmd)
+            cx.spawn_in(window, async move |this, cx| loop {
                 Timer::after(std::time::Duration::from_millis(250)).await;
-                if this.update(cx, |w, cx| w.publish_state(cx)).is_err() {
+                let ok = this.update_in(cx, |w, window, cx| {
+                    crate::testcmd::poll(w, window, cx);
+                    w.publish_state(cx)
+                });
+                if ok.is_err() {
                     break;
                 }
             })
@@ -341,8 +371,9 @@ impl Workspace {
 
     pub fn update_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s = self.state.read(cx);
+        let ws = s.meta.get(&s.active).map(|m| format!(" · {}", m.ws)).unwrap_or_default();
         let t = match s.info() {
-            Some(i) => format!("{}{} · OptChat", task_name(&i.task), if i.task.id != 0 { format!(" · #{}", i.task.id) } else { String::new() }),
+            Some(i) => format!("{}{}{ws} · OptChat", task_name(&i.task), if i.task.id != 0 { format!(" · #{}", i.task.id) } else { String::new() }),
             None => "OptChat".into(),
         };
         if t != self.title {
@@ -362,8 +393,18 @@ impl Workspace {
         self.composer.update(cx, |c, cx| c.focus(window, cx));
         cx.notify();
     }
+    /// show another connected workspace (instant: its state is kept live in the background)
+    pub fn switch_workspace(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.overlay = None;
+        self.overlay_subs.clear();
+        self.state.update(cx, |s, cx| s.switch_ws(key, cx));
+        self.update_title(window, cx);
+        self.composer.update(cx, |c, cx| c.focus(window, cx));
+        cx.notify();
+    }
     pub fn close_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay = None;
+        self.overlay_subs.clear();
         self.composer.update(cx, |c, cx| c.focus(window, cx));
         cx.notify();
     }
@@ -502,7 +543,7 @@ impl Render for Workspace {
         crate::ui::frame_begin();
         crate::ui::anim::area(crate::ui::anim::WORKSPACE);
         if self._ticker.is_none() {
-            self.start_ticker(cx);
+            self.start_ticker(window, cx);
         }
         let k = c(cx).clone();
         if self.state.read(cx).stats.first_frame_ms.is_none() {
@@ -550,6 +591,7 @@ impl Render for Workspace {
         let side_w = s.prefs.side_w;
         let ended = s.info().map(|i| i.task.status.terminal()).unwrap_or(false);
         let narrow = self.narrow;
+        let _ = s;
 
         let mut root = div()
             .id("workspace")
@@ -573,6 +615,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &ShowLog, _, cx| w.pick(View::Log, cx)))
             .on_action(cx.listener(|w, _: &ShowModels, _, cx| w.pick(View::Models, cx)))
             .on_action(cx.listener(|w, _: &ShowSettings, _, cx| w.pick(View::Settings, cx)))
+            .on_action(cx.listener(|w, _: &ShowNotifications, _, cx| w.pick(View::Notifications, cx)))
+            .on_action(cx.listener(|w, _: &AddEngine, window, cx| crate::workspaces::open_add_engine(w, window, cx)))
+            .on_action(cx.listener(|w, _: &WorkspaceMenu, _, cx| crate::workspaces::open_menu(w, cx)))
             .on_action(cx.listener(|w, _: &NewTask, window, cx| dialogs::open_new_task(w, None, window, cx)))
             .on_action(cx.listener(|w, _: &CloseTab, window, cx| {
                 let cur = w.state.read(cx).current;
@@ -604,9 +649,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &About, window, cx| {
                 let s = w.state.read(cx);
                 let detail = format!(
-                    "App {}\nConnected to the OptChat hub {} (version {}, build {}).\nA native client for OptChat's endless, task-tree chat, in Rust and GPUI.\nThemes from Zed (see THEMES.md).",
+                    "App {}\nConnected to {} (engine version {}, build {}).\nA native client for OptChat's endless, task-tree chat, in Rust and GPUI.\nThemes from Zed (see THEMES.md).",
                     env!("CARGO_PKG_VERSION"),
-                    s.hub().map(|h| h.cfg.label()).unwrap_or_default(),
+                    s.hub().map(|h| h.label()).unwrap_or_default(),
                     s.version,
                     s.build
                 );
@@ -630,6 +675,7 @@ impl Render for Workspace {
                     w.composer.update(cx, |c, cx| c.stop_dictation(cx));
                 } else if w.overlay.is_some() {
                     w.overlay = None;
+                    w.overlay_subs.clear();
                     w.composer.update(cx, |c, cx| c.focus(window, cx));
                 } else if w.ask.is_some() {
                     w.ask = None;
@@ -708,7 +754,7 @@ impl Render for Workspace {
         // ---- overlays
         if let Some(o) = self.overlay.clone() {
             // dialogs and popovers fade in (120 ms); the state goes with the overlay, so each opening plays it
-            let kind = match &o { Overlay::NewTask(_) => "fade-new", Overlay::Palette(_) => "fade-pal", Overlay::Metrics(_) => "fade-met", Overlay::Lightbox(_) => "fade-light" };
+            let kind = match &o { Overlay::NewTask(_) => "fade-new", Overlay::Palette(_) => "fade-pal", Overlay::Metrics(_) => "fade-met", Overlay::Lightbox(_) => "fade-light", Overlay::WsMenu => "fade-wsm", Overlay::AddEngine(_) => "fade-ae", Overlay::Connect(_) => "fade-cn" };
             let el = dialogs::render_overlay(self, o, window, cx);
             root = root.child(
                 div()
@@ -721,7 +767,6 @@ impl Render for Workspace {
         if let Some(a) = self.state.read(cx).approvals.first().cloned() {
             root = root.child(dialogs::approval(self, a, cx));
         }
-        root = root.children(dialogs::toast(self, cx));
         root
     }
 }
@@ -732,6 +777,10 @@ impl Workspace {
         let s = self.state.read(cx);
         let active = s.tasks.values().filter(|x| x.task.status == TaskStatus::Active).count();
         let compacting = !s.busy.is_empty();
+        let alert = s.background_alert();
+        let alert_col = if s.meta.iter().any(|(kk, m)| *kk != s.active && m.unread.error > 0) { k.red } else { k.amber };
+        let ws_name = s.meta.get(&s.active).map(|m| m.ws.clone()).unwrap_or("no workspace".into());
+        let unread = s.unread();
         set_state_extra("rail", serde_json::json!({ "badge": active, "memDot": compacting }));
         if active > 0 {
             crate::ui::seen("railSeen", "badge");
@@ -752,11 +801,24 @@ impl Workspace {
             .bg(k.rail)
             .border_r_1()
             .border_color(k.line)
-            .child(div().id("logo").mb(px(12.)).mt(px(2.)).cursor_pointer().child(logo(24., cx)).tooltip(tooltip("OptChat · main chat (⌘0)")).on_click(cx.listener(|w, _, window, cx| w.open_task(0, window, cx))));
+            .child(
+                div()
+                    .id("logo")
+                    .relative()
+                    .mb(px(12.))
+                    .mt(px(2.))
+                    .cursor_pointer()
+                    .child(logo(24., cx))
+                    .when(alert, |d| d.child(div().absolute().top(px(-3.)).right(px(-4.)).child(dot(alert_col, 9.).border_2().border_color(k.rail)).child(probe("logo.dot"))))
+                    .child(probe("logo"))
+                    .tooltip(tooltip(format!("{} · workspaces (⇧⌘O)", ws_name)))
+                    .on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_menu(w, cx))),
+            );
         for v in [View::Tasks, View::Memory, View::Context, View::Log, View::Models] {
             rail = rail.child(self.rail_btn(v, open && view == v, if v == View::Tasks { active } else { 0 }, v == View::Memory && compacting, cx));
         }
         rail = rail.child(div().flex_1());
+        rail = rail.child(self.rail_btn(View::Notifications, open && view == View::Notifications, 0, false, cx).when(unread.error + unread.warn > 0, |d| d.child(div().absolute().top(px(8.)).right(px(8.)).child(dot(if unread.error > 0 { k.red } else { k.amber }, 7.)))));
         rail = rail.child(self.rail_btn(View::Settings, open && view == View::Settings, 0, false, cx));
         let k2 = k.clone();
         rail = rail.child(
@@ -777,7 +839,7 @@ impl Workspace {
         rail
     }
 
-    fn rail_btn(&self, v: View, on: bool, badge: usize, dot_on: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    fn rail_btn(&self, v: View, on: bool, badge: usize, dot_on: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let k = c(cx).clone();
         let col = if on { k.text } else { k.muted };
         let hover = k.text2;
@@ -865,12 +927,14 @@ impl Workspace {
         let cached = |v: AnyView| v.cached(StyleRefinement::default().size_full()).into_any_element();
         let body: AnyElement = match view {
             View::Tasks => cached(self.tasks_panel.clone().into()),
+            View::Settings if s.hub.is_none() => cached(self.settings.clone().into()),
             _ if !loaded => div().p(px(12.)).child(skeleton_line(None, cx)).child(skeleton_line(Some(160.), cx)).into_any_element(),
             View::Memory => cached(self.memory.clone().into()),
             View::Context => cached(self.context.clone().into()),
             View::Log => cached(self.log.clone().into()),
             View::Models => cached(self.models.clone().into()),
             View::Settings => cached(self.settings.clone().into()),
+            View::Notifications => cached(self.notices_panel.clone().into()),
         };
         let resizer = div()
             .id("resizer")
@@ -907,6 +971,38 @@ impl Workspace {
     fn editor(&mut self, ended: bool, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = c(cx).clone();
         let mut ed = div().flex_1().min_w_0().h_full().flex().flex_col().bg(k.bg);
+        if self.state.read(cx).hub.is_none() {
+            // nothing connected (or no token): what to do next
+            let st = self.state.read(cx);
+            let (title, sub) = if st.engines.is_empty() {
+                ("Add an OptChat engine", "Its address, then connect one of its workspaces with a client token (kept in the Keychain).")
+            } else if st.meta.is_empty() {
+                ("Connect a workspace", "Open the workspace menu (the icon at the top left) and connect one with its client token.")
+            } else {
+                ("This workspace needs its token again", "Open the workspace menu and connect it again.")
+            };
+            return ed.child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(10.))
+                    .child(logo(40., cx))
+                    .child(div().text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                    .child(div().max_w(px(420.)).text_center().text_size(px(13.)).text_color(k.muted).child(sub))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .mt(px(6.))
+                            .child(btn("empty-add", "Add engine…", Tone::Primary, cx).child(probe("empty.add")).on_click(cx.listener(|w, _, window, cx| crate::workspaces::open_add_engine(w, window, cx))))
+                            .child(btn("empty-menu", "Workspaces…", Tone::Plain, cx).child(probe("empty.menu")).on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_menu(w, cx)))),
+                    )
+                    .child(probe("empty")),
+            );
+        }
         ed = ed.child(crate::tabs::tab_strip(self, window, cx));
         ed = ed.child(crate::tabs::task_bar(self, window, cx));
         // a click in the feed leaves the composer (so M dictates, as outside a text field in the web app)
@@ -946,4 +1042,11 @@ pub fn task_menu(m: gpui_component::menu::PopupMenu, id: i64, status: TaskStatus
         m = item(m, "New subtask…", "new");
     }
     m.separator().item(PopupMenuItem::new(format!("Copy #{id}")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(format!("#{id}")))))
+}
+
+/// the layout, chosen at the root by the window's size: narrow (or portrait) windows get the simple narrow layout
+pub fn narrow_layout(window: &Window) -> bool {
+    let sz = window.bounds().size;
+    let (w, h) = (f32::from(sz.width), f32::from(sz.height));
+    w < 760.0 || h > w * 1.15
 }

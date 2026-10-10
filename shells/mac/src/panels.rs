@@ -883,7 +883,7 @@ impl ModelsPanel {
         if s.prefs.view != View::Models {
             return;
         }
-        let key = (s.models.len() * 1000 + s.models.iter().filter(|m| m.priced).count(), s.notice.as_ref().map(|n| n.2.elapsed().as_secs() / 1000).unwrap_or(0) + s.server_log.len() as u64);
+        let key = (s.models.len() * 1000 + s.models.iter().filter(|m| m.priced).count(), s.notices.len() as u64 + s.server_log.len() as u64);
         if key == self.seen {
             return;
         }
@@ -1129,7 +1129,7 @@ impl SettingsPanel {
                         },
                         _ => return,
                     };
-                    p.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, patch).map(|x| x.to_string()) }));
+                    p.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, patch).await }));
                 }
             }));
         }
@@ -1149,7 +1149,7 @@ impl SettingsPanel {
     }
     fn patch(&self, p: SettingsPatch, cx: &mut Context<Self>) {
         let task = self.task;
-        self.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, p).map(|x| x.to_string()) }));
+        self.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, p).await }));
     }
 }
 fn picker(id: &str, label: String, items: Vec<(String, String, bool)>, on: impl Fn(String, &mut App) + 'static) -> impl IntoElement {
@@ -1190,16 +1190,18 @@ impl SettingsPanel {
             .flex()
             .gap(px(4.))
             .mb(px(12.))
-            .child(seg("tab-global", "Global", global_tab, cx).child(probe("settings.global")).on_click({
-                let st = st_e.clone();
-                move |_, _, cx| st.update(cx, |s, cx| { s.prefs.settings_tab_global = true; s.save_prefs(); cx.notify(); })
-            }))
-            .child(seg("tab-task", if task == 0 { "Main chat".to_string() } else { format!("Task #{task}") }, !global_tab, cx).child(probe("settings.task")).on_click({
+            .child(seg("tab-task", "Workspace", !global_tab, cx).child(probe("settings.task")).child(probe("settings.workspace")).on_click({
                 let st = st_e.clone();
                 move |_, _, cx| st.update(cx, |s, cx| { s.prefs.settings_tab_global = false; s.save_prefs(); cx.notify(); })
+            }))
+            .child(seg("tab-global", "App", global_tab, cx).child(probe("settings.global")).child(probe("settings.app")).on_click({
+                let st = st_e.clone();
+                move |_, _, cx| st.update(cx, |s, cx| { s.prefs.settings_tab_global = true; s.save_prefs(); cx.notify(); })
             }));
         let field = |label: &str| div().text_size(px(11.5)).text_color(k.muted).mb(px(4.)).child(label.to_string());
         if global_tab {
+            let engines = self.engines_section(cx).into_any_element();
+            let s = self.state.read(cx);
             let g = s.global.clone();
             let font_size = s.prefs.font_size;
             let themes: Vec<(String, String, bool)> = {
@@ -1216,20 +1218,11 @@ impl SettingsPanel {
             let st4 = st_e.clone();
             let log: Vec<String> = s.server_log.iter().rev().take(80).rev().cloned().collect();
             let stats = s.stats.clone();
+            let _ = (g, st1, st2, st3, log);
             return pad(div())
                 .child(probe("settings"))
                 .child(tabs)
-                .child(section(cx).child(section_title("turns", cx)).child(field("turns at once, across all tasks")).child(picker("maxturns", g.max_turns.to_string(), [1, 2, 3, 4, 6, 8, 12, 16].iter().map(|n| (n.to_string(), n.to_string(), *n == g.max_turns)).collect(), move |v, cx| {
-                    let n: u32 = v.parse().unwrap_or(4);
-                    st1.update(cx, |s, cx| s.command(cx, false, move |h| async move { { h.update_global(Some(n), None); Ok(String::new()) } }))
-                })))
-                .child(section(cx).child(section_title("dictation", cx)).child(field("speech to text")).child(
-                    div()
-                        .flex()
-                        .gap(px(4.))
-                        .child(seg("dict-claude", "Claude", g.dictation == DictationService::Claude, cx).child(probe("settings.dict.claude")).on_click(move |_, _, cx| st2.update(cx, |s, cx| s.command(cx, false, |h| async move { { h.update_global(None, Some(DictationService::Claude)); Ok(String::new()) } }))))
-                        .child(seg("dict-codex", "Codex", g.dictation == DictationService::Codex, cx).child(probe("settings.dict.codex")).on_click(move |_, _, cx| st3.update(cx, |s, cx| s.command(cx, false, |h| async move { { h.update_global(None, Some(DictationService::Codex)); Ok(String::new()) } })))),
-                ))
+                .child(engines)
                 .child(
                     section(cx)
                         .child(section_title("appearance", cx))
@@ -1286,11 +1279,37 @@ impl SettingsPanel {
                                 ),
                         ),
                 )
-                .child(section(cx).child(section_title("performance", cx)).child(card(cx).child(kv_row("first frame", stats.first_frame_ms.map(|m| format!("{m:.0} ms after launch")).unwrap_or("—".into()), cx)).child(kv_row("chat loaded", stats.loaded_ms.map(|m| format!("{m:.0} ms after launch")).unwrap_or("—".into()), cx)).child(kv_row("events applied", stats.events.to_string(), cx))))
-                .child(section(cx).child(section_title(format!("server log · hub {} · build {} · {}", s.version, s.build, s.hub().map(|h| h.cfg.label()).unwrap_or_default()), cx)).child(div().id("srvlog").max_h(px(300.)).overflow_y_scroll().p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.)).line_height(px(16.)).text_color(k.text2).child(if log.is_empty() { "—".to_string() } else { log.join("\n") })))
+                .child(section(cx).child(section_title("performance", cx)).child(card(cx).child(kv_row("first frame", stats.first_frame_ms.map(|m| format!("{m:.0} ms after launch")).unwrap_or("—".into()), cx)).child(kv_row("chat loaded", stats.loaded_ms.map(|m| format!("{m:.0} ms after launch")).unwrap_or("—".into()), cx)).child(kv_row("events applied", stats.events.to_string(), cx)).child(kv_row("workspace switches", s.ws_switches.last().map(|m| format!("{} · last {m:.2} ms", s.ws_switches.len())).unwrap_or("—".into()), cx))))
                 .into_any_element();
         }
-        let Some(st) = s.cur.settings.clone() else { return div().into_any_element() };
+        let g = s.global.clone();
+        let st1 = st_e.clone();
+        let st2 = st_e.clone();
+        let st3 = st_e.clone();
+        let log: Vec<String> = s.server_log.iter().rev().take(80).rev().cloned().collect();
+        let srvlog = section(cx).child(section_title(format!("server log · engine {} · build {} · {}", s.version, s.build, s.hub().map(|h| h.label()).unwrap_or_default()), cx)).child(div().id("srvlog").max_h(px(300.)).overflow_y_scroll().p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.)).line_height(px(16.)).text_color(k.text2).child(if log.is_empty() { "—".to_string() } else { log.join("\n") }));
+        let ws_name = s.meta.get(&s.active).map(|m| m.ws.clone()).unwrap_or_default();
+        let ws_head = div()
+            .text_size(px(12.))
+            .text_color(k.muted)
+            .mb(px(12.))
+            .child(format!("Settings of the workspace “{ws_name}” on its engine: every client sees them. The engine's own settings are on its admin page."));
+        let ws_global = section(cx)
+            .child(section_title("turns", cx))
+            .child(field("turns at once, across all tasks"))
+            .child(picker("maxturns", g.max_turns.to_string(), [1, 2, 3, 4, 6, 8, 12, 16].iter().map(|n| (n.to_string(), n.to_string(), *n == g.max_turns)).collect(), move |v, cx| {
+                let n: u32 = v.parse().unwrap_or(4);
+                st1.update(cx, |s, cx| s.command(cx, false, move |h| async move { { h.update_global(Some(n), None); Ok(String::new()) } }))
+            }))
+            .child(div().mt(px(10.)).child(field("dictation: speech to text")))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(4.))
+                    .child(seg("dict-claude", "Claude", g.dictation == DictationService::Claude, cx).child(probe("settings.dict.claude")).on_click(move |_, _, cx| st2.update(cx, |s, cx| s.command(cx, false, |h| async move { { h.update_global(None, Some(DictationService::Claude)); Ok(String::new()) } }))))
+                    .child(seg("dict-codex", "Codex", g.dictation == DictationService::Codex, cx).child(probe("settings.dict.codex")).on_click(move |_, _, cx| st3.update(cx, |s, cx| s.command(cx, false, |h| async move { { h.update_global(None, Some(DictationService::Codex)); Ok(String::new()) } })))),
+            );
+        let Some(st) = s.cur.settings.clone() else { return pad(div()).child(probe("settings")).child(tabs).child(ws_head).child(ws_global).into_any_element() };
         let info = s.info().cloned();
         let parent = info.as_ref().and_then(|i| i.task.parent).and_then(|p| s.tasks.get(&p)).map(|p| p.task.settings.depth);
         let max_depth = parent.map(|d| (d - 1).max(0)).unwrap_or(8);
@@ -1341,6 +1360,9 @@ impl SettingsPanel {
         pad(div())
             .child(probe("settings"))
             .child(tabs)
+            .child(ws_head)
+            .child(ws_global)
+            .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).mt(px(6.)).mb(px(4.)).child(if task == 0 { "Main chat".to_string() } else { format!("Task #{task}") }))
             .child(div().text_size(px(12.)).text_color(k.muted).mb(px(12.)).child("New child tasks start with a copy of these (a parent may override parts)."))
             .child(section(cx).child(section_title("instructions", cx)).child(div().child(Input::new(&self.instr)).child(probe("settings.instructions"))))
             .child(section(cx).child(section_title("tasks", cx)).child(field("depth: how many levels of child tasks it may create (0 = none; a child gets at most its parent's − 1)")).child(picker("depth", format!("{}{}", st.depth, if st.depth == 0 { " (no task tools)" } else { "" }), (0..=max_depth).map(|d| (d.to_string(), format!("{d}{}", if d == 0 { " (no task tools)" } else { "" }), d == st.depth)).collect(), move |v, cx| {
@@ -1376,7 +1398,56 @@ impl SettingsPanel {
                         g
                     }),
             )
-            .child(section(cx).child(section_title("workspace", cx)).child(field("working directory for tools")).child(Input::new(&self.cwd).small()).child(div().mt(px(8.)).child(field("view budget (bytes): the view grows to this size, then one batch merges it down to half"))).child(Input::new(&self.budget).small()))
+            .child(section(cx).child(section_title("files and view", cx)).child(field("working directory for tools")).child(Input::new(&self.cwd).small()).child(div().mt(px(8.)).child(field("view budget (bytes): the view grows to this size, then one batch merges it down to half"))).child(Input::new(&self.budget).small()))
+            .child(srvlog)
             .into_any_element()
+    }
+
+    /// App settings: the engines and the workspaces connected on each (tokens are in the Keychain)
+    fn engines_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = c(cx).clone();
+        let s = self.state.read(cx);
+        let mut sec = section(cx).child(section_title("engines and workspaces", cx)).child(probe("settings.engines"));
+        if s.engines.is_empty() {
+            sec = sec.child(div().text_size(px(12.)).text_color(k.muted).mb(px(8.)).child("No engine yet: add one (its address, e.g. chat.example.dev), then connect a workspace with its client token."));
+        }
+        for (i, e) in s.engines.iter().enumerate() {
+            let online = e.online.unwrap_or(false);
+            let ep = e.cfg.endpoint.clone();
+            let st = self.state.clone();
+            let mut card_ = card(cx).child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(dot(if online { k.green } else if e.online.is_none() { k.muted } else { k.red }, 7.))
+                    .child(div().flex_1().min_w_0().flex().flex_col().child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(e.cfg.name.clone())).child(div().text_size(px(11.)).text_color(k.muted).child(format!("{}{}", e.cfg.endpoint, if online { String::new() } else if let Some(er) = &e.error { format!(" · offline: {er}") } else { " · offline".into() }))))
+                    .child(btn_small(SharedString::from(format!("eng-rm-{i}")), "remove", Tone::Ghost, cx).on_click(move |_, _, cx| {
+                        let ep = ep.clone();
+                        st.update(cx, |s, cx| s.remove_engine(&ep, cx))
+                    })),
+            );
+            for m in s.meta.values().filter(|m| m.endpoint == e.cfg.endpoint) {
+                let key = crate::client::ws_key(&m.endpoint, &m.ws);
+                let st = self.state.clone();
+                let state = if m.disabled.is_some() { "disabled" } else if m.no_token { "no token" } else { match m.conn { optchat_proto::api::Conn::Open => "connected", optchat_proto::api::Conn::Connecting => "connecting", optchat_proto::api::Conn::Closed => "offline" } };
+                card_ = card_.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .pl(px(15.))
+                        .pt(px(6.))
+                        .child(div().flex_1().text_size(px(12.5)).child(format!("{}{}", m.ws, if key == s.active { "  ✓" } else { "" })))
+                        .child(div().text_size(px(11.)).text_color(k.muted).child(state))
+                        .child(btn_small(SharedString::from(format!("ws-dc-{key}")), "disconnect", Tone::Ghost, cx).on_click(move |_, _, cx| {
+                            let key = key.clone();
+                            st.update(cx, |s, cx| s.disconnect_ws(&key, cx))
+                        })),
+                );
+            }
+            sec = sec.child(div().mb(px(8.)).child(card_));
+        }
+        sec.child(div().flex().gap(px(6.)).child(btn_small("eng-add", "Add engine…", Tone::Plain, cx).child(probe("settings.addEngine")).on_click(|_, window, cx| window.dispatch_action(Box::new(crate::workspace::AddEngine), cx))).child(btn_small("ws-menu", "Workspaces…", Tone::Ghost, cx).on_click(|_, window, cx| window.dispatch_action(Box::new(crate::workspace::WorkspaceMenu), cx))))
     }
 }

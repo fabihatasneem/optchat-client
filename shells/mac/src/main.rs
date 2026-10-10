@@ -10,6 +10,10 @@ mod fmt;
 mod markdown;
 mod media;
 mod mic;
+mod notices_view;
+mod testcmd;
+mod tokens;
+mod workspaces;
 mod panels;
 mod state;
 mod statusbar;
@@ -40,24 +44,44 @@ impl AssetSource for Assets {
 
 actions!(app, [Quit, Hide, HideOthers, ShowAll]);
 
-/// Per-viewer prefs (tabs, sidebar, theme, window): `~/Library/Application Support/com.reframe.optchat.gpui`, one file
-/// per hub instance (task ids differ between instances); OPTCHAT_PREFS_DIR overrides the folder (tests).
-fn prefs_path(cfg: &client::HubCfg) -> String {
+/// The app's prefs (engines, connections, each workspace's tabs, theme, window): `~/Library/Application
+/// Support/com.reframe.optchat.gpui/prefs.json`; OPTCHAT_PREFS_DIR overrides the folder (tests).
+fn prefs_path() -> String {
     let dir = std::env::var("OPTCHAT_PREFS_DIR").unwrap_or_else(|_| format!("{}/Library/Application Support/com.reframe.optchat.gpui", std::env::var("HOME").unwrap_or_default()));
     let _ = std::fs::create_dir_all(&dir);
-    format!("{dir}/prefs{}.json", cfg.db.as_ref().map(|d| format!("-{d}")).unwrap_or_default())
+    format!("{dir}/prefs.json")
+}
+
+/// Tests: OPTCHAT_ENGINE (an endpoint) and OPTCHAT_CONNECT (workspace names, comma-separated) add that engine and
+/// those connections to the prefs at launch, their tokens from the JSON file OPTCHAT_TEST_TOKENS ({name: token}).
+/// The tokens go to the token store only; they are never printed.
+fn test_bootstrap(prefs_path: &str) {
+    let Ok(endpoint) = std::env::var("OPTCHAT_ENGINE") else { return };
+    let Ok(endpoint) = client::EngineCfg::normalize(&endpoint) else { return };
+    let mut prefs: state::Prefs = std::fs::read_to_string(prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if !prefs.engines.iter().any(|e| e.endpoint == endpoint) {
+        let name = std::env::var("OPTCHAT_ENGINE_NAME").unwrap_or_else(|_| endpoint.split("://").nth(1).unwrap_or("engine").to_string());
+        prefs.engines.push(client::EngineCfg { endpoint: endpoint.clone(), name });
+    }
+    let tokens: std::collections::BTreeMap<String, String> = std::env::var("OPTCHAT_TEST_TOKENS").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    for ws in std::env::var("OPTCHAT_CONNECT").unwrap_or_default().split(',').map(str::trim).filter(|w| !w.is_empty()) {
+        let c = state::ConnPref { endpoint: endpoint.clone(), ws: ws.to_string() };
+        if let Some(t) = tokens.get(ws) {
+            let _ = tokens::set(&c.key(), t);
+        }
+        if !prefs.connections.contains(&c) {
+            prefs.connections.push(c);
+        }
+    }
+    if let Ok(s) = serde_json::to_string_pretty(&prefs) {
+        let _ = std::fs::write(prefs_path, s);
+    }
 }
 
 fn main() {
     LAUNCH.get_or_init(std::time::Instant::now);
-    let cfg = match client::HubCfg::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(2);
-        }
-    };
-    let prefs_path = prefs_path(&cfg);
+    let prefs_path = prefs_path();
+    test_bootstrap(&prefs_path);
     let rt: &'static tokio::runtime::Runtime = Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("optchat-client").enable_all().build().expect("tokio runtime")));
     ui::start_probe_writer();
 
@@ -113,22 +137,22 @@ fn main() {
         let _ = win;
         cx.activate(true);
 
-        // the hub: one websocket (snapshot, events, commands, rpc), reconnecting by itself
+        // the engines: one websocket per engine (and token), carrying every connected workspace there
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let first = state.read(cx).current;
-        let client = {
-            let _g = rt.enter();
-            client::Client::start(cfg.clone(), first, tx)
-        };
         state.update(cx, |s, cx| {
             s.stats.launch_ms = LAUNCH.get().unwrap().elapsed().as_secs_f64() * 1000.0;
-            s.attach(client, rx, cx)
+            s.start(tx, rx, cx)
         });
         let st4 = state.clone();
         cx.on_app_quit(move |cx| {
-            let c = st4.read(cx).hub();
+            let s = st4.read(cx);
+            let conns = s.conns.clone();
+            let hubs: Vec<_> = s.hub().into_iter().chain(s.bg.values().filter_map(|d| d.hub.clone())).collect();
             async move {
-                if let Some(c) = c {
+                for h in hubs {
+                    h.shutdown();
+                }
+                for c in conns {
                     c.shutdown();
                 }
             }

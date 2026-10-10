@@ -1,4 +1,4 @@
-//! The app's connection to the OptChat hub (app/ws/serve.ts, lib/hub.ts): ONE websocket, like the browser's page.
+//! The app's connections to OptChat engines (spec-workspaces §2, §4) (app/ws/serve.ts, lib/hub.ts): ONE websocket, like the browser's page.
 //! A snapshot of the task on screen arrives on connect and after every `open`; then the hub's events; commands go up
 //! (send / cancel / stopTool / settings / global / control / spawn / approve) and rpc calls come back by id.
 //! Reconnects with backoff (0.4 s doubling to 5 s) and resnapshots. Images come from GET /blob/<sha>; each dictation
@@ -18,61 +18,44 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-/// Where the hub is: OPTCHAT_HUB (default https://chat.reframe.dev) and OPTCHAT_HUB_DB (a test instance, t<id>).
-#[derive(Clone, Debug)]
-pub struct HubCfg {
-    pub base: String,
-    pub db: Option<String>,
+/// An engine: where it is (https://<host>, or http://127.0.0.1:<port> for a local relay in tests) and its name.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct EngineCfg {
+    pub endpoint: String,
+    pub name: String,
 }
-impl HubCfg {
-    pub fn from_env() -> Result<HubCfg, String> {
-        let base = std::env::var("OPTCHAT_HUB").unwrap_or_else(|_| "https://chat.reframe.dev".into()).trim_end_matches('/').to_string();
-        if !base.starts_with("https://") {
-            return Err(format!("OPTCHAT_HUB must be an https URL (got {base})"));
+impl EngineCfg {
+    pub fn normalize(endpoint: &str) -> Result<String, String> {
+        let e = endpoint.trim().trim_end_matches('/').to_string();
+        let e = if e.contains("://") { e } else { format!("https://{e}") };
+        let local = e.starts_with("http://127.0.0.1:") || e.starts_with("http://localhost:");
+        if !(e.starts_with("https://") || local) {
+            return Err(format!("an engine is https://<host> (got {e})"));
         }
-        let db = std::env::var("OPTCHAT_HUB_DB").ok().filter(|d| !d.is_empty());
-        if let Some(d) = &db {
-            let ok = d.len() >= 2 && d.len() <= 25 && d.starts_with('t') && d[1..].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
-            if !ok {
-                return Err(format!("OPTCHAT_HUB_DB must be a test instance like t<id> (got {d})"));
-            }
-        }
-        Ok(HubCfg { base, db })
+        Ok(e)
     }
     fn host(&self) -> &str {
-        self.base.trim_start_matches("https://")
+        self.endpoint.split("://").nth(1).unwrap_or(&self.endpoint)
     }
+    /// the edge admits same-origin requests only: Origin https://<host> (a local relay rewrites it)
     pub fn origin(&self) -> String {
         format!("https://{}", self.host())
     }
-    fn query(&self, task: Option<i64>) -> String {
-        let mut q = vec![];
-        if let Some(t) = task {
-            q.push(format!("task={t}"));
-        }
-        if let Some(d) = &self.db {
-            q.push(format!("db={d}"));
-        }
-        if q.is_empty() {
-            String::new()
-        } else {
-            format!("?{}", q.join("&"))
-        }
+    pub fn ws_base(&self) -> String {
+        if self.endpoint.starts_with("http://") { format!("ws://{}", self.host()) } else { format!("wss://{}", self.host()) }
     }
-    pub fn ws_url(&self, path: &str, task: i64) -> String {
-        format!("wss://{}{path}{}", self.host(), self.query(Some(task)))
-    }
-    pub fn blob_url(&self, sha: &str) -> String {
-        format!("{}/blob/{sha}{}", self.base, self.query(None))
-    }
-    /// what the status bar and settings show: the hub and the instance
     pub fn label(&self) -> String {
-        match &self.db {
-            Some(d) => format!("{} · {d}", self.host()),
-            None => self.host().to_string(),
-        }
+        self.name.clone()
     }
 }
+
+/// The key of a connected workspace in the app: `<endpoint>|<workspace>`.
+pub fn ws_key(endpoint: &str, ws: &str) -> String {
+    format!("{endpoint}|{ws}")
+}
+
+/// What the connections send the app: (engine endpoint, workspace or None for the engine itself, event).
+pub type Routed = (String, Option<String>, HubEvent);
 
 pub struct Blob {
     pub media_type: String,
@@ -82,62 +65,79 @@ pub struct Blob {
 type RpcReply = oneshot::Sender<Result<Value, String>>;
 type ControlReply = oneshot::Sender<(bool, String, Option<i64>)>;
 
-pub struct Client {
-    pub cfg: HubCfg,
-    events: mpsc::UnboundedSender<HubEvent>,
+/// One socket to an engine (`/engine/ws`) with one client token; it carries every workspace of that token the app is
+/// connected to (`connect {ws}` / `disconnect {ws}`; `ws` on every message). Reconnects with backoff and connects
+/// its workspaces again (each answers with `hello` and a snapshot).
+pub struct EngineConn {
+    pub cfg: EngineCfg,
+    token: String,
+    events: mpsc::UnboundedSender<Routed>,
     out: Mutex<Option<mpsc::UnboundedSender<WsMsg>>>,
     rpcs: Mutex<HashMap<u64, RpcReply>>,
     controls: Mutex<HashMap<u64, ControlReply>>,
     next: AtomicU64,
-    task: AtomicI64,
+    /// connected workspaces → the task on screen there
+    subs: Mutex<HashMap<String, i64>>,
     stopped: AtomicBool,
-    http: reqwest::Client,
-    dict: Mutex<Option<Arc<DictSession>>>,
-    /// reconnects so far (status bar, tests)
+    pub online: AtomicBool,
     pub reconnects: AtomicU64,
+    http: reqwest::Client,
 }
 
-impl Client {
-    /// Connect (and keep reconnecting) on the current tokio runtime; events go to `events`.
-    pub fn start(cfg: HubCfg, task: i64, events: mpsc::UnboundedSender<HubEvent>) -> Arc<Client> {
-        let c = Arc::new(Client {
+impl EngineConn {
+    pub fn start(cfg: EngineCfg, token: String, events: mpsc::UnboundedSender<Routed>) -> Arc<EngineConn> {
+        let c = Arc::new(EngineConn {
             cfg,
+            token,
             events,
             out: Mutex::new(None),
             rpcs: Mutex::new(HashMap::new()),
             controls: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
-            task: AtomicI64::new(task),
+            subs: Mutex::new(HashMap::new()),
             stopped: AtomicBool::new(false),
-            http: reqwest::Client::builder().timeout(Duration::from_secs(30)).build().expect("http client"),
-            dict: Mutex::new(None),
+            online: AtomicBool::new(false),
             reconnects: AtomicU64::new(0),
+            http: reqwest::Client::builder().timeout(Duration::from_secs(30)).build().expect("http client"),
         });
         let me = c.clone();
         tokio::spawn(async move { me.run().await });
         c
     }
-
-    fn emit(&self, e: HubEvent) {
-        let _ = self.events.send(e);
+    pub fn same_token(&self, token: &str) -> bool {
+        self.token == token
+    }
+    fn emit(&self, ws: Option<&str>, e: HubEvent) {
+        let _ = self.events.send((self.cfg.endpoint.clone(), ws.map(String::from), e));
+    }
+    fn emit_all(&self, e: impl Fn() -> HubEvent) {
+        let names: Vec<String> = self.subs.lock().keys().cloned().collect();
+        for n in names {
+            self.emit(Some(&n), e());
+        }
     }
 
     async fn run(self: Arc<Self>) {
         let mut retry: u32 = 0;
         let mut first = true;
         while !self.stopped.load(Ordering::SeqCst) {
-            self.emit(HubEvent::Conn(Conn::Connecting));
-            let url = self.cfg.ws_url("/ws", self.task.load(Ordering::SeqCst));
-            match self.connect(&url).await {
+            self.emit_all(|| HubEvent::Conn(Conn::Connecting));
+            match self.connect(&format!("{}/engine/ws", self.cfg.ws_base())).await {
                 Ok(ws) => {
                     retry = 0;
                     if !first {
                         self.reconnects.fetch_add(1, Ordering::SeqCst);
                     }
                     first = false;
-                    self.emit(HubEvent::Conn(Conn::Open));
+                    self.online.store(true, Ordering::SeqCst);
+                    self.emit(None, HubEvent::EngineOnline(true));
+                    self.emit(None, HubEvent::EngineError(String::new()));
                     let (mut w, mut r) = ws.split();
                     let (tx, mut rx) = mpsc::unbounded_channel::<WsMsg>();
+                    // every connected workspace again: each answers hello + snapshot
+                    for (ws, task) in self.subs.lock().iter() {
+                        let _ = tx.send(WsMsg::text(json!({ "type": "connect", "ws": ws, "task": task }).to_string()));
+                    }
                     *self.out.lock() = Some(tx);
                     let writer = tokio::spawn(async move {
                         while let Some(m) = rx.recv().await {
@@ -157,23 +157,27 @@ impl Client {
                     *self.out.lock() = None;
                     writer.abort();
                     for (_, tx) in self.rpcs.lock().drain() {
-                        let _ = tx.send(Err("disconnected from the hub".into()));
+                        let _ = tx.send(Err("disconnected from the engine".into()));
                     }
                     for (_, tx) in self.controls.lock().drain() {
-                        let _ = tx.send((false, "disconnected from the hub".into(), None));
+                        let _ = tx.send((false, "disconnected from the engine".into(), None));
                     }
-                    self.emit(HubEvent::Conn(Conn::Closed));
+                    self.online.store(false, Ordering::SeqCst);
+                    self.emit(None, HubEvent::EngineOnline(false));
+                    self.emit_all(|| HubEvent::Conn(Conn::Closed));
                 }
                 Err(e) => {
-                    self.emit(HubEvent::Conn(Conn::Closed));
-                    self.emit(HubEvent::ServerLog(format!("{} hub connection failed: {e}", chrono::Local::now().format("%H:%M:%S"))));
+                    self.online.store(false, Ordering::SeqCst);
+                    self.emit(None, HubEvent::EngineOnline(false));
+                    self.emit_all(|| HubEvent::Conn(Conn::Closed));
+                    self.emit(None, HubEvent::EngineError(e));
                 }
             }
             if self.stopped.load(Ordering::SeqCst) {
                 break;
             }
-            // like the page: 0.4 s, doubling, at most 5 s
-            let ms = (400u64 << retry.min(4)).min(5000);
+            // 0.4 s, doubling, at most 4 s: an engine that comes back is seen within ~5 s
+            let ms = (400u64 << retry.min(4)).min(4000);
             retry += 1;
             tokio::time::sleep(Duration::from_millis(ms)).await;
         }
@@ -181,47 +185,76 @@ impl Client {
 
     async fn connect(&self, url: &str) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, String> {
         let mut req = url.into_client_request().map_err(|e| e.to_string())?;
-        // the endpoint is same-origin only: Origin must be https://<host>
-        req.headers_mut().insert("Origin", self.cfg.origin().parse().map_err(|_| "bad origin".to_string())?);
-        let (ws, _) = tokio::time::timeout(Duration::from_secs(15), tokio_tungstenite::connect_async(req)).await.map_err(|_| "timed out".to_string())?.map_err(|e| e.to_string())?;
+        let h = req.headers_mut();
+        h.insert("Origin", self.cfg.origin().parse().map_err(|_| "bad origin".to_string())?);
+        h.insert("Authorization", format!("Bearer {}", self.token).parse().map_err(|_| "bad token".to_string())?);
+        let (ws, _) = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(req)).await.map_err(|_| "timed out".to_string())?.map_err(|e| match e {
+            tokio_tungstenite::tungstenite::Error::Http(r) if r.status().as_u16() == 401 => "the token was refused".to_string(),
+            e => e.to_string(),
+        })?;
         Ok(ws)
     }
 
     fn on_message(&self, text: &str) {
         let Ok(m) = serde_json::from_str::<Value>(text) else { return };
+        let ws = m["ws"].as_str().map(String::from);
+        let ws = ws.as_deref();
         match m["type"].as_str() {
             Some("rpc") => {
-                if let Some(id) = m["id"].as_u64() {
-                    if let Some(tx) = self.rpcs.lock().remove(&id) {
-                        let r = match m.get("error").and_then(|e| e.as_str()) {
-                            Some(e) => Err(e.to_string()),
-                            None => Ok(m["result"].clone()),
-                        };
-                        let _ = tx.send(r);
-                    }
+                if let Some(tx) = m["id"].as_u64().and_then(|id| self.rpcs.lock().remove(&id)) {
+                    let _ = tx.send(match m.get("error").and_then(|e| e.as_str()) {
+                        Some(e) => Err(e.to_string()),
+                        None => Ok(m["result"].clone()),
+                    });
                 }
             }
             Some("controlDone") => {
                 let ok = m["ok"].as_bool().unwrap_or(false);
                 let message = m["message"].as_str().unwrap_or("").to_string();
                 let spawned = m["spawned"].as_i64();
-                // a command of ours waits for it; other clients' outcomes are not broadcast (the hub replies to one socket)
-                let waiting = m["id"].as_u64().and_then(|id| self.controls.lock().remove(&id));
-                match waiting {
+                match m["id"].as_u64().and_then(|id| self.controls.lock().remove(&id)) {
                     Some(tx) => {
                         let _ = tx.send((ok, message, spawned));
                     }
-                    None => self.emit(HubEvent::Notice { ok, message, spawned }),
+                    None => self.emit(ws, HubEvent::Notice { ok, message, spawned }),
                 }
             }
+            Some("error") if m["id"].as_u64().is_some() => {
+                // a refused request of ours (not connected, out of scope): answer whoever waits
+                let id = m["id"].as_u64().unwrap();
+                let msg = m["message"].as_str().unwrap_or("refused").to_string();
+                if let Some(tx) = self.rpcs.lock().remove(&id) {
+                    let _ = tx.send(Err(msg));
+                } else if let Some(tx) = self.controls.lock().remove(&id) {
+                    let _ = tx.send((false, msg, None));
+                }
+            }
+            Some("workspaces") => {
+                let list = m["workspaces"].as_array().map(|a| a.iter().map(|w| (w["name"].as_str().unwrap_or("").to_string(), w["running"].as_bool().unwrap_or(false))).collect()).unwrap_or_default();
+                self.emit(None, HubEvent::EngineWorkspaces(list));
+            }
+            Some("hello") => {
+                self.emit(ws, HubEvent::Hello { version: m["version"].as_str().unwrap_or("").into(), build: m["build"].as_str().unwrap_or("").into() });
+                self.emit(ws, HubEvent::Conn(Conn::Open));
+            }
+            Some("disabled") => {
+                if let Some(w) = ws {
+                    self.subs.lock().remove(w);
+                }
+                self.emit(ws, HubEvent::Disabled(m["reason"].as_str().unwrap_or("disabled on the engine").into()));
+            }
+            Some("disconnected") => {}
             Some("snapshot") => {
                 if let Some(s) = Snapshot::parse(&m) {
-                    self.emit(HubEvent::Snapshot(Box::new(s)));
+                    self.emit(ws, HubEvent::Snapshot(Box::new(s)));
                 }
+            }
+            Some("notices") => {
+                self.emit(ws, HubEvent::Notices { changed: serde_json::from_value(m["notices"].clone()).unwrap_or_default(), unread: serde_json::from_value(m["unread"].clone()).unwrap_or_default() });
             }
             _ => {
                 if let Some(e) = parse_event(&m) {
-                    self.emit(e);
+                    self.emit(ws, e);
                 }
             }
         }
@@ -229,69 +262,158 @@ impl Client {
 
     fn send_json(&self, v: Value) -> Result<(), String> {
         match self.out.lock().as_ref() {
-            Some(tx) => tx.send(WsMsg::text(v.to_string())).map_err(|_| "not connected to the hub".to_string()),
-            None => Err("not connected to the hub".into()),
+            Some(tx) => tx.send(WsMsg::text(v.to_string())).map_err(|_| "not connected to the engine".to_string()),
+            None => Err("not connected to the engine".into()),
         }
     }
-
-    /// tests: an event through the app's own path (AppState::apply), as if the hub had sent it
-    pub fn inject(&self, e: HubEvent) {
-        self.emit(e);
+    pub fn connect_ws(&self, ws: &str, task: i64) {
+        self.subs.lock().insert(ws.to_string(), task);
+        let _ = self.send_json(json!({ "type": "connect", "ws": ws, "task": task }));
     }
-    /// an image from the hub's database, or None
-    pub async fn get_blob(&self, sha: &str) -> Option<Blob> {
-        self.blob(sha).await.ok().map(|(media_type, bytes)| Blob { media_type, bytes })
+    pub fn disconnect_ws(&self, ws: &str) {
+        self.subs.lock().remove(ws);
+        let _ = self.send_json(json!({ "type": "disconnect", "ws": ws }));
     }
-
-    /// tests: close the socket as a network drop would; the client reconnects and resnapshots
-    pub fn drop_connection(&self) {
-        if let Some(tx) = self.out.lock().as_ref() {
-            let _ = tx.send(WsMsg::Close(None));
-        }
-    }
-
-    pub fn current_task(&self) -> i64 {
-        self.task.load(Ordering::SeqCst)
+    pub fn has_subs(&self) -> bool {
+        !self.subs.lock().is_empty()
     }
     pub fn shutdown(&self) {
         self.stopped.store(true, Ordering::SeqCst);
         if let Some(tx) = self.out.lock().take() {
             let _ = tx.send(WsMsg::Close(None));
         }
+    }
+    pub fn drop_connection(&self) {
+        if let Some(tx) = self.out.lock().as_ref() {
+            let _ = tx.send(WsMsg::Close(None));
+        }
+    }
+}
+
+/// GET <engine>/engine/workspaces: the engine's workspaces {name, running} (no token); Err when it is unreachable.
+pub async fn list_workspaces(cfg: &EngineCfg) -> Result<Vec<(String, bool)>, String> {
+    let r = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(format!("{}/engine/workspaces", cfg.endpoint))
+        .header("Origin", cfg.origin())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !r.status().is_success() {
+        return Err(format!("{}", r.status()));
+    }
+    let v: Value = serde_json::from_str(&r.text().await.map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let a = v.as_array().cloned().or_else(|| v["workspaces"].as_array().cloned()).unwrap_or_default();
+    Ok(a.iter().map(|w| (w["name"].as_str().unwrap_or("").to_string(), w["running"].as_bool().unwrap_or(false))).collect())
+}
+
+/// A connected workspace: the API the views use (the hub's commands and rpc), tagged with its name, on its engine's
+/// socket.
+pub struct Client {
+    pub conn: Arc<EngineConn>,
+    pub ws: String,
+    task: AtomicI64,
+    dict: Mutex<Option<Arc<DictSession>>>,
+}
+
+impl Client {
+    pub fn new(conn: Arc<EngineConn>, ws: &str, task: i64) -> Arc<Client> {
+        conn.connect_ws(ws, task);
+        Arc::new(Client { conn, ws: ws.to_string(), task: AtomicI64::new(task), dict: Mutex::new(None) })
+    }
+    fn emit(&self, e: HubEvent) {
+        self.conn.emit(Some(&self.ws), e);
+    }
+    pub fn key(&self) -> String {
+        ws_key(&self.conn.cfg.endpoint, &self.ws)
+    }
+    /// what the about box and the server log show
+    pub fn label(&self) -> String {
+        format!("{} · {}", self.conn.cfg.name, self.ws)
+    }
+    pub fn reconnects(&self) -> u64 {
+        self.conn.reconnects.load(Ordering::SeqCst)
+    }
+    fn send_json(&self, mut v: Value) -> Result<(), String> {
+        v["ws"] = json!(self.ws);
+        self.conn.send_json(v)
+    }
+    /// tests: an event through the app's own path (AppState::apply), as if the engine had sent it
+    pub fn inject(&self, e: HubEvent) {
+        self.emit(e);
+    }
+    /// an image from the workspace's database, or None
+    pub async fn get_blob(&self, sha: &str) -> Option<Blob> {
+        self.blob(sha).await.ok().map(|(media_type, bytes)| Blob { media_type, bytes })
+    }
+    /// tests: close the engine socket as a network drop would; it reconnects and resnapshots
+    pub fn drop_connection(&self) {
+        self.conn.drop_connection();
+    }
+    pub fn current_task(&self) -> i64 {
+        self.task.load(Ordering::SeqCst)
+    }
+    pub fn disconnect(&self) {
+        if let Some(d) = self.dict.lock().take() {
+            d.stop();
+        }
+        self.conn.disconnect_ws(&self.ws);
+    }
+    pub fn shutdown(&self) {
         if let Some(d) = self.dict.lock().take() {
             d.stop();
         }
     }
+    /// mark notices read on the engine (ids, every unread one of a level, or all); every client sees it
+    pub fn read_notices(&self, ids: Option<Vec<String>>, level: Option<&str>, all: bool) {
+        let mut m = json!({ "type": "notices.read", "all": all });
+        if let Some(i) = ids {
+            m["ids"] = json!(i);
+        }
+        if let Some(l) = level {
+            m["level"] = json!(l);
+        }
+        let _ = self.send_json(m);
+    }
+    pub async fn notices(&self, level: Option<&str>, limit: usize) -> Vec<Notice> {
+        let mut p = json!({ "limit": limit });
+        if let Some(l) = level {
+            p["level"] = json!(l);
+        }
+        self.rpc("notices", p).await.ok().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+    }
 
     // ---- calls ------------------------------------------------------------------------------------------------------
     pub async fn rpc(&self, method: &str, mut params: Value) -> Result<Value, String> {
-        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        let id = self.conn.next.fetch_add(1, Ordering::SeqCst);
         if params.get("task").is_none() {
             params["task"] = json!(self.current_task());
         }
         let (tx, rx) = oneshot::channel();
-        self.rpcs.lock().insert(id, tx);
+        self.conn.rpcs.lock().insert(id, tx);
         if let Err(e) = self.send_json(json!({ "type": "rpc", "id": id, "method": method, "params": params })) {
-            self.rpcs.lock().remove(&id);
+            self.conn.rpcs.lock().remove(&id);
             return Err(e);
         }
         match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(r)) => r,
             Ok(Err(_)) => Err("disconnected from the hub".into()),
             Err(_) => {
-                self.rpcs.lock().remove(&id);
+                self.conn.rpcs.lock().remove(&id);
                 Err(format!("{method}: timed out"))
             }
         }
     }
 
     async fn control_msg(&self, mut msg: Value) -> Result<(String, Option<i64>), String> {
-        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        let id = self.conn.next.fetch_add(1, Ordering::SeqCst);
         msg["id"] = json!(id);
         let (tx, rx) = oneshot::channel();
-        self.controls.lock().insert(id, tx);
+        self.conn.controls.lock().insert(id, tx);
         if let Err(e) = self.send_json(msg) {
-            self.controls.lock().remove(&id);
+            self.conn.controls.lock().remove(&id);
             return Err(e);
         }
         match tokio::time::timeout(Duration::from_secs(60), rx).await {
@@ -299,8 +421,8 @@ impl Client {
             Ok(Ok((false, m, _))) => Err(m),
             Ok(Err(_)) => Err("disconnected from the hub".into()),
             Err(_) => {
-                self.controls.lock().remove(&id);
-                Err("the hub did not answer".into())
+                self.conn.controls.lock().remove(&id);
+                Err("the engine did not answer".into())
             }
         }
     }
@@ -318,6 +440,7 @@ impl Client {
     /// show this task: the hub answers with its snapshot (a HubEvent::Snapshot)
     pub fn open(&self, task: i64) {
         self.task.store(task, Ordering::SeqCst);
+        self.conn.subs.lock().insert(self.ws.clone(), task);
         let _ = self.send_json(json!({ "type": "open", "task": task }));
     }
 
@@ -340,9 +463,9 @@ impl Client {
     pub fn stop_tool(&self, call_id: &str) {
         let _ = self.send_json(json!({ "type": "stopTool", "callId": call_id }));
     }
-    pub fn update_settings(&self, task: i64, patch: SettingsPatch) -> Result<&'static str, String> {
-        self.send_json(json!({ "type": "settings", "task": task, "patch": patch }))?;
-        Ok("saved")
+    /// the outcome (now · next turn · saved) comes back in controlDone and as an info notice
+    pub async fn update_settings(&self, task: i64, patch: SettingsPatch) -> Result<String, String> {
+        self.control_msg(json!({ "type": "settings", "task": task, "patch": patch })).await.map(|r| r.0)
     }
     pub fn update_global(&self, max_turns: Option<u32>, dictation: Option<DictationService>) {
         let mut patch = json!({});
@@ -461,7 +584,8 @@ impl Client {
 
     /// an image from the hub's database (GET /blob/<sha>)
     pub async fn blob(&self, sha: &str) -> Result<(String, Vec<u8>), String> {
-        let r = self.http.get(self.cfg.blob_url(sha)).send().await.map_err(|e| e.to_string())?;
+        let url = format!("{}/engine/blob/{sha}?ws={}", self.conn.cfg.endpoint, self.ws);
+        let r = self.conn.http.get(url).header("Origin", self.conn.cfg.origin()).bearer_auth(&self.conn.token).send().await.map_err(|e| e.to_string())?;
         if !r.status().is_success() {
             return Err(format!("blob {sha}: {}", r.status()));
         }
@@ -549,8 +673,8 @@ impl DictSession {
         }
         let me = s.clone();
         tokio::spawn(async move {
-            let url = client.cfg.ws_url("/stt", task);
-            let ws = match client.connect(&url).await {
+            let url = format!("{}/engine/stt?ws={}&task={task}", client.conn.cfg.ws_base(), client.ws);
+            let ws = match client.conn.connect(&url).await {
                 Ok(ws) => ws,
                 Err(e) => {
                     emit(DictEvent::Error(format!("dictation could not connect: {e}")));

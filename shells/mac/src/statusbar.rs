@@ -25,7 +25,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
     let offline = s.conn != optchat_proto::api::Conn::Open;
     // like the page: the connection first, then the turn, then the task
     let status = if s.hub.is_none() {
-        s.error.clone().map(|e| format!("failed: {e}")).unwrap_or("starting".into())
+        if s.meta.is_empty() { "no workspace: add an engine and connect one".to_string() } else if s.meta.get(&s.active).is_some_and(|m| m.no_token) { "no token: connect again".into() } else { "starting".into() }
     } else if offline {
         if s.conn == optchat_proto::api::Conn::Closed { "disconnected · reconnecting".into() } else { "connecting".into() }
     } else if let Some(r) = &s.cur.running {
@@ -50,6 +50,22 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
     } else {
         dot(k.green.opacity(0.8), 7.).into_any_element()
     };
+    // the workspace on screen (click: the workspace menu)
+    if let Some(m) = s.meta.get(&s.active) {
+        let hover = k.hover.opacity(0.5);
+        let engine = s.engines.iter().find(|e| e.cfg.endpoint == m.endpoint).map(|e| e.cfg.name.clone()).unwrap_or_default();
+        left = left.child(
+            item()
+                .id("sb-ws")
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover))
+                .child(icon("layers", 13., fg))
+                .child(m.ws.clone())
+                .child(probe("status.ws"))
+                .tooltip(tooltip(format!("workspace {} on {engine} (click to switch)", m.ws)))
+                .on_click(cx.listener(|w, _, _, cx| crate::workspaces::open_menu(w, cx))),
+        );
+    }
     left = left.child(item().child(sdot).child(status.clone()).child(probe("status.text")));
     if let Some(t) = &t {
         if t.parent.is_some() && !narrow {
@@ -66,6 +82,26 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
         left = left.child(item().child(format!("{} queued", s.cur.queue.len())));
     }
     let mut right = div().flex().items_center().h_full().flex_none();
+    // unread notices of this workspace, a dot per level (click: the Notifications view)
+    {
+        let u = s.unread();
+        let hover = k.hover.opacity(0.5);
+        let mut n = item().id("sb-notices").cursor_pointer().hover(move |s| s.bg(hover)).gap(px(7.)).child(probe("status.notices"));
+        let mut any = false;
+        for (lv, cnt, col) in [("error", u.error, k.red), ("warn", u.warn, k.amber), ("info", u.info, k.muted), ("ok", u.ok, k.green)] {
+            if cnt > 0 {
+                any = true;
+                n = n.child(div().flex().items_center().gap(px(3.)).child(dot(col, 7.)).child(cnt.to_string()).child(probe(format!("status.notice.{lv}"))));
+            }
+        }
+        if !any {
+            n = n.child(icon("bell", 13., fg.opacity(0.7)));
+        }
+        if probes_on() {
+            set_state_extra("statusNotices", serde_json::json!(u));
+        }
+        right = right.child(n.tooltip(tooltip(format!("notifications: {} unread (click to show them)", u.total()))).on_click(cx.listener(|w, _, _, cx| w.pick(View::Notifications, cx))));
+    }
     if probes_on() {
         let cost = sub(info.as_ref(), "usd") as f64 / 1e6;
         let b = t.as_ref().and_then(|t| t.budget.usd);
@@ -138,7 +174,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
                                         let st = st.clone();
                                         m = m.item(PopupMenuItem::new(mi.label.clone()).checked(mi.id == cur_model).on_click(move |_, _, cx| {
                                             let id = id.clone();
-                                            st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).map(|x| x.to_string()) }))
+                                            st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).await }))
                                         }));
                                     }
                                 }
@@ -155,7 +191,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
                             let ev = e.clone();
                             m = m.item(PopupMenuItem::new(e.clone()).checked(*e == cur_e).on_click(move |_, _, cx| {
                                 let ev = ev.clone();
-                                st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, SettingsPatch { effort: Some(ev), ..Default::default() }).map(|x| x.to_string()) }))
+                                st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, SettingsPatch { effort: Some(ev), ..Default::default() }).await }))
                             }));
                         }
                         m

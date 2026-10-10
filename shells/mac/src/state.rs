@@ -1,7 +1,7 @@
 //! The app's model (app/ui/state.ts): a mirror of the hub's state for the task on screen plus the global bits,
 //! fed by the hub's websocket messages (`HubEvent`s), and the commands the views send (on the client's runtime, never
 //! on the UI thread).
-use crate::client::Client;
+use crate::client::{ws_key, Client, EngineCfg, EngineConn, Routed};
 use gpui::{App, AppContext, Context, Entity, EventEmitter, Task};
 use optchat_proto::api::*;
 use optchat_proto::types::*;
@@ -17,10 +17,11 @@ pub enum View {
     Context,
     Log,
     Models,
+    Notifications,
     Settings,
 }
 impl View {
-    pub const ALL: [View; 6] = [View::Tasks, View::Memory, View::Context, View::Log, View::Models, View::Settings];
+    pub const ALL: [View; 7] = [View::Tasks, View::Memory, View::Context, View::Log, View::Models, View::Notifications, View::Settings];
     pub fn label(&self) -> &'static str {
         match self {
             View::Tasks => "Tasks",
@@ -28,6 +29,7 @@ impl View {
             View::Context => "Context",
             View::Log => "Log",
             View::Models => "Models",
+            View::Notifications => "Notifications",
             View::Settings => "Settings",
         }
     }
@@ -38,15 +40,51 @@ impl View {
             View::Context => "scan-text",
             View::Log => "scroll-text",
             View::Models => "cpu",
+            View::Notifications => "bell",
             View::Settings => "settings",
         }
     }
 }
 
-/// per-viewer layout preferences (a JSON file next to the database); missing fields take their defaults
+/// A connection: a workspace on an engine (its token is in the Keychain under the same key).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConnPref {
+    pub endpoint: String,
+    pub ws: String,
+}
+impl ConnPref {
+    pub fn key(&self) -> String {
+        ws_key(&self.endpoint, &self.ws)
+    }
+}
+
+/// what each workspace remembers (its tabs, the task on screen, the sidebar's view)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WsPrefs {
+    pub view: View,
+    pub side_open: bool,
+    pub task_scope_all: bool,
+    pub show_ended: bool,
+    pub settings_tab_global: bool,
+    pub tabs: Vec<i64>,
+    pub current: i64,
+}
+impl Default for WsPrefs {
+    fn default() -> Self {
+        WsPrefs { view: View::Tasks, side_open: true, task_scope_all: false, show_ended: true, settings_tab_global: false, tabs: vec![0], current: 0 }
+    }
+}
+
+/// the app's settings (Application Support/…/prefs.json): engines and connections, theme, zoom, window; the
+/// workspace-level ones (tabs, view, …) are the active workspace's, the others' are in `ws`
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
+    pub engines: Vec<EngineCfg>,
+    pub connections: Vec<ConnPref>,
+    pub active: Option<String>,
+    pub ws: BTreeMap<String, WsPrefs>,
     /// window bounds [x, y, w, h] in points, restored at launch
     pub window: Option<[f32; 4]>,
     pub view: View,
@@ -63,7 +101,7 @@ pub struct Prefs {
 }
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { window: None, view: View::Tasks, side_open: true, side_w: 320.0, task_scope_all: false, show_ended: true, settings_tab_global: false, theme: None, follow_system: true, tabs: vec![0], current: 0, font_size: 14.0 }
+        Prefs { engines: vec![], connections: vec![], active: None, ws: BTreeMap::new(), window: None, view: View::Tasks, side_open: true, side_w: 320.0, task_scope_all: false, show_ended: true, settings_tab_global: false, theme: None, follow_system: true, tabs: vec![0], current: 0, font_size: 14.0 }
     }
 }
 
@@ -118,7 +156,95 @@ pub struct Dict {
     pub error: Option<(String, std::time::Instant)>,
 }
 
+/// A connected workspace's state while another one is on screen (swapped with AppState's fields on a switch; its
+/// events keep being applied to it, quietly).
+pub struct WsData {
+    pub hub: Option<Arc<Client>>,
+    pub conn: Conn,
+    pub version: String,
+    pub build: String,
+    pub instance: String,
+    pub computer_available: bool,
+    pub tasks: BTreeMap<i64, TaskInfo>,
+    pub current: i64,
+    pub cur: Cur,
+    pub models: Vec<ModelInfo>,
+    pub global: GlobalSettings,
+    pub busy: Vec<String>,
+    pub failed: BTreeMap<String, String>,
+    pub approvals: Vec<Approval>,
+    pub server_log: VecDeque<String>,
+    pub errors: Vec<String>,
+    pub follow: bool,
+    pub selected_request: Option<String>,
+    pub pinned_request: bool,
+    pub notices: Vec<Notice>,
+    pub notices_loaded: bool,
+    pub wp: WsPrefs,
+}
+impl WsData {
+    pub fn new(hub: Option<Arc<Client>>, wp: WsPrefs) -> WsData {
+        WsData {
+            hub,
+            conn: Conn::Connecting,
+            version: String::new(),
+            build: String::new(),
+            instance: String::new(),
+            computer_available: false,
+            tasks: BTreeMap::new(),
+            current: wp.current,
+            cur: Cur::default(),
+            models: vec![],
+            global: GlobalSettings::default(),
+            busy: vec![],
+            failed: BTreeMap::new(),
+            approvals: vec![],
+            server_log: VecDeque::new(),
+            errors: vec![],
+            follow: true,
+            selected_request: None,
+            pinned_request: false,
+            notices: vec![],
+            notices_loaded: false,
+            wp,
+        }
+    }
+}
+
+/// What the app knows of every connected workspace, on screen or not (the workspace menu, the dots).
+#[derive(Clone, Debug)]
+pub struct WsMeta {
+    pub endpoint: String,
+    pub ws: String,
+    pub unread: Unread,
+    pub conn: Conn,
+    pub disabled: Option<String>,
+    /// no token for it (in the Keychain): connect again
+    pub no_token: bool,
+}
+
+/// An engine in the workspace menu: online (a socket or the public list answers), its workspaces.
+#[derive(Clone, Debug)]
+pub struct EngineView {
+    pub cfg: EngineCfg,
+    pub online: Option<bool>,
+    pub workspaces: Vec<(String, bool)>,
+    pub error: Option<String>,
+}
+
 pub struct AppState {
+    /// the workspace on screen: `<endpoint>|<name>` (empty: none connected)
+    pub active: String,
+    pub bg: HashMap<String, WsData>,
+    pub meta: BTreeMap<String, WsMeta>,
+    pub engines: Vec<EngineView>,
+    pub conns: Vec<Arc<EngineConn>>,
+    pub notices: Vec<Notice>,
+    pub notices_loaded: bool,
+    /// applying a background workspace's event: no UI events, no timing
+    quiet: bool,
+    local_seq: u64,
+    pub ws_switches: Vec<f64>,
     pub hub: Option<Arc<Client>>,
     /// the websocket's state (status bar: "disconnected · reconnecting")
     pub conn: Conn,
@@ -139,7 +265,6 @@ pub struct AppState {
     pub approvals: Vec<Approval>,
     pub server_log: VecDeque<String>,
     pub errors: Vec<String>,
-    pub notice: Option<(bool, String, std::time::Instant)>,
     pub dict: Dict,
     pub prefs: Prefs,
     pub prefs_path: String,
@@ -149,7 +274,9 @@ pub struct AppState {
     pub selected_request: Option<String>,
     pub pinned_request: bool,
     pub stats: Stats,
+    tx: Option<tokio::sync::mpsc::UnboundedSender<Routed>>,
     _pump: Option<Task<()>>,
+    _poll: Option<Task<()>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -170,6 +297,8 @@ pub enum StateEvent {
     SpawnedOpen(i64),
     DictText,
     Appended,
+    /// another workspace is on screen
+    WsSwitched,
 }
 impl EventEmitter<StateEvent> for AppState {}
 
@@ -177,6 +306,16 @@ impl AppState {
     pub fn new(rt: tokio::runtime::Handle, prefs_path: String) -> AppState {
         let prefs: Prefs = std::fs::read_to_string(&prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         AppState {
+            active: String::new(),
+            bg: HashMap::new(),
+            meta: BTreeMap::new(),
+            engines: prefs.engines.iter().map(|c| EngineView { cfg: c.clone(), online: None, workspaces: vec![], error: None }).collect(),
+            conns: vec![],
+            notices: vec![],
+            notices_loaded: false,
+            quiet: false,
+            local_seq: 0,
+            ws_switches: vec![],
             hub: None,
             conn: Conn::Connecting,
             version: String::new(),
@@ -196,7 +335,6 @@ impl AppState {
             approvals: vec![],
             server_log: VecDeque::new(),
             errors: vec![],
-            notice: None,
             dict: Dict { state: "idle".into(), ..Default::default() },
             prefs,
             prefs_path,
@@ -206,20 +344,56 @@ impl AppState {
             selected_request: None,
             pinned_request: false,
             stats: Stats::default(),
+            tx: None,
             _pump: None,
+            _poll: None,
         }
     }
+    fn wp(&self) -> WsPrefs {
+        let p = &self.prefs;
+        WsPrefs { view: p.view, side_open: p.side_open, task_scope_all: p.task_scope_all, show_ended: p.show_ended, settings_tab_global: p.settings_tab_global, tabs: p.tabs.clone(), current: p.current }
+    }
+    fn set_wp(&mut self, w: WsPrefs) {
+        let p = &mut self.prefs;
+        p.view = w.view;
+        p.side_open = w.side_open;
+        p.task_scope_all = w.task_scope_all;
+        p.show_ended = w.show_ended;
+        p.settings_tab_global = w.settings_tab_global;
+        p.tabs = w.tabs;
+        p.current = w.current;
+    }
     pub fn save_prefs(&self) {
-        if let Ok(s) = serde_json::to_string_pretty(&self.prefs) {
+        let mut p = self.prefs.clone();
+        if !self.active.is_empty() {
+            p.ws.insert(self.active.clone(), self.wp());
+        }
+        for (k, d) in &self.bg {
+            p.ws.insert(k.clone(), d.wp.clone());
+        }
+        if let Ok(s) = serde_json::to_string_pretty(&p) {
             let _ = std::fs::write(&self.prefs_path, s);
         }
     }
 
-    /// Wire the client in: its first snapshot (of the task in the URL) and the events after it, batched per frame.
-    pub fn attach(&mut self, client: Arc<Client>, mut rx: tokio::sync::mpsc::UnboundedReceiver<HubEvent>, cx: &mut Context<Self>) {
-        self.hub = Some(client);
-        self.open_seq += 1;
+    /// Start the engines' connections from the prefs (a token per connection from the Keychain), and apply what
+    /// they send: the active workspace's events, the background ones' quietly, batched per frame.
+    pub fn start(&mut self, tx: tokio::sync::mpsc::UnboundedSender<Routed>, mut rx: tokio::sync::mpsc::UnboundedReceiver<Routed>, cx: &mut Context<Self>) {
+        self.tx = Some(tx);
+        let active = self.prefs.active.clone();
+        let wp_active = self.wp();
+        for c in self.prefs.connections.clone() {
+            let key = c.key();
+            let wp = if Some(&key) == active.as_ref() { wp_active.clone() } else { self.prefs.ws.get(&key).cloned().unwrap_or_default() };
+            self.attach_ws(&c.endpoint, &c.ws, wp, crate::tokens::get(&key), cx);
+        }
+        if let Some(a) = active.filter(|a| self.bg.contains_key(a)) {
+            self.switch_ws(&a, cx);
+        } else if let Some(first) = self.prefs.connections.first().map(|c| c.key()) {
+            self.switch_ws(&first, cx);
+        }
         self.stats.switch_t0 = Some(std::time::Instant::now());
+        self.open_seq += 1;
         self._pump = Some(cx.spawn(async move |this, cx| {
             while let Some(first) = rx.recv().await {
                 let mut batch = vec![first];
@@ -230,8 +404,8 @@ impl AppState {
                     }
                 }
                 let ok = this.update(cx, |s, cx| {
-                    for e in batch {
-                        s.apply(e, cx);
+                    for (endpoint, ws, e) in batch {
+                        s.route(endpoint, ws, e, cx);
                     }
                     cx.notify();
                 });
@@ -240,6 +414,310 @@ impl AppState {
                 }
             }
         }));
+        // engines without a socket: their public workspace list every 5 s (online / offline, what is available)
+        self._poll = Some(cx.spawn(async move |this, cx| loop {
+            let Ok((rt, cfgs)) = this.update(cx, |s, _| (s.rt.clone(), s.engines.iter().filter(|e| !s.conns.iter().any(|c| c.cfg.endpoint == e.cfg.endpoint && c.has_subs())).map(|e| e.cfg.clone()).collect::<Vec<_>>())) else { break };
+            for cfg in cfgs {
+                let c2 = cfg.clone();
+                let r = rt.spawn(async move { crate::client::list_workspaces(&c2).await }).await.unwrap_or_else(|e| Err(e.to_string()));
+                let _ = this.update(cx, |s, cx| {
+                    if let Some(e) = s.engines.iter_mut().find(|e| e.cfg.endpoint == cfg.endpoint) {
+                        match r {
+                            Ok(list) => {
+                                e.online = Some(true);
+                                e.workspaces = list;
+                                e.error = None;
+                            }
+                            Err(err) => {
+                                e.online = Some(false);
+                                e.error = Some(err);
+                            }
+                        }
+                    }
+                    cx.notify();
+                });
+            }
+            gpui::Timer::after(std::time::Duration::from_secs(5)).await;
+        }));
+    }
+
+    fn conn_for(&mut self, endpoint: &str, token: &str) -> Option<Arc<EngineConn>> {
+        if let Some(c) = self.conns.iter().find(|c| c.cfg.endpoint == endpoint && c.same_token(token)) {
+            return Some(c.clone());
+        }
+        let cfg = self.engines.iter().find(|e| e.cfg.endpoint == endpoint)?.cfg.clone();
+        let tx = self.tx.clone()?;
+        let _g = self.rt.enter();
+        let c = EngineConn::start(cfg, token.to_string(), tx);
+        self.conns.push(c.clone());
+        Some(c)
+    }
+
+    /// a connection as a background workspace (subscribed at once); without a token it stays listed, unconnected
+    fn attach_ws(&mut self, endpoint: &str, ws: &str, wp: WsPrefs, token: Option<String>, _cx: &mut Context<Self>) {
+        let key = ws_key(endpoint, ws);
+        let hub = token.as_deref().and_then(|t| self.conn_for(endpoint, t)).map(|c| Client::new(c, ws, wp.current));
+        self.meta.insert(key.clone(), WsMeta { endpoint: endpoint.into(), ws: ws.into(), unread: Unread::default(), conn: Conn::Connecting, disabled: None, no_token: hub.is_none() });
+        self.bg.insert(key, WsData::new(hub, wp));
+    }
+
+    /// Add an engine (endpoint, name); its workspaces show in the menu once its public list answers.
+    pub fn add_engine(&mut self, endpoint: &str, name: &str, cx: &mut Context<Self>) -> Result<String, String> {
+        let endpoint = EngineCfg::normalize(endpoint)?;
+        if self.engines.iter().any(|e| e.cfg.endpoint == endpoint) {
+            return Err(format!("{endpoint} is already added"));
+        }
+        let name = if name.trim().is_empty() { endpoint.split("://").nth(1).unwrap_or(&endpoint).to_string() } else { name.trim().to_string() };
+        let cfg = EngineCfg { endpoint: endpoint.clone(), name };
+        self.prefs.engines.push(cfg.clone());
+        self.engines.push(EngineView { cfg, online: None, workspaces: vec![], error: None });
+        self.save_prefs();
+        cx.notify();
+        Ok(endpoint)
+    }
+    pub fn remove_engine(&mut self, endpoint: &str, cx: &mut Context<Self>) {
+        for k in self.meta.values().filter(|m| m.endpoint == endpoint).map(|m| ws_key(&m.endpoint, &m.ws)).collect::<Vec<_>>() {
+            self.disconnect_ws(&k, cx);
+        }
+        self.prefs.engines.retain(|e| e.endpoint != endpoint);
+        self.engines.retain(|e| e.cfg.endpoint != endpoint);
+        self.save_prefs();
+        cx.notify();
+    }
+
+    /// Connect a workspace of an engine with its client token (kept in the Keychain); it shows at once.
+    pub fn connect_ws(&mut self, endpoint: &str, ws: &str, token: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err("a client token is needed".into());
+        }
+        let key = ws_key(endpoint, ws);
+        crate::tokens::set(&key, token)?;
+        if self.meta.contains_key(&key) {
+            // reconnect with a new token
+            self.disconnect_ws(&key, cx);
+        }
+        let c = ConnPref { endpoint: endpoint.into(), ws: ws.into() };
+        if !self.prefs.connections.contains(&c) {
+            self.prefs.connections.push(c);
+        }
+        let wp = self.prefs.ws.get(&key).cloned().unwrap_or_default();
+        self.attach_ws(endpoint, ws, wp, Some(token.to_string()), cx);
+        self.switch_ws(&key, cx);
+        self.save_prefs();
+        Ok(())
+    }
+
+    /// Stop showing a workspace: unsubscribe, forget its token; another connected one comes on screen.
+    pub fn disconnect_ws(&mut self, key: &str, cx: &mut Context<Self>) {
+        if key == self.active {
+            let next = self.meta.keys().find(|k| *k != key).cloned();
+            match next {
+                Some(n) => self.switch_ws(&n, cx),
+                None => {
+                    // nothing else: an empty screen
+                    let mut d = WsData::new(None, WsPrefs::default());
+                    self.swap_ws(&mut d);
+                    self.active = String::new();
+                    self.bg.insert(key.to_string(), d);
+                    self.feed_rev += 1;
+                    self.open_seq += 1;
+                    cx.emit(StateEvent::WsSwitched);
+                }
+            }
+        }
+        if let Some(d) = self.bg.remove(key) {
+            if let Some(h) = d.hub {
+                h.disconnect();
+            }
+        }
+        self.meta.remove(key);
+        self.prefs.connections.retain(|c| c.key() != key);
+        self.prefs.ws.remove(key);
+        crate::tokens::delete(key);
+        // a socket with nothing left on it closes
+        self.conns.retain(|c| {
+            let keep = c.has_subs();
+            if !keep {
+                c.shutdown();
+            }
+            keep
+        });
+        self.save_prefs();
+        cx.notify();
+    }
+
+    fn swap_ws(&mut self, d: &mut WsData) {
+        use std::mem::swap;
+        swap(&mut self.hub, &mut d.hub);
+        swap(&mut self.conn, &mut d.conn);
+        swap(&mut self.version, &mut d.version);
+        swap(&mut self.build, &mut d.build);
+        swap(&mut self.instance, &mut d.instance);
+        swap(&mut self.computer_available, &mut d.computer_available);
+        swap(&mut self.tasks, &mut d.tasks);
+        swap(&mut self.current, &mut d.current);
+        swap(&mut self.cur, &mut d.cur);
+        swap(&mut self.models, &mut d.models);
+        swap(&mut self.global, &mut d.global);
+        swap(&mut self.busy, &mut d.busy);
+        swap(&mut self.failed, &mut d.failed);
+        swap(&mut self.approvals, &mut d.approvals);
+        swap(&mut self.server_log, &mut d.server_log);
+        swap(&mut self.errors, &mut d.errors);
+        swap(&mut self.follow, &mut d.follow);
+        swap(&mut self.selected_request, &mut d.selected_request);
+        swap(&mut self.pinned_request, &mut d.pinned_request);
+        swap(&mut self.notices, &mut d.notices);
+        swap(&mut self.notices_loaded, &mut d.notices_loaded);
+        let mine = self.wp();
+        let theirs = std::mem::replace(&mut d.wp, mine);
+        self.set_wp(theirs);
+    }
+
+    /// Show another connected workspace: its state is already here (kept live in the background), so this is a swap.
+    pub fn switch_ws(&mut self, key: &str, cx: &mut Context<Self>) {
+        if key == self.active {
+            return;
+        }
+        let Some(mut d) = self.bg.remove(key) else { return };
+        let t0 = std::time::Instant::now();
+        self.swap_ws(&mut d);
+        let old = std::mem::replace(&mut self.active, key.to_string());
+        if !old.is_empty() {
+            self.bg.insert(old, d);
+        }
+        self.prefs.active = Some(key.to_string());
+        self.feed_rev += 1;
+        self.open_seq += 1;
+        self.dict = Dict { state: "idle".into(), ..Default::default() };
+        if !self.cur.loaded {
+            self.stats.switch_t0 = Some(t0);
+        }
+        self.ws_switches.push(t0.elapsed().as_secs_f64() * 1000.0);
+        self.save_prefs();
+        cx.emit(StateEvent::WsSwitched);
+        if self.cur.loaded {
+            cx.emit(StateEvent::Opened(self.current));
+        }
+        cx.notify();
+    }
+
+    /// An event from an engine: engine-level ones update the menu; a workspace's go to it (on screen or not).
+    fn route(&mut self, endpoint: String, ws: Option<String>, e: HubEvent, cx: &mut Context<Self>) {
+        let Some(ws) = ws else {
+            if let Some(ev) = self.engines.iter_mut().find(|x| x.cfg.endpoint == endpoint) {
+                match e {
+                    HubEvent::EngineOnline(_) => ev.online = Some(self.conns.iter().any(|c| c.cfg.endpoint == endpoint && c.online.load(std::sync::atomic::Ordering::SeqCst))),
+                    HubEvent::EngineWorkspaces(list) => {
+                        // a workspace enabled again: subscribe to it again
+                        for (name, running) in &list {
+                            let key = ws_key(&endpoint, name);
+                            if *running && self.meta.get(&key).is_some_and(|m| m.disabled.is_some()) {
+                                if let Some(m) = self.meta.get_mut(&key) {
+                                    m.disabled = None;
+                                }
+                                let h = if key == self.active { self.hub.clone() } else { self.bg.get(&key).and_then(|d| d.hub.clone()) };
+                                if let Some(h) = h {
+                                    h.conn.connect_ws(name, h.current_task());
+                                }
+                            }
+                        }
+                        ev.workspaces = list;
+                    }
+                    HubEvent::EngineError(m) => ev.error = if m.is_empty() { None } else { Some(m) },
+                    _ => {}
+                }
+            }
+            return;
+        };
+        let key = ws_key(&endpoint, &ws);
+        if let Some(m) = self.meta.get_mut(&key) {
+            match &e {
+                HubEvent::Notices { unread, .. } => m.unread = *unread,
+                HubEvent::Snapshot(s) => m.unread = s.notices,
+                HubEvent::Conn(c) => m.conn = *c,
+                HubEvent::Disabled(r) => m.disabled = Some(r.clone()),
+                _ => {}
+            }
+        } else {
+            return; // a workspace disconnected meanwhile
+        }
+        if key == self.active {
+            self.apply(e, cx);
+        } else if let Some(mut d) = self.bg.remove(&key) {
+            self.swap_ws(&mut d);
+            let (rev, seq) = (self.feed_rev, self.open_seq);
+            self.quiet = true;
+            self.apply(e, cx);
+            self.quiet = false;
+            self.feed_rev = rev;
+            self.open_seq = seq;
+            self.swap_ws(&mut d);
+            self.bg.insert(key, d);
+        }
+    }
+
+    /// unread notices of the workspace on screen by level (the engine's, plus this app's own unread ones)
+    pub fn unread(&self) -> Unread {
+        let mut u = self.meta.get(&self.active).map(|m| m.unread).unwrap_or_default();
+        for n in self.notices.iter().filter(|n| n.id.starts_with("local-") && n.read_at.is_none()) {
+            match n.level.as_str() {
+                "ok" => u.ok += 1,
+                "error" => u.error += 1,
+                "warn" => u.warn += 1,
+                _ => u.info += 1,
+            }
+        }
+        u
+    }
+    /// unread errors and warnings in workspaces not on screen (the dot on the workspace icon)
+    pub fn background_alert(&self) -> bool {
+        self.meta.iter().any(|(k, m)| *k != self.active && m.unread.error + m.unread.warn > 0)
+    }
+    /// something this app did (a failed command, a spawned task) as a notice of the workspace on screen
+    pub fn local_notice(&mut self, level: &str, text: impl Into<String>) {
+        self.local_seq += 1;
+        let n = Notice { id: format!("local-{}", self.local_seq), at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true), level: level.into(), task: Some(self.current), key: None, text: text.into(), count: Some(1), read_at: None };
+        self.notices.insert(0, n);
+    }
+    /// the notifications list from the engine (latest 500), merged with this app's own
+    pub fn load_notices(&mut self, cx: &mut Context<Self>) {
+        let key = self.active.clone();
+        self.run(cx, |h| async move { h.notices(None, 500).await }, move |s, list, _| {
+            if s.active != key {
+                return;
+            }
+            let locals: Vec<Notice> = s.notices.drain(..).filter(|n| n.id.starts_with("local-")).collect();
+            s.notices = list;
+            s.notices.extend(locals);
+            s.notices.sort_by(|a, b| b.at.cmp(&a.at));
+            s.notices_loaded = true;
+        });
+    }
+    /// mark read: these ids (local ones here, the others on the engine), or every one of a level, or all
+    pub fn read_notices(&mut self, ids: Option<Vec<String>>, level: Option<String>, cx: &mut Context<Self>) {
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        for n in self.notices.iter_mut().filter(|n| n.read_at.is_none()) {
+            let hit = match (&ids, &level) {
+                (Some(i), _) => i.contains(&n.id),
+                (None, Some(l)) => &n.level == l,
+                (None, None) => true,
+            };
+            if hit && n.id.starts_with("local-") {
+                n.read_at = Some(now.clone());
+            }
+        }
+        let all = ids.is_none() && level.is_none();
+        let remote: Option<Vec<String>> = ids.map(|i| i.into_iter().filter(|x| !x.starts_with("local-")).collect());
+        if remote.as_ref().is_some_and(|r| r.is_empty()) {
+            cx.notify();
+            return;
+        }
+        if let Some(h) = &self.hub {
+            h.read_notices(remote, level.as_deref(), all);
+        }
+        cx.notify();
     }
 
     pub fn hub(&self) -> Option<Arc<Client>> {
@@ -265,16 +743,28 @@ impl AppState {
         .detach();
     }
 
-    /// A command whose outcome is a notice (toast) on error, and optionally on success.
-    pub fn command<F: std::future::Future<Output = Result<String, String>> + Send + 'static>(&self, cx: &mut Context<Self>, toast_ok: bool, f: impl FnOnce(Arc<Client>) -> F + Send + 'static) {
-        self.run(cx, f, move |s, r, _| match r {
-            Ok(m) => {
-                if toast_ok {
-                    s.notice = Some((true, m, std::time::Instant::now()));
-                }
-            }
-            Err(e) => s.notice = Some((false, e, std::time::Instant::now())),
+    /// A command whose outcome is a notice of the workspace (an error always; `ok_notice`: success too).
+    pub fn command<F: std::future::Future<Output = Result<String, String>> + Send + 'static>(&self, cx: &mut Context<Self>, ok_notice: bool, f: impl FnOnce(Arc<Client>) -> F + Send + 'static) {
+        let key = self.active.clone();
+        self.run(cx, f, move |s, r, cx| {
+            let (level, text) = match r {
+                Ok(m) if ok_notice && !m.is_empty() => ("ok", m),
+                Ok(_) => return,
+                Err(e) => ("error", e),
+            };
+            s.notice_in(&key, level, text, cx);
         });
+    }
+    /// a local notice for workspace `key` (on screen or not)
+    pub fn notice_in(&mut self, key: &str, level: &str, text: String, _cx: &mut Context<Self>) {
+        if key == self.active {
+            self.local_notice(level, text);
+        } else if let Some(mut d) = self.bg.remove(key) {
+            self.swap_ws(&mut d);
+            self.local_notice(level, text);
+            self.swap_ws(&mut d);
+            self.bg.insert(key.to_string(), d);
+        }
     }
 
     pub fn load_task(&mut self, id: i64, cx: &mut Context<Self>) {
@@ -407,7 +897,9 @@ impl AppState {
                         self.cur.t = self.cur.t.max(entry.i + 1);
                         self.cur.log.push(entry);
                         self.feed_rev += 1;
-                        cx.emit(StateEvent::Appended);
+                        if !self.quiet {
+                            cx.emit(StateEvent::Appended);
+                        }
                     }
                 }
                 EngineEvent::Node { task, .. } => {
@@ -508,6 +1000,7 @@ impl AppState {
             HubEvent::ApprovalDone(id) => self.approvals.retain(|x| x.id != id),
             HubEvent::Models(m) => self.models = m,
             HubEvent::Global(g) => self.global = g,
+            HubEvent::Dictation { .. } if self.quiet => {}
             HubEvent::Dictation { task, ev } => {
                 self.dict.task = task;
                 match ev {
@@ -516,7 +1009,9 @@ impl AppState {
                     DictEvent::Text(t) => {
                         self.dict.text = Some(t);
                         self.dict.seq += 1;
-                        cx.emit(StateEvent::DictText);
+                        if !self.quiet {
+                            cx.emit(StateEvent::DictText);
+                        }
                     }
                     DictEvent::Error(m) => {
                         self.dict.error = Some((m, std::time::Instant::now()));
@@ -533,17 +1028,37 @@ impl AppState {
                         self.dict.done = Some(text.clone());
                         self.dict.text = Some(text);
                         self.dict.seq += 1;
-                        cx.emit(StateEvent::DictText);
+                        if !self.quiet {
+                            cx.emit(StateEvent::DictText);
+                        }
                     }
                 }
             }
             HubEvent::Notice { ok, message, spawned } => {
-                self.notice = Some((ok, message, std::time::Instant::now()));
+                if !message.is_empty() {
+                    self.local_notice(if ok { "ok" } else { "error" }, message);
+                }
                 if let Some(id) = spawned {
-                    cx.emit(StateEvent::SpawnedOpen(id));
+                    if !self.quiet {
+                        cx.emit(StateEvent::SpawnedOpen(id));
+                    }
                 }
             }
-            HubEvent::Ready => {}
+            HubEvent::Ready | HubEvent::EngineOnline(_) | HubEvent::EngineWorkspaces(_) | HubEvent::EngineError(_) | HubEvent::Hello { .. } => {}
+            HubEvent::Disabled(reason) => {
+                self.conn = Conn::Closed;
+                self.local_notice("warn", format!("this workspace was disconnected by the engine: {reason}"));
+            }
+            HubEvent::Notices { changed, .. } => {
+                for n in changed {
+                    match self.notices.iter_mut().find(|x| x.id == n.id) {
+                        Some(x) => *x = n,
+                        None => self.notices.insert(0, n),
+                    }
+                }
+                self.notices.sort_by(|a, b| b.at.cmp(&a.at));
+                self.notices.truncate(600);
+            }
             HubEvent::Conn(c) => {
                 self.conn = c;
                 if c == Conn::Closed {
@@ -578,7 +1093,11 @@ impl AppState {
                     self.prefs.tabs.push(cur);
                 }
                 let first = !self.cur.loaded;
+                let history = snap.history;
                 self.apply_snapshot(*snap);
+                if self.quiet {
+                    return;
+                }
                 if let Some(t0) = self.stats.switch_t0 {
                     if std::env::var("OPTCHAT_TIMING").is_ok() {
                         eprintln!("open #{cur}: snapshot applied at {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
@@ -589,6 +1108,13 @@ impl AppState {
                 }
                 if first {
                     cx.emit(StateEvent::Opened(cur));
+                }
+                if history {
+                    // an engine client's snapshot carries the task's turns and requests
+                    if let Some(t0) = self.stats.switch_t0 {
+                        self.stats.switches_full.push(t0.elapsed().as_secs_f64() * 1000.0);
+                    }
+                    return;
                 }
                 // its turns and requests (the foot chips, the step tables), as the page loads them after a snapshot
                 let seq = self.open_seq;

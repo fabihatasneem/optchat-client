@@ -25,6 +25,9 @@ pub enum Overlay {
     Palette(Entity<Palette>),
     Metrics(Entity<MetricsPop>),
     Lightbox(String),
+    WsMenu,
+    AddEngine(Entity<crate::workspaces::AddEngineDialog>),
+    Connect(Entity<crate::workspaces::ConnectDialog>),
 }
 
 pub fn noop() -> Div {
@@ -73,11 +76,11 @@ pub fn set_theme(w: &mut Workspace, id: &str, follow: bool, cx: &mut Context<Wor
     cx.notify();
 }
 
-fn overlay_bg(id: &str, cx: &App) -> Stateful<Div> {
+pub(crate) fn overlay_bg(id: &str, cx: &App) -> Stateful<Div> {
     let k = c(cx);
     div().id(SharedString::from(id.to_string())).absolute().inset_0().bg(hsla(0., 0., 0., if k.dark { 0.5 } else { 0.25 })).flex().items_center().justify_center().occlude()
 }
-fn dialog_box(cx: &App, w: f32) -> Div {
+pub(crate) fn dialog_box(cx: &App, w: f32) -> Div {
     let k = c(cx);
     div()
         .w(px(w))
@@ -114,6 +117,9 @@ pub fn render_overlay(w: &mut Workspace, o: Overlay, _window: &mut Window, cx: &
             .on_click(cx.listener(|w, _, window, cx| w.close_overlay(window, cx)))
             .child(div().id("ov-met-inner").absolute().right(px(10.)).bottom(px(32.)).on_click(|_, _, cx| cx.stop_propagation()).child(m))
             .into_any_element(),
+        Overlay::WsMenu => crate::workspaces::menu(w, cx),
+        Overlay::AddEngine(d) => crate::workspaces::render_dialog("ov-addengine", d.into(), cx),
+        Overlay::Connect(d) => crate::workspaces::render_dialog("ov-connect", d.into(), cx),
         Overlay::Lightbox(blob) => {
             let im = w.feed.read(cx).images.get(&blob).cloned().flatten();
             overlay_bg("ov-light", cx)
@@ -153,59 +159,6 @@ pub fn approval(w: &mut Workspace, a: Approval, cx: &mut Context<Workspace>) -> 
                 .child(div().flex().justify_end().gap(px(8.)).child(b1).child(b2).child(b3).child(b4)),
         )
         .into_any_element()
-}
-
-// ---- toast ------------------------------------------------------------------------------------------------------------
-pub fn toast(w: &mut Workspace, cx: &mut Context<Workspace>) -> Option<AnyElement> {
-    let k = c(cx).clone();
-    static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let Some((ok, msg, at)) = w.state.read(cx).notice.clone() else {
-        set_state_extra("toast", serde_json::Value::Null);
-        return None;
-    };
-    let ttl = if ok { 2600 } else { 6000 };
-    let age = at.elapsed().as_millis() as u64;
-    if age > ttl {
-        // UI tests: how long the last toast was on screen (measured when it was taken down)
-        if SHOWN.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            set_state_extra("toastGone", serde_json::json!({ "ok": ok, "message": msg.clone(), "lifeMs": age }));
-        }
-        set_state_extra("toast", serde_json::Value::Null);
-        return None;
-    }
-    SHOWN.store(true, std::sync::atomic::Ordering::Relaxed);
-    set_state_extra("toast", serde_json::json!({ "ok": ok, "message": msg.clone() }));
-    // re-render when it should disappear
-    cx.spawn(async move |this, cx| {
-        Timer::after(std::time::Duration::from_millis(ttl - age + 20)).await;
-        let _ = this.update(cx, |_, cx| cx.notify());
-    })
-    .detach();
-    Some(
-        div()
-            .absolute()
-            .bottom(px(42.))
-            .left_0()
-            .right_0()
-            .flex()
-            .justify_center()
-            .child(
-                div()
-                    .px(px(14.))
-                    .py(px(8.))
-                    .rounded(px(10.))
-                    .bg(k.panel2)
-                    .border_1()
-                    .border_color(if ok { k.line2 } else { k.red.opacity(0.4) })
-                    .text_color(if ok { k.text } else { k.red })
-                    .text_size(px(13.))
-                    .shadow_lg()
-                    .child(msg)
-                    .child(probe("toast"))
-                    .with_animation("toast-in", Animation::new(std::time::Duration::from_millis(160)), |d, t| d.opacity(t).mt(px(8. * (1. - t)))),
-            )
-            .into_any_element(),
-    )
 }
 
 // ---- metrics popover ------------------------------------------------------------------------------------------------
@@ -419,10 +372,10 @@ impl NewTaskDialog {
             s.run(cx, move |h| async move { h.spawn(parent, &mode, &title, &instruction, imgs, prev, budget, settings, start).await }, move |s, r, cx| match r {
                 Ok(id) => {
                     let st = s.tasks.get(&id).map(|t| t.task.status);
-                    s.notice = Some((true, format!("#{id} {}", if st == Some(TaskStatus::Pending) { "added" } else { "spawned" }), std::time::Instant::now()));
+                    s.local_notice("ok", format!("#{id} {}", if st == Some(TaskStatus::Pending) { "added" } else { "spawned" }));
                     cx.emit(StateEvent::SpawnedOpen(id));
                 }
-                Err(e) => s.notice = Some((false, e, std::time::Instant::now())),
+                Err(e) => s.local_notice("error", e),
             })
         });
         cx.emit(DismissEvent);
@@ -614,7 +567,7 @@ impl Render for NewTaskDialog {
                         }
                         m.max_h(px(360.)).scrollable(true)
                     }))
-                    .child(div().w(px(96.)).child(Input::new(&self.usd).small()))
+                    .child(div().w(px(96.)).child(Input::new(&self.usd).small()).child(probe("newtask.usd")))
                     .child(div().w(px(96.)).child(Input::new(&self.minutes).small())),
             )
             .child(
@@ -788,7 +741,7 @@ impl Palette {
             }
         }
         if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && !self.tasks_only {
-            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: drop the hub connection", "t-drop"), ("Test: toast ok", "t-toast-ok"), ("Test: toast error", "t-toast-err"), ("Test: engine error", "t-err"), ("Test: dictation error", "t-dict-err"), ("Test: compaction failure", "t-cfail"), ("Test: appearance light", "t-light"), ("Test: appearance dark", "t-dark"), ("Test: mic hold", "t-mic-hold"), ("Test: mic tap", "t-mic-tap"), ("Test: dictate again", "t-dict-again"), ("Test: load all history", "t-load-all"), ("Test: paste image", "t-paste"), ("Test: drop big image", "t-drop-big"), ("Test: attach 21 images", "t-attach-21"), ("Test: new task with 21 images", "t-nt-21"), ("Test: new task paste image", "t-nt-paste"), ("Test: empty feed", "t-empty"), ("Test: reveal entry", "t-reveal")] {
+            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: drop the hub connection", "t-drop"), ("Test: notice ok", "t-toast-ok"), ("Test: notice error", "t-toast-err"), ("Test: engine error", "t-err"), ("Test: dictation error", "t-dict-err"), ("Test: compaction failure", "t-cfail"), ("Test: appearance light", "t-light"), ("Test: appearance dark", "t-dark"), ("Test: mic hold", "t-mic-hold"), ("Test: mic tap", "t-mic-tap"), ("Test: dictate again", "t-dict-again"), ("Test: load all history", "t-load-all"), ("Test: paste image", "t-paste"), ("Test: drop big image", "t-drop-big"), ("Test: attach 21 images", "t-attach-21"), ("Test: new task with 21 images", "t-nt-21"), ("Test: new task paste image", "t-nt-paste"), ("Test: empty feed", "t-empty"), ("Test: reveal entry", "t-reveal"), ("Test: fill token", "t-fill-token"), ("Test: workspace menu", "t-ws-menu"), ("Test: next workspace", "t-ws-next"), ("Test: notice warn", "t-notice-warn")] {
                 if let Some(sc) = fuzzy(&q, l) {
                     items.push((sc + 60, l.to_string(), String::new(), Cmd::Act(a)));
                 }
@@ -872,11 +825,11 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
         Cmd::Theme(id) => set_theme(w, &id, false, cx),
         Cmd::Model(id) => {
             let task = w.state.read(cx).current;
-            w.state.update(cx, |s, cx| s.command(cx, true, move |h| async move { h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).map(|r| format!("model: {r}")) }));
+            w.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).await.map(|r| format!("model: {r}")) }));
         }
         Cmd::Effort(e) => {
             let task = w.state.read(cx).current;
-            w.state.update(cx, |s, cx| s.command(cx, true, move |h| async move { h.update_settings(task, SettingsPatch { effort: Some(e), ..Default::default() }).map(|r| format!("effort: {r}")) }));
+            w.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, SettingsPatch { effort: Some(e), ..Default::default() }).await.map(|r| format!("effort: {r}")) }));
         }
         Cmd::Act(a) => match a {
             "new" => open_new_task(w, None, window, cx),
@@ -928,6 +881,26 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
                 w.composer.update(cx, |c, cx| c.add_paths(vec![p], cx));
             }
             "t-frames" => crate::ui::reset_frames(),
+            "t-fill-token" => {
+                if let Some(Overlay::Connect(d)) = w.overlay.clone() {
+                    d.update(cx, |d, cx| d.fill_test_token(window, cx));
+                }
+            }
+            "t-ws-menu" => crate::workspaces::open_menu(w, cx),
+            "t-ws-next" => {
+                let s = w.state.read(cx);
+                let keys: Vec<String> = s.meta.keys().cloned().collect();
+                if let Some(i) = keys.iter().position(|k| *k == s.active) {
+                    let next = keys[(i + 1) % keys.len()].clone();
+                    w.switch_workspace(&next, window, cx);
+                }
+            }
+            "t-notice-warn" => {
+                w.state.update(cx, |s, cx| {
+                    s.local_notice("warn", "test notice: a warning");
+                    cx.notify();
+                });
+            }
             "t-narrow" => window.resize(size(px(700.), px(820.))),
             "t-wide" => window.resize(size(px(1360.), px(880.))),
             "t-scroll" => w.feed.update(cx, |f, cx| f.test_gesture(6.0, 14.0, cx)),

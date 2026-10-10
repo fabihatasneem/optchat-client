@@ -1,14 +1,15 @@
-// The app under test: dist/OptChat.app as a client of the OptChat hub on a TEST instance (OPTCHAT_HUB_DB=t<id>, never
-// the live chat), with its prefs in a temp folder; driven through Computer Use with coordinates from the app's probe
+// The app under test: dist/OptChat.app as a client of the OptChat engine, connected to TEST workspaces only
+// (test-gpui-a / test-gpui-b, scoped tokens from data/test-tokens.json; never the live chat), with its prefs and its
+// token store in a temp folder; driven through Computer Use with coordinates from the app's probe
 // file, observed through its state file and screenshots.
 import { BUNDLE, Cua, ROOT, sleep } from "./cua.ts";
-import { checkTestDb } from "./hub.ts";
+import { checkTestDb, HUB, TOKENS } from "./hub.ts";
 
 export const SHOTS = `${ROOT}/shots`;
 const TITLEBAR = 32; // points above the content area
 const SCALE = 2; // screenshot pixels per point (Retina)
 
-/** the test instance a suite uses: OPTCHAT_TEST_DB (e.g. a live-sized copy seeded for the run), else `fallback` */
+/** the test workspace a suite uses: OPTCHAT_TEST_DB, else `fallback` (test-gpui-a / test-gpui-b only) */
 export function testDb(fallback: string): string {
   const db = Deno.env.get("OPTCHAT_TEST_DB") ?? fallback;
   checkTestDb(db);
@@ -22,24 +23,38 @@ export class App {
   db = "";
   log: string[] = [];
   proc?: Deno.ChildProcess;
-  /** `db`: the hub test instance (t<id>); `dir`: relaunch with a previous run's prefs (see quit({ keep: true })) */
-  static async launch(o: { db?: string; env?: Record<string, string>; dir?: string } = {}): Promise<App> {
+  /** `db`: the test workspace on screen; `also`: more test workspaces connected in the background; `dir`: relaunch
+   *  with a previous run's prefs (see quit({ keep: true })); `bare`: no engine or connection (the UI adds them) */
+  static async launch(o: { db?: string; also?: string[]; env?: Record<string, string>; dir?: string; bare?: boolean; headless?: boolean } = {}): Promise<App> {
     const me = new App();
     me.dir = o.dir ?? await Deno.makeTempDir({ prefix: "optchat-e2e-" });
-    me.db = o.db ?? testDb("tmv23x72y"); // the live-sized test copy (seeded for these runs; never the live chat)
+    me.db = o.db ?? testDb("test-gpui-a"); // a copy of the main chat on the engine (never the live chat)
     checkTestDb(me.db);
+    for (const w of o.also ?? []) checkTestDb(w);
     try { Deno.removeSync(me.probes); } catch { /* none */ }
     try { Deno.removeSync(`${me.probes}.state.json`); } catch { /* none */ }
-    const env = { OPTCHAT_PROBES: me.probes, OPTCHAT_HUB_DB: me.db, OPTCHAT_PREFS_DIR: me.dir, ...(o.env ?? {}) };
+    const conn = o.bare ? {} : { OPTCHAT_ENGINE: HUB, OPTCHAT_ENGINE_NAME: "reframe.dev", OPTCHAT_CONNECT: [me.db, ...(o.also ?? [])].join(",") };
+    const env = { OPTCHAT_PROBES: me.probes, OPTCHAT_PREFS_DIR: me.dir, OPTCHAT_TOKEN_DIR: me.dir, OPTCHAT_TEST_TOKENS: TOKENS, ...conn, ...(o.env ?? {}) };
     const args = ["-n", "-W", "--stderr", `${me.dir}/stderr.txt`];
     for (const [k, v] of Object.entries(env)) args.push("--env", `${k}=${v}`);
     args.push(`${ROOT}/dist/OptChat.app`);
     await killLeftovers();
     me.proc = new Deno.Command("open", { args, stdout: "null", stderr: "null" }).spawn(); // -W: returns when the app quits
-    me.cua = await Cua.start();
-    await me.waitFor(() => me.state()?.ready && me.state()?.loaded, 30_000, "app ready");
-    await me.cua.js(`globalThis.app = await cua.getApp("${BUNDLE}"); 1`);
+    me.headless = !!o.headless;
+    if (!me.headless) me.cua = await Cua.start();
+    if (o.bare) await me.waitFor(() => me.state()?.pid, 30_000, "app up");
+    else await me.waitFor(() => me.state()?.ready && me.state()?.loaded, 30_000, "app ready");
+    if (!me.headless) await me.cua.js(`globalThis.app = await cua.getApp("${BUNDLE}"); 1`);
     return me;
+  }
+  headless = false;
+  /** the test channel (OPTCHAT_TEST_HOOKS): commands run through the app's own handlers (crate::testcmd) */
+  async cmd(...cmds: Record<string, unknown>[]) {
+    const p = `${this.probes}.cmd`;
+    for (let i = 0; i < 40; i++) { try { Deno.statSync(p); await sleep(100); } catch { break; } }
+    Deno.writeTextFileSync(p, JSON.stringify(cmds));
+    for (let i = 0; i < 40; i++) { try { Deno.statSync(p); await sleep(100); } catch { break; } }
+    await sleep(150);
   }
   state(): any {
     try { return JSON.parse(Deno.readTextFileSync(`${this.probes}.state.json`)); } catch { return null; }
@@ -161,11 +176,12 @@ export class App {
   }
   async quit(o: { keep?: boolean } = {}) {
     const kids = this.children();
-    try { await this.cua.js(`await app.pressKey("cmd+q"); 1`); } catch { /* gone */ }
+    if (this.headless) await this.cmd({ op: "quit" }).catch(() => {});
+    else try { await this.cua.js(`await app.pressKey("cmd+q"); 1`); } catch { /* gone */ }
     // `open -W` returns once the app has exited; if it has not within 8 s, kill our own instance
     const exited = await Promise.race([this.proc!.status.then(() => true), sleep(8000).then(() => false)]);
     if (!exited) { console.log("app did not quit on cmd+q: killing it"); await killLeftovers(); await this.proc!.status; }
-    this.cua.close();
+    this.cua?.close();
     await sleep(300);
     this.orphans = kids.filter((p) => new Deno.Command("kill", { args: ["-0", p], stderr: "null" }).outputSync().success);
     // the prefs folder (OPTCHAT_KEEP_E2E=1 keeps it for debugging)

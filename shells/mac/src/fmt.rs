@@ -104,3 +104,17 @@ mod tests {
         assert_eq!(price(Some(0.1)), "$0.1");
     }
 }
+
+/// "just now", "5 min ago", "3 h ago", else the date and time
+pub fn ago(iso: &str) -> String {
+    let s = (optchat_proto::types::now_ms() - iso_ms(iso)) / 1000;
+    if s < 45 {
+        "just now".into()
+    } else if s < 3600 {
+        format!("{} min ago", (s + 30) / 60)
+    } else if s < 86_400 {
+        format!("{} h ago", s / 3600)
+    } else {
+        parse_iso(iso).map(|d| d.with_timezone(&chrono::Local).format("%b %-d, %H:%M").to_string()).unwrap_or_default()
+    }
+}

@@ -1,12 +1,21 @@
-// A second client of the OptChat hub, like a browser tab: one websocket to /ws on a TEST instance (?db=t<id>), the
-// snapshot, the events, commands and rpc. Used to check that the GPUI app and "the browser" stay in sync.
+// A second client of the OptChat engine, like a browser tab: one websocket to /engine/ws with a TEST workspace's client
+// token (data/test-tokens.json, never printed), `connect {ws}`, the snapshot, the events, commands and rpc (every
+// message tagged with the workspace). Used to check that the GPUI app and "the browser" stay in sync.
 // Deno must trust the local edge's certificate: run with DENO_TLS_CA_STORE=system (tests/e2e.ts sets it).
-import { sleep } from "./cua.ts";
+import { ROOT, sleep } from "./cua.ts";
 
 export const HUB = Deno.env.get("OPTCHAT_HUB") ?? "https://chat.reframe.dev";
+/** the scoped test tokens ({name: token}, 0600, git-ignored): the only workspaces tests may use */
+export const TOKENS = `${ROOT}/data/test-tokens.json`;
+export const TEST_WORKSPACES = ["test-gpui-a", "test-gpui-b"];
 
 export function checkTestDb(db: string) {
-  if (!/^t[a-z0-9]{1,24}$/.test(db)) throw new Error(`not a test instance: ${db} (tests never use the live chat)`);
+  if (!TEST_WORKSPACES.includes(db)) throw new Error(`not a test workspace: ${db} (tests never use the live chat)`);
+}
+function token(ws: string): string {
+  const t = JSON.parse(Deno.readTextFileSync(TOKENS))[ws];
+  if (!t) throw new Error(`no test token for ${ws}`);
+  return t;
 }
 
 export class Peer {
@@ -26,11 +35,12 @@ export class Peer {
   #connect(): Promise<void> {
     const host = HUB.replace(/^https:\/\//, "");
     this.snapshot = null;
-    this.ws = new WebSocket(`wss://${host}/ws?task=${this.task}&db=${this.db}`, { headers: { origin: `https://${host}` } } as any);
-    this.ws.onopen = () => { this.open = true; };
+    this.ws = new WebSocket(`wss://${host}/engine/ws`, { headers: { origin: `https://${host}`, authorization: `Bearer ${token(this.db)}` } } as any);
+    this.ws.onopen = () => { this.open = true; this.ws.send(JSON.stringify({ type: "connect", ws: this.db, task: this.task })); };
     this.ws.onclose = () => { this.open = false; };
     this.ws.onmessage = (ev) => {
       const m = JSON.parse(String(ev.data));
+      if (m.ws !== undefined && m.ws !== this.db) return;
       if ((m.type === "rpc" || m.type === "controlDone") && m.id !== undefined && this.#pending.has(m.id)) {
         this.#pending.get(m.id)!(m);
         this.#pending.delete(m.id);
@@ -41,7 +51,7 @@ export class Peer {
     };
     return this.waitFor(() => this.snapshot, 60_000, "peer snapshot");
   }
-  send(m: Record<string, unknown>) { this.ws.send(JSON.stringify(m)); }
+  send(m: Record<string, unknown>) { this.ws.send(JSON.stringify({ ...m, ws: this.db })); }
   rpc(method: string, params: Record<string, unknown> = {}): Promise<any> {
     const id = this.#next++;
     return new Promise((resolve, reject) => {

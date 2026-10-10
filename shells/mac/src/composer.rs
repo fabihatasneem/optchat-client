@@ -40,7 +40,10 @@ pub struct Attachment {
 pub struct Composer {
     pub state: Entity<AppState>,
     pub input: Entity<InputState>,
-    drafts: HashMap<i64, String>,
+    /// drafts by (workspace, task)
+    drafts: HashMap<(String, i64), String>,
+    /// the workspace the composer writes in
+    ws: String,
     pub task: i64,
     pub images: Vec<Attachment>,
     busy: bool,
@@ -62,7 +65,7 @@ impl Composer {
         let s1 = cx.subscribe_in(&input, window, |this: &mut Composer, _, ev: &InputEvent, _, cx| {
             if let InputEvent::Change = ev {
                 let v = this.input.read(cx).value().to_string();
-                this.drafts.insert(this.task, v);
+                this.drafts.insert((this.ws.clone(), this.task), v);
                 cx.notify();
             }
         });
@@ -73,7 +76,8 @@ impl Composer {
         });
         let s3 = cx.observe(&state, |_, _, cx| cx.notify());
         let task = state.read(cx).current;
-        Composer { state, input, drafts: HashMap::new(), task, images: vec![], busy: false, drag: false, anchor: None, caret: None, dict_seq: 0, mic_press: None, err: None, pending_submit: None, _subs: vec![s1, s2, s3] }
+        let ws = state.read(cx).active.clone();
+        Composer { state, input, drafts: HashMap::new(), ws, task, images: vec![], busy: false, drag: false, anchor: None, caret: None, dict_seq: 0, mic_press: None, err: None, pending_submit: None, _subs: vec![s1, s2, s3] }
     }
 
     fn switch(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
@@ -81,9 +85,9 @@ impl Composer {
             return;
         }
         let cur = self.input.read(cx).value().to_string();
-        self.drafts.insert(self.task, cur);
+        self.drafts.insert((self.ws.clone(), self.task), cur);
         self.task = id;
-        let d = self.drafts.get(&id).cloned().unwrap_or_default();
+        let d = self.drafts.get(&(self.ws.clone(), id)).cloned().unwrap_or_default();
         let who = if id == 0 { "OptChat".to_string() } else { format!("#{id}") };
         self.input.update(cx, |i, cx| {
             i.set_value(d, window, cx);
@@ -91,6 +95,28 @@ impl Composer {
         });
         self.images.clear();
         self.focus(window, cx);
+    }
+
+    /// another workspace on screen: keep this draft, show that workspace's draft of its task
+    pub fn workspace_switched(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let cur = self.input.read(cx).value().to_string();
+        self.drafts.insert((self.ws.clone(), self.task), cur);
+        let (ws, id) = {
+            let s = self.state.read(cx);
+            (s.active.clone(), s.current)
+        };
+        self.ws = ws;
+        self.task = id;
+        self.anchor = None;
+        self.pending_submit = None;
+        self.images.clear();
+        let d = self.drafts.get(&(self.ws.clone(), id)).cloned().unwrap_or_default();
+        let who = if id == 0 { "OptChat".to_string() } else { format!("#{id}") };
+        self.input.update(cx, |i, cx| {
+            i.set_value(d, window, cx);
+            i.set_placeholder(format!("Message {who}…"), window, cx);
+        });
+        cx.notify();
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -136,7 +162,7 @@ impl Composer {
         let task = self.task;
         let imgs: Vec<ImageIn> = self.images.drain(..).map(|a| ImageIn { media_type: a.media_type, bytes: (*a.bytes).clone(), name: a.name, w: a.w, h: a.h }).collect();
         self.input.update(cx, |i, cx| i.set_value("", window, cx));
-        self.drafts.remove(&task);
+        self.drafts.remove(&(self.ws.clone(), task));
         self.state.update(cx, |s, cx| {
             if run {
                 s.follow = true;
@@ -313,7 +339,7 @@ impl Composer {
         self.input.update(cx, |i, cx| {
             i.set_value(v.clone(), window, cx);
         });
-        self.drafts.insert(task, v);
+        self.drafts.insert((self.ws.clone(), task), v);
         if d.state == "idle" || d.done.is_some() && d.state == "idle" {
             // finished: caret after the dictated text, focus back
             self.anchor = None;

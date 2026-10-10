@@ -134,6 +134,10 @@ pub struct Snapshot {
     /// filled by turns.recent / requests.recent after the snapshot (the browser's "turnsLoaded")
     pub turns: Vec<TurnRecord>,
     pub requests: Vec<RequestRecord>,
+    /// the engine sent turns + requests with the snapshot (engine clients): no follow-up rpcs needed
+    pub history: bool,
+    /// unread notices by level
+    pub notices: Unread,
 }
 impl Snapshot {
     pub fn parse(m: &Value) -> Option<Snapshot> {
@@ -166,8 +170,10 @@ impl Snapshot {
             queue: from(&m["queue"]).unwrap_or_default(),
             approvals: from(&m["approvals"]).unwrap_or_default(),
             server_log: from(&m["serverLog"]).unwrap_or_default(),
-            turns: vec![],
-            requests: vec![],
+            turns: m["turns"].as_array().map(|a| a.iter().filter_map(|t| from::<TurnRecord>(t)).collect()).unwrap_or_default(),
+            requests: m["requests"].as_array().map(|a| a.iter().filter_map(|t| from::<RequestRecord>(t)).collect()).unwrap_or_default(),
+            history: m.get("turns").is_some_and(|t| t.is_array()),
+            notices: from(&m["notices"]).unwrap_or_default(),
         })
     }
 }
@@ -229,6 +235,48 @@ pub enum HubEvent {
     /// a snapshot of the task on screen (on connect and after "open")
     Snapshot(Box<Snapshot>),
     Ready,
+    /// the workspace answered `connect` (engine version / build)
+    Hello { version: String, build: String },
+    /// the workspace was disabled on the engine (or its token no longer covers it): it is disconnected
+    Disabled(String),
+    /// notices changed (new, counted again, read) and the unread counts per level
+    Notices { changed: Vec<Notice>, unread: Unread },
+    /// engine-level: its socket is up / down
+    EngineOnline(bool),
+    /// engine-level: why the socket could not connect (unreachable, token refused)
+    EngineError(String),
+    /// engine-level: its workspaces (name, running)
+    EngineWorkspaces(Vec<(String, bool)>),
+}
+
+/// A notice (lib/notices.ts): something the user should know about a workspace, kept on the engine with its read state.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Notice {
+    pub id: String,
+    pub at: String,
+    /// ok | info | warn | error
+    pub level: String,
+    pub task: Option<i64>,
+    pub key: Option<String>,
+    pub text: String,
+    pub count: Option<i64>,
+    #[serde(rename = "readAt")]
+    pub read_at: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Unread {
+    pub ok: i64,
+    pub info: i64,
+    pub warn: i64,
+    pub error: i64,
+}
+impl Unread {
+    pub fn total(&self) -> i64 {
+        self.ok + self.info + self.warn + self.error
+    }
 }
 
 /// One server message → the app's event (rpc replies and snapshots are handled by the client itself).

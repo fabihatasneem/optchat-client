@@ -29,3 +29,4 @@ base64.workspace = true
 uuid.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 cpal = "0.16"
+security-framework = "3"

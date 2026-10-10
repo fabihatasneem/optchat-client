@@ -388,7 +388,7 @@ try {
     await sleep(500);
     await a.shot("parity-22-sidebar-wide");
     const w1 = st().ws.sideW;
-    const saved = JSON.parse(Deno.readTextFileSync(`${a.dir}/prefs-${a.db}.json`)).side_w;
+    const saved = JSON.parse(Deno.readTextFileSync(`${a.dir}/prefs.json`)).side_w;
     check(Math.abs(w1 - (w0 + 120)) < 12 && Math.abs(saved - w1) < 0.5, `dragging the resizer 120 pt widens the sidebar ${w0} → ${Math.round(w1)} pt, saved in prefs (${Math.round(saved)})`);
     const r2 = a.probe("side.resizer")!;
     const [x1, y1] = a.px(r2[0] + r2[2] / 2, r2[1] + 300);
@@ -624,13 +624,14 @@ try {
   });
 } catch (e) { check(false, String(e)); await a.shot("parity-fail"); } finally { await a.quit(); }
 
-// L16: a fresh database shows the root's intro
+// L16 (engine clients): no fresh workspace exists to show the root's intro; with nothing connected the app shows
+// what to do next (Add engine / Workspaces)
 try {
-  a = await App.launch({ db: "tgpuiempty", env }); // a test instance nothing is ever sent to
-  await a.waitFor(() => (st().feedEmpty ?? []).includes("root") && !!a.probe("feed.empty"), 8000, "root intro");
-  await a.shot("parity-33-root-empty");
-  check(true, "an empty chat (a fresh test instance) shows the root's intro (One chat. It never ends.)");
-} catch (e) { check(false, `fresh: ${String(e).slice(0, 300)}`); } finally { await a.quit(); }
+  a = await App.launch({ bare: true, env });
+  await a.waitFor(() => !!a.probe("empty") && !!a.probe("empty.add"), 8000, "no-workspace state");
+  await a.shot("parity-33-no-workspace");
+  check(true, "nothing connected: the editor shows Add engine / Workspaces");
+} catch (e) { check(false, `no workspace: ${String(e).slice(0, 300)}`); } finally { await a.quit(); }
 try { Deno.removeSync(`${a.probes}.arg`); } catch { /* none */ }
 try { Deno.removeSync(tmp, { recursive: true }); } catch { /* gone */ }
 peer.close();
