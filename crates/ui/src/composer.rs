@@ -37,6 +37,8 @@ pub struct Attachment {
 }
 
 pub struct Composer {
+    /// the phone layout: touch-sized buttons (44 pt)
+    pub touch: bool,
     pub state: Entity<AppState>,
     pub input: Entity<InputState>,
     /// drafts by (workspace, task)
@@ -76,7 +78,7 @@ impl Composer {
         let s3 = cx.observe(&state, |_, _, cx| cx.notify());
         let task = state.read(cx).current;
         let ws = state.read(cx).active.clone();
-        Composer { state, input, drafts: HashMap::new(), ws, task, images: vec![], busy: false, drag: false, anchor: None, caret: None, dict_seq: 0, mic_press: None, err: None, pending_submit: None, _subs: vec![s1, s2, s3] }
+        Composer { touch: false, state, input, drafts: HashMap::new(), ws, task, images: vec![], busy: false, drag: false, anchor: None, caret: None, dict_seq: 0, mic_press: None, err: None, pending_submit: None, _subs: vec![s1, s2, s3] }
     }
 
     fn switch(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
@@ -361,7 +363,7 @@ impl Composer {
         let off = self.disabled(cx) && st == "idle";
         let b = div()
             .id("mic")
-            .size(px(30.))
+            .size(px(if self.touch { 44. } else { 30. }))
             .flex()
             .flex_none()
             .items_center()
@@ -548,7 +550,7 @@ impl Render for Composer {
                                         d.child(
                                             div()
                                                 .id("append")
-                                                .size(px(32.))
+                                                .size(px(if self.touch { 44. } else { 32. }))
                                                 .rounded_full()
                                                 .border_1()
                                                 .border_color(k.line2)
@@ -565,7 +567,7 @@ impl Render for Composer {
                                     .child(
                                         div()
                                             .id("run")
-                                            .size(px(32.))
+                                            .size(px(if self.touch { 44. } else { 32. }))
                                             .rounded_full()
                                             .bg(k.accent2)
                                             .flex()

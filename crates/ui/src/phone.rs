@@ -117,6 +117,7 @@ impl Workspace {
         }
         self.phone.expanded = false;
         window.focus(&self.focus, cx);
+        window.dismiss_virtual_keyboard();
         cx.notify();
     }
     fn phone_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -134,12 +135,7 @@ impl Workspace {
             let _ = this.update_in(cx, |w, window, cx| {
                 if w.phone.press.is_some() && w.phone.press_seq == seq && !dictating(w, cx) {
                     // long-press: dictation into the floating composer
-                    w.phone.long = true;
-                    w.phone.dict_started = Some(Instant::now());
-                    w.phone.expanded = false;
-                    w.phone.screen = None;
-                    w.composer.update(cx, |c, cx| c.start_dictation(window, cx));
-                    cx.notify();
+                    w.chat_long_started(window, cx);
                 }
             });
         })
@@ -153,7 +149,8 @@ impl Workspace {
         self.phone.long = true;
         self.phone.press.get_or_insert_with(Instant::now);
         self.phone.dict_started = Some(Instant::now());
-        self.phone.expanded = false;
+        // the keyboard goes down; the words stream into the floating card (as with the keyboard down)
+        self.phone_collapse(window, cx);
         self.phone.screen = None;
         self.composer.update(cx, |c, cx| c.start_dictation(window, cx));
         cx.notify();
@@ -185,9 +182,12 @@ impl Workspace {
         let double = clicks >= 2 || self.phone.last_tap.map(|t| t.elapsed() < DOUBLE_TAP).unwrap_or(false);
         self.phone.last_tap = Some(Instant::now());
         if double {
-            // double-tap: send (stops a dictation first; resumes a paused task)
+            // double-tap: send (stops a dictation first; resumes a paused task); the first tap may have sent already
             self.phone.last_tap = None;
-            self.phone_send(window, cx);
+            let paused = self.state.read(cx).info().map(|i| i.task.status == TaskStatus::Paused).unwrap_or(false);
+            if dictating(self, cx) || !draft(self, cx).trim().is_empty() || paused {
+                self.phone_send(window, cx);
+            }
             return;
         }
         if dictating(self, cx) {
@@ -482,15 +482,7 @@ fn bar(w: &mut Workspace, cx: &mut Context<Workspace>) -> impl IntoElement {
                     .shadow(vec![BoxShadow { color: bg.opacity(0.45), offset: point(px(0.), px(4.)), blur_radius: px(16.), spread_radius: px(0.), inset: false }])
                     .child(icon(ic, 23., k.on_accent))
                     .child(probe("phone.chat"))
-                    .on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, cx| {
-                        cx.stop_propagation();
-                        w.chat_down(window, cx)
-                    }))
-                    .on_mouse_up(MouseButton::Left, cx.listener(|w, e: &MouseUpEvent, window, cx| {
-                        cx.stop_propagation();
-                        w.chat_up(e.click_count, window, cx)
-                    }))
-                    .child(long_press_area(cx.entity().downgrade())),
+                    .child(chat_button_events(cx.entity().downgrade())),
             ),
         )
         .child(tab("ph-alerts", "Alerts", "bell", Screen::Panel(View::Notifications), alerts, cx))
@@ -692,27 +684,56 @@ fn status(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) 
         )
 }
 
-/// iOS: a held finger arrives as LongPressEvent (Started after ~500 ms, Ended on release); listened to over the chat
-/// button's bounds
-fn long_press_area(ws: WeakEntity<Workspace>) -> impl IntoElement {
+/// The chat button's presses, taps and long presses, taken in the CAPTURE phase over its bounds: nothing under or
+/// around it (the focused composer's text input, which iOS hands touches and long presses to while the keyboard is
+/// up) can swallow them. Mouse down/up drive taps, double taps (click_count or timing) and the desktop's long-press
+/// timer; iOS's LongPressEvent (Started after ~500 ms, Ended on release) drives dictation and hold-to-talk.
+fn chat_button_events(ws: WeakEntity<Workspace>) -> impl IntoElement {
     canvas(
         |b, _, _| b,
         move |bounds, _, window, _| {
-            let ws = ws.clone();
-            let began = std::rc::Rc::new(std::cell::Cell::new(None::<Instant>));
-            window.on_mouse_event::<LongPressEvent>(move |e, phase, window, cx| {
-                if phase != DispatchPhase::Bubble || !bounds.contains(&e.start_position) {
+            let free = |w: &Workspace, cx: &App| w.overlay.is_none() && !crate::kit::menu::is_open(cx);
+            let ws1 = ws.clone();
+            window.on_mouse_event::<MouseDownEvent>(move |e, phase, window, cx| {
+                if phase != DispatchPhase::Capture || e.button != MouseButton::Left || !bounds.contains(&e.position) {
                     return;
                 }
+                let _ = ws1.update(cx, |w, cx| {
+                    if free(w, cx) {
+                        cx.stop_propagation();
+                        w.chat_down(window, cx);
+                    }
+                });
+            });
+            let ws2 = ws.clone();
+            window.on_mouse_event::<MouseUpEvent>(move |e, phase, window, cx| {
+                if phase != DispatchPhase::Capture || e.button != MouseButton::Left {
+                    return;
+                }
+                let _ = ws2.update(cx, |w, cx| {
+                    // a release anywhere ends a press that began on the button
+                    if w.phone.press.is_some() && (bounds.contains(&e.position) || w.phone.long) {
+                        cx.stop_propagation();
+                        w.chat_up(e.click_count, window, cx);
+                    }
+                });
+            });
+            let ws3 = ws.clone();
+            let began = std::rc::Rc::new(std::cell::Cell::new(None::<Instant>));
+            window.on_mouse_event::<LongPressEvent>(move |e, phase, window, cx| {
+                if phase != DispatchPhase::Capture || !bounds.contains(&e.start_position) {
+                    return;
+                }
+                cx.stop_propagation();
                 match e.phase {
                     TouchPhase::Started => {
                         // the touch began ~500 ms before the long press was recognised
                         began.set(Some(Instant::now() - Duration::from_millis(500)));
-                        let _ = ws.update(cx, |w, cx| w.chat_long_started(window, cx));
+                        let _ = ws3.update(cx, |w, cx| w.chat_long_started(window, cx));
                     }
                     TouchPhase::Ended | TouchPhase::Cancelled => {
                         let t = began.take().unwrap_or_else(Instant::now);
-                        let _ = ws.update(cx, |w, cx| w.chat_long_ended(t, cx));
+                        let _ = ws3.update(cx, |w, cx| w.chat_long_ended(t, cx));
                     }
                     _ => {}
                 }

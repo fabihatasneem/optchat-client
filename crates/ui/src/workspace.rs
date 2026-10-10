@@ -746,6 +746,12 @@ impl Render for Workspace {
                 }
             }));
 
+        if self.composer.read(cx).touch != narrow {
+            self.composer.update(cx, |c, cx| {
+                c.touch = narrow;
+                cx.notify();
+            });
+        }
         if self.tasks_panel.read(cx).large != narrow {
             self.tasks_panel.update(cx, |p, cx| {
                 p.large = narrow;

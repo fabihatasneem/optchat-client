@@ -93,6 +93,38 @@ try {
   await a.key("BackSpace");
   await a.click("feed", { dy: 40 });
 
+  // with the keyboard up (composer open, focused): double-tap sends, long-press dictates, hold-to-talk stops on release
+  await press(80);
+  await a.waitFor(() => ph().expanded && st().focus === "composer", 3000, "composer open (keyboard up)");
+  await a.type("sent by a double tap");
+  {
+    const [x, y] = center(await a.waitProbe("phone.chat"));
+    await a.cmd({ op: "click", x, y }, { op: "click", x, y });
+    await a.waitFor(() => ph().draft === "" && !ph().expanded, 5000, "double-tap with the keyboard up");
+    check(true, "keyboard up: a double-tap sends");
+  }
+  await press(80);
+  await a.waitFor(() => ph().expanded, 3000, "open again");
+  await press(700);
+  await a.waitFor(() => ph().dictating && !ph().expanded, 5000, "long-press with the keyboard up");
+  check(true, "keyboard up: a long-press dictates (the keyboard goes down, words float)");
+  await press(80);
+  await a.waitFor(() => !ph().dictating, 8000, "stopped");
+  await press(80); // ^ sends what was said
+  await a.waitFor(() => ph().draft === "", 5000, "sent");
+  await press(80);
+  await a.waitFor(() => ph().expanded, 3000, "open again");
+  await press(2200);
+  await a.waitFor(() => !ph().dictating, 8000, "hold-to-talk ended by the release");
+  check(ph().draft.length > 0, `keyboard up: hold-to-talk stops on release ("${ph().draft}")`);
+  await a.click("phone.card");
+  await a.waitFor(() => ph().expanded, 3000, "edit");
+  const run = a.probe("composer.run");
+  check(run && run[2] >= 44 && run[3] >= 44, `the composer's run button is a 44 pt target (${run?.[2]}×${run?.[3]})`);
+  await a.key("cmd+a");
+  await a.key("BackSpace");
+  await a.click("feed", { dy: 40 });
+
   // screens: Tasks (full screen, large title), the active tab again → chat; More; Status
   await a.click("phone.tab.tasks");
   await a.waitFor(() => ph().screen === "tasks" && !!a.probe("phone.screenTitle"), 3000, "tasks screen");
