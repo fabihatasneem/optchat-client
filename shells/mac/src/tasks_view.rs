@@ -5,12 +5,12 @@ use crate::theme::c;
 use crate::ui::*;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use optchat_engine::engine::TaskInfo;
+use optchat_proto::api::TaskInfo;
 
 pub enum TasksEvent {
     Open(i64),
     Act(i64, &'static str),
-    Menu(i64, optchat_engine::types::TaskStatus, Point<Pixels>),
+    Menu(i64, optchat_proto::types::TaskStatus, Point<Pixels>),
 }
 /// The Tasks view as its own (cached) view: it re-renders only when the state changes, never while the feed scrolls.
 pub struct TasksPanel {

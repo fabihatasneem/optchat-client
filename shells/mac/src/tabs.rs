@@ -10,7 +10,7 @@ use gpui::*;
 use gpui::Context;
 use gpui_component::input::Input;
 use gpui_component::Sizable;
-use optchat_engine::types::*;
+use optchat_proto::types::*;
 
 pub fn tab_strip(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) -> impl IntoElement {
     let k = c(cx).clone();

@@ -12,10 +12,11 @@ use gpui_component::button::Button;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_component::Sizable;
-use optchat_engine::hub::{prepare_image, Approval, ImageIn};
-use optchat_engine::lifecycle::BudgetArgs;
-use optchat_engine::metrics::metrics;
-use optchat_engine::types::*;
+use crate::media::prepare_image;
+use optchat_proto::api::{Approval, ImageIn};
+use optchat_proto::api::BudgetArgs;
+use optchat_proto::metrics::metrics;
+use optchat_proto::types::*;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -135,7 +136,7 @@ pub fn approval(w: &mut Workspace, a: Approval, cx: &mut Context<Workspace>) -> 
         let st = w.state.clone();
         btn(id, label, tone, cx).child(probe(format!("approve.{id}"))).on_click(move |_, _, cx| {
             let aid = aid.clone();
-            st.update(cx, |s, cx| s.command(cx, false, move |h| { h.approve(&aid, accept, persist.map(String::from)); Ok(String::new()) }))
+            st.update(cx, |s, cx| s.command(cx, false, move |h| async move { { h.approve(&aid, accept, persist.map(String::from)); Ok(String::new()) } }))
         })
     };
     let b1 = mk("deny", "Deny", Tone::Plain, false, None, cx);
@@ -264,7 +265,7 @@ impl MetricsPop {
             let dm = num(&self.dl, cx);
             BudgetArgs { usd: num(&self.usd, cx), minutes: num(&self.min, cx), tokens: num(&self.tok, cx), deadline_minutes: dm, deadline: if dm.is_none() { cur.deadline.clone() } else { None } }
         };
-        self.state.update(cx, |s, cx| s.command(cx, true, move |h| h.set_budget(task, b)));
+        self.state.update(cx, |s, cx| s.command(cx, true, move |h| async move { h.set_budget(task, b).await }));
         cx.emit(DismissEvent);
     }
 }
@@ -415,7 +416,7 @@ impl NewTaskDialog {
         let prev = if mode == "continue" { self.prev } else { None };
         let imgs: Vec<ImageIn> = self.images.drain(..).map(|a| ImageIn { media_type: a.media_type, bytes: (*a.bytes).clone(), name: a.name, w: a.w, h: a.h }).collect();
         self.state.update(cx, |s, cx| {
-            s.run(cx, move |h| h.spawn(parent, &mode, &title, &instruction, imgs, prev, budget, settings, start), move |s, r, cx| match r {
+            s.run(cx, move |h| async move { h.spawn(parent, &mode, &title, &instruction, imgs, prev, budget, settings, start).await }, move |s, r, cx| match r {
                 Ok(id) => {
                     let st = s.tasks.get(&id).map(|t| t.task.status);
                     s.notice = Some((true, format!("#{id} {}", if st == Some(TaskStatus::Pending) { "added" } else { "spawned" }), std::time::Instant::now()));
@@ -787,7 +788,7 @@ impl Palette {
             }
         }
         if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && !self.tasks_only {
-            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: run a bash tool", "t-bash"), ("Test: toast ok", "t-toast-ok"), ("Test: toast error", "t-toast-err"), ("Test: engine error", "t-err"), ("Test: dictation error", "t-dict-err"), ("Test: compaction failure", "t-cfail"), ("Test: appearance light", "t-light"), ("Test: appearance dark", "t-dark"), ("Test: mic hold", "t-mic-hold"), ("Test: mic tap", "t-mic-tap"), ("Test: dictate again", "t-dict-again"), ("Test: load all history", "t-load-all"), ("Test: paste image", "t-paste"), ("Test: drop big image", "t-drop-big"), ("Test: attach 21 images", "t-attach-21"), ("Test: new task with 21 images", "t-nt-21"), ("Test: new task paste image", "t-nt-paste"), ("Test: empty feed", "t-empty"), ("Test: reveal entry", "t-reveal")] {
+            for (l, a) in [("Test: approval dialog", "t-approval"), ("Test: attach image", "t-image"), ("Test: reset frame stats", "t-frames"), ("Test: narrow window", "t-narrow"), ("Test: wide window", "t-wide"), ("Test: scroll gesture", "t-scroll"), ("Test: fast scroll gesture", "t-scroll-fast"), ("Test: drop the hub connection", "t-drop"), ("Test: toast ok", "t-toast-ok"), ("Test: toast error", "t-toast-err"), ("Test: engine error", "t-err"), ("Test: dictation error", "t-dict-err"), ("Test: compaction failure", "t-cfail"), ("Test: appearance light", "t-light"), ("Test: appearance dark", "t-dark"), ("Test: mic hold", "t-mic-hold"), ("Test: mic tap", "t-mic-tap"), ("Test: dictate again", "t-dict-again"), ("Test: load all history", "t-load-all"), ("Test: paste image", "t-paste"), ("Test: drop big image", "t-drop-big"), ("Test: attach 21 images", "t-attach-21"), ("Test: new task with 21 images", "t-nt-21"), ("Test: new task paste image", "t-nt-paste"), ("Test: empty feed", "t-empty"), ("Test: reveal entry", "t-reveal")] {
                 if let Some(sc) = fuzzy(&q, l) {
                     items.push((sc + 60, l.to_string(), String::new(), Cmd::Act(a)));
                 }
@@ -871,11 +872,11 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
         Cmd::Theme(id) => set_theme(w, &id, false, cx),
         Cmd::Model(id) => {
             let task = w.state.read(cx).current;
-            w.state.update(cx, |s, cx| s.command(cx, true, move |h| h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).map(|r| format!("model: {r}"))));
+            w.state.update(cx, |s, cx| s.command(cx, true, move |h| async move { h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).map(|r| format!("model: {r}")) }));
         }
         Cmd::Effort(e) => {
             let task = w.state.read(cx).current;
-            w.state.update(cx, |s, cx| s.command(cx, true, move |h| h.update_settings(task, SettingsPatch { effort: Some(e), ..Default::default() }).map(|r| format!("effort: {r}"))));
+            w.state.update(cx, |s, cx| s.command(cx, true, move |h| async move { h.update_settings(task, SettingsPatch { effort: Some(e), ..Default::default() }).map(|r| format!("effort: {r}")) }));
         }
         Cmd::Act(a) => match a {
             "new" => open_new_task(w, None, window, cx),
@@ -911,12 +912,17 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
             "zoomout" => zoom(w, -1.0, cx),
             "metrics" => open_metrics(w, window, cx),
             "quit" => cx.quit(),
-            "t-approval" => w.state.update(cx, |s, _| {
-                if let Some(h) = s.hub() {
-                    let _g = s.rt.enter();
-                    h.test_approval();
+            "t-drop" => {
+                if let Some(h) = w.state.read(cx).hub() {
+                    h.drop_connection();
                 }
-            }),
+            }
+            // an approval as the hub broadcasts one (computer use asking for an app); the answer goes to the hub
+            "t-approval" => {
+                if let Some(h) = w.state.read(cx).hub() {
+                    h.inject(optchat_proto::api::HubEvent::Approval(optchat_proto::api::Approval { id: format!("test-{}", uuid::Uuid::new_v4()), message: "Allow Computer Use to use \"Calculator\"?".into(), meta: serde_json::json!({"tool_params": {"app": "com.apple.calculator"}, "persist": ["session", "always"]}), task: None }));
+                }
+            }
             "t-image" => {
                 let p = std::path::PathBuf::from(std::env::var("OPTCHAT_TEST_IMAGE").unwrap_or_default());
                 w.composer.update(cx, |c, cx| c.add_paths(vec![p], cx));
@@ -926,28 +932,23 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
             "t-wide" => window.resize(size(px(1360.), px(880.))),
             "t-scroll" => w.feed.update(cx, |f, cx| f.test_gesture(6.0, 14.0, cx)),
             "t-scroll-fast" => w.feed.update(cx, |f, cx| f.test_gesture(4.0, 60.0, cx)),
-            "t-bash" => {
-                if let Some(h) = w.state.read(cx).hub() {
-                    h.test_bash();
-                }
-            }
             // ---- hooks that feed the app's real event paths (HubEvent through AppState::apply) -------------------
             "t-toast-ok" | "t-toast-err" => {
                 if let Some(h) = w.state.read(cx).hub() {
                     let ok = a == "t-toast-ok";
-                    h.send(optchat_engine::hub::HubEvent::Notice { ok, message: if ok { "test notice: done".into() } else { "test notice: it failed".into() }, spawned: None });
+                    h.inject(optchat_proto::api::HubEvent::Notice { ok, message: if ok { "test notice: done".into() } else { "test notice: it failed".into() }, spawned: None });
                 }
             }
             "t-err" => {
                 let s = w.state.read(cx);
                 if let Some(h) = s.hub() {
-                    h.send(optchat_engine::hub::HubEvent::Engine(optchat_engine::engine::EngineEvent::Error { task: Some(s.current), message: "test engine error".into() }));
+                    h.inject(optchat_proto::api::HubEvent::Engine(optchat_proto::api::EngineEvent::Error { task: Some(s.current), message: "test engine error".into() }));
                 }
             }
             "t-dict-err" => {
                 let s = w.state.read(cx);
                 if let Some(h) = s.hub() {
-                    h.send(optchat_engine::hub::HubEvent::Dictation { task: s.current, ev: optchat_engine::hub::DictEvent::Error("microphone access is blocked".into()) });
+                    h.inject(optchat_proto::api::HubEvent::Dictation { task: s.current, ev: optchat_proto::api::DictEvent::Error("microphone access is blocked".into()) });
                 }
             }
             "t-cfail" => {
@@ -955,7 +956,7 @@ pub fn run_cmd(w: &mut Workspace, cmd: Cmd, window: &mut Window, cx: &mut Contex
                 if let Some(h) = s.hub() {
                     let mut failed = s.failed.clone();
                     failed.insert(format!("{}:1:0", s.current), "test: the compactor call failed".into());
-                    h.send(optchat_engine::hub::HubEvent::Engine(optchat_engine::engine::EngineEvent::Compactor { busy: s.busy.clone(), failed }));
+                    h.inject(optchat_proto::api::HubEvent::Engine(optchat_proto::api::EngineEvent::Compactor { busy: s.busy.clone(), failed }));
                 }
             }
             // the handler GPUI's observe_window_appearance calls (theme::sync_window → on_appearance), with a given appearance

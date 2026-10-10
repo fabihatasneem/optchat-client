@@ -1,5 +1,5 @@
 //! Number/time formatting (app/ui/format.ts).
-use optchat_engine::types::{iso_ms, parse_iso, Cost, Usage};
+use optchat_proto::types::{iso_ms, parse_iso, Cost, Usage};
 
 pub fn tokens(n: i64) -> String {
     let v = n;
@@ -69,11 +69,11 @@ pub fn cache_pct(u: Option<&Usage>) -> i64 {
 }
 
 pub fn ms(v: i64) -> String {
-    optchat_engine::metrics::fmt_ms(v as f64)
+    optchat_proto::metrics::fmt_ms(v as f64)
 }
 
 pub fn elapsed(since: &str) -> String {
-    let s = ((optchat_engine::types::now_ms() - iso_ms(since)) / 1000).max(0);
+    let s = ((optchat_proto::types::now_ms() - iso_ms(since)) / 1000).max(0);
     if s >= 60 { format!("{}m {:02}s", s / 60, s % 60) } else { format!("{s}s") }
 }
 

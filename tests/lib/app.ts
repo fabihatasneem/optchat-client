@@ -1,10 +1,19 @@
-// The app under test: launched from dist/OptChat.app on a temp copy of the project's database, driven through
-// Computer Use with coordinates from the app's probe file, observed through its state file and screenshots.
+// The app under test: dist/OptChat.app as a client of the OptChat hub on a TEST instance (OPTCHAT_HUB_DB=t<id>, never
+// the live chat), with its prefs in a temp folder; driven through Computer Use with coordinates from the app's probe
+// file, observed through its state file and screenshots.
 import { BUNDLE, Cua, ROOT, sleep } from "./cua.ts";
+import { checkTestDb } from "./hub.ts";
 
 export const SHOTS = `${ROOT}/shots`;
 const TITLEBAR = 32; // points above the content area
 const SCALE = 2; // screenshot pixels per point (Retina)
+
+/** the test instance a suite uses: OPTCHAT_TEST_DB (e.g. a live-sized copy seeded for the run), else `fallback` */
+export function testDb(fallback: string): string {
+  const db = Deno.env.get("OPTCHAT_TEST_DB") ?? fallback;
+  checkTestDb(db);
+  return db;
+}
 
 export class App {
   cua!: Cua;
@@ -13,23 +22,15 @@ export class App {
   db = "";
   log: string[] = [];
   proc?: Deno.ChildProcess;
-  /** `dir`: relaunch on a previous run's directory (same database copy and prefs; see quit({ keep: true })) */
-  static async launch(o: { db?: string; fresh?: boolean; env?: Record<string, string>; dir?: string } = {}): Promise<App> {
+  /** `db`: the hub test instance (t<id>); `dir`: relaunch with a previous run's prefs (see quit({ keep: true })) */
+  static async launch(o: { db?: string; env?: Record<string, string>; dir?: string } = {}): Promise<App> {
     const me = new App();
     me.dir = o.dir ?? await Deno.makeTempDir({ prefix: "optchat-e2e-" });
-    me.db = `${me.dir}/optchat.db`;
-    if (o.dir) {
-      // relaunch: keep everything
-    } else if (o.fresh) {
-      // an empty database
-    } else {
-      const src = o.db ?? `${ROOT}/data/optchat.db`;
-      const r = await new Deno.Command("sqlite3", { args: [src, `.backup '${me.db}'`] }).output();
-      if (!r.success) throw new Error("db copy failed");
-    }
+    me.db = o.db ?? testDb("tgpuie2e");
+    checkTestDb(me.db);
     try { Deno.removeSync(me.probes); } catch { /* none */ }
     try { Deno.removeSync(`${me.probes}.state.json`); } catch { /* none */ }
-    const env = { OPTCHAT_REFRAME_MCP: "0", OPTCHAT_PROBES: me.probes, OPTCHAT_DB: me.db, ...(o.env ?? {}) };
+    const env = { OPTCHAT_PROBES: me.probes, OPTCHAT_HUB_DB: me.db, OPTCHAT_PREFS_DIR: me.dir, ...(o.env ?? {}) };
     const args = ["-n", "-W", "--stderr", `${me.dir}/stderr.txt`];
     for (const [k, v] of Object.entries(env)) args.push("--env", `${k}=${v}`);
     args.push(`${ROOT}/dist/OptChat.app`);
@@ -167,7 +168,7 @@ export class App {
     this.cua.close();
     await sleep(300);
     this.orphans = kids.filter((p) => new Deno.Command("kill", { args: ["-0", p], stderr: "null" }).outputSync().success);
-    // the database copy is ~1.6 GB: never leave it behind (OPTCHAT_KEEP_E2E=1 keeps it for debugging)
+    // the prefs folder (OPTCHAT_KEEP_E2E=1 keeps it for debugging)
     if (!o.keep && !Deno.env.get("OPTCHAT_KEEP_E2E")) { try { Deno.removeSync(this.dir, { recursive: true }); } catch { /* gone */ } }
   }
 }

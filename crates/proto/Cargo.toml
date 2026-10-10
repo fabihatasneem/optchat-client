@@ -1,0 +1,13 @@
+[package]
+name = "optchat-proto"
+edition.workspace = true
+version.workspace = true
+description = "The OptChat hub's wire types (records as the web app's JSON) and the app-facing shapes the GPUI client builds from them"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+regex.workspace = true

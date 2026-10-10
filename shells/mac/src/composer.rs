@@ -9,8 +9,9 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::RopeExt;
-use optchat_engine::hub::{prepare_image, ImageIn};
-use optchat_engine::types::TaskStatus;
+use crate::media::prepare_image;
+use optchat_proto::api::ImageIn;
+use optchat_proto::types::TaskStatus;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -140,7 +141,7 @@ impl Composer {
             if run {
                 s.follow = true;
             }
-            s.command(cx, false, move |h| h.send_message(task, &text, imgs, run))
+            s.command(cx, false, move |h| async move { h.send_message(task, &text, imgs, run) })
         });
         cx.notify();
     }
@@ -514,7 +515,7 @@ impl Render for Composer {
                                     .when(stoppable, |d| {
                                         let st = self.state.clone();
                                         d.child(btn("stop", "Stop", Tone::Danger, cx).child(probe("composer.stop")).on_click(move |_, _, cx| {
-                                            st.update(cx, |s, cx| s.command(cx, false, move |h| { h.stop(task); Ok(String::new()) }))
+                                            st.update(cx, |s, cx| s.command(cx, false, move |h| async move { { h.stop(task); Ok(String::new()) } }))
                                         }))
                                     })
                                     .child(self.render_mic(cx))

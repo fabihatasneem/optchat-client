@@ -12,8 +12,8 @@ use gpui::Context;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_component::Sizable;
-use optchat_engine::metrics::TOKENS;
-use optchat_engine::types::*;
+use optchat_proto::metrics::TOKENS;
+use optchat_proto::types::*;
 
 pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) -> impl IntoElement {
     let k = c(cx).clone();
@@ -22,8 +22,12 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
     let info = s.info().cloned();
     let t = info.as_ref().map(|i| i.task.clone());
     let working = s.tasks.values().filter(|x| x.running).count();
+    let offline = s.conn != optchat_proto::api::Conn::Open;
+    // like the page: the connection first, then the turn, then the task
     let status = if s.hub.is_none() {
         s.error.clone().map(|e| format!("failed: {e}")).unwrap_or("starting".into())
+    } else if offline {
+        if s.conn == optchat_proto::api::Conn::Closed { "disconnected · reconnecting".into() } else { "connecting".into() }
     } else if let Some(r) = &s.cur.running {
         if r.status == "waiting" { "settling".into() } else { "running".into() }
     } else if info.as_ref().map(|i| i.waiting).unwrap_or(false) {
@@ -37,8 +41,10 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
     let fg = if running || paused { k.text } else { k.muted };
     let item = || div().flex().items_center().gap(px(5.)).px(px(7.)).h_full().whitespace_nowrap();
     let mut left = div().flex().items_center().h_full().min_w_0().overflow_hidden();
-    let sdot: AnyElement = if s.hub.is_none() {
+    let sdot: AnyElement = if s.hub.is_none() || s.conn == optchat_proto::api::Conn::Closed {
         dot(k.red, 7.).into_any_element()
+    } else if offline {
+        pulse("sbdot", dot(k.amber, 7.)).into_any_element()
     } else if running {
         pulse("sbdot", dot(k.green, 7.)).into_any_element()
     } else {
@@ -132,7 +138,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
                                         let st = st.clone();
                                         m = m.item(PopupMenuItem::new(mi.label.clone()).checked(mi.id == cur_model).on_click(move |_, _, cx| {
                                             let id = id.clone();
-                                            st.update(cx, |s, cx| s.command(cx, false, move |h| h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).map(|x| x.to_string())))
+                                            st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, SettingsPatch { model: Some(id), ..Default::default() }).map(|x| x.to_string()) }))
                                         }));
                                     }
                                 }
@@ -149,7 +155,7 @@ pub fn render(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspac
                             let ev = e.clone();
                             m = m.item(PopupMenuItem::new(e.clone()).checked(*e == cur_e).on_click(move |_, _, cx| {
                                 let ev = ev.clone();
-                                st.update(cx, |s, cx| s.command(cx, false, move |h| h.update_settings(task, SettingsPatch { effort: Some(ev), ..Default::default() }).map(|x| x.to_string())))
+                                st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, SettingsPatch { effort: Some(ev), ..Default::default() }).map(|x| x.to_string()) }))
                             }));
                         }
                         m

@@ -1,10 +1,10 @@
 //! The app's model (app/ui/state.ts): a mirror of the hub's state for the task on screen plus the global bits,
-//! fed by `HubEvent`s, and the commands the views send (run on the hub's runtime, never on the UI thread).
+//! fed by the hub's websocket messages (`HubEvent`s), and the commands the views send (on the client's runtime, never
+//! on the UI thread).
+use crate::client::Client;
 use gpui::{App, AppContext, Context, Entity, EventEmitter, Task};
-use optchat_engine::engine::{EngineEvent, TaskInfo, ViewInfo};
-use optchat_engine::hub::*;
-use optchat_engine::tools::ToolResult;
-use optchat_engine::types::*;
+use optchat_proto::api::*;
+use optchat_proto::types::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
@@ -119,7 +119,13 @@ pub struct Dict {
 }
 
 pub struct AppState {
-    pub hub: Option<Arc<Hub>>,
+    pub hub: Option<Arc<Client>>,
+    /// the websocket's state (status bar: "disconnected · reconnecting")
+    pub conn: Conn,
+    pub version: String,
+    pub build: String,
+    pub instance: String,
+    pub computer_available: bool,
     pub rt: tokio::runtime::Handle,
     pub error: Option<String>,
     pub tasks: BTreeMap<i64, TaskInfo>,
@@ -170,6 +176,11 @@ impl AppState {
         let prefs: Prefs = std::fs::read_to_string(&prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         AppState {
             hub: None,
+            conn: Conn::Connecting,
+            version: String::new(),
+            build: String::new(),
+            instance: String::new(),
+            computer_available: false,
             rt,
             error: None,
             tasks: BTreeMap::new(),
@@ -202,25 +213,11 @@ impl AppState {
         }
     }
 
-    /// Wire the hub in: snapshot the current task, then apply events as they come (batched per frame).
-    pub fn attach(&mut self, hub: Arc<Hub>, mut rx: tokio::sync::mpsc::UnboundedReceiver<HubEvent>, cx: &mut Context<Self>) {
-        self.models = hub.models();
-        self.global = hub.global.read().clone();
-        self.approvals = hub.pending_approvals();
-        let (b, f) = hub.compactor_state();
-        self.busy = b;
-        self.failed = f;
-        self.tasks = hub.tasks().into_iter().map(|i| (i.task.id, i)).collect();
-        if !self.tasks.contains_key(&self.current) {
-            self.current = 0;
-        }
-        self.prefs.tabs.retain(|t| self.tasks.contains_key(t));
-        if !self.prefs.tabs.contains(&self.current) {
-            self.prefs.tabs.push(self.current);
-        }
-        self.hub = Some(hub);
-        let cur = self.current;
-        self.load_task(cur, cx);
+    /// Wire the client in: its first snapshot (of the task in the URL) and the events after it, batched per frame.
+    pub fn attach(&mut self, client: Arc<Client>, mut rx: tokio::sync::mpsc::UnboundedReceiver<HubEvent>, cx: &mut Context<Self>) {
+        self.hub = Some(client);
+        self.open_seq += 1;
+        self.stats.switch_t0 = Some(std::time::Instant::now());
         self._pump = Some(cx.spawn(async move |this, cx| {
             while let Some(first) = rx.recv().await {
                 let mut batch = vec![first];
@@ -243,19 +240,17 @@ impl AppState {
         }));
     }
 
-    pub fn hub(&self) -> Option<Arc<Hub>> {
+    pub fn hub(&self) -> Option<Arc<Client>> {
         self.hub.clone()
     }
 
-    /// Run a hub call on its runtime; `done` gets the result back on the UI thread.
-    pub fn run<R: Send + 'static>(&self, cx: &mut Context<Self>, f: impl FnOnce(Arc<Hub>) -> R + Send + 'static, done: impl FnOnce(&mut AppState, R, &mut Context<Self>) + 'static) {
+    /// Run a hub call (a command or an rpc) on the client's runtime; `done` gets the result back on the UI thread.
+    pub fn run<R: Send + 'static, F: std::future::Future<Output = R> + Send + 'static>(&self, cx: &mut Context<Self>, f: impl FnOnce(Arc<Client>) -> F + Send + 'static, done: impl FnOnce(&mut AppState, R, &mut Context<Self>) + 'static) {
         let Some(hub) = self.hub.clone() else { return };
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.rt.spawn(async move {
-            let r = tokio::task::spawn_blocking(move || f(hub)).await;
-            if let Ok(r) = r {
-                let _ = tx.send(r);
-            }
+            let r = f(hub).await;
+            let _ = tx.send(r);
         });
         cx.spawn(async move |this, cx| {
             if let Ok(r) = rx.await {
@@ -269,7 +264,7 @@ impl AppState {
     }
 
     /// A command whose outcome is a notice (toast) on error, and optionally on success.
-    pub fn command(&self, cx: &mut Context<Self>, toast_ok: bool, f: impl FnOnce(Arc<Hub>) -> Result<String, String> + Send + 'static) {
+    pub fn command<F: std::future::Future<Output = Result<String, String>> + Send + 'static>(&self, cx: &mut Context<Self>, toast_ok: bool, f: impl FnOnce(Arc<Client>) -> F + Send + 'static) {
         self.run(cx, f, move |s, r, _| match r {
             Ok(m) => {
                 if toast_ok {
@@ -293,26 +288,39 @@ impl AppState {
         }
         self.prefs.current = id;
         self.save_prefs();
-        let seq = self.open_seq;
-        let t0 = std::time::Instant::now();
-        self.stats.switch_t0 = Some(t0);
-        self.run(cx, move |h| h.snapshot(id), move |s, snap, cx| {
-            if s.open_seq != seq {
-                return;
-            }
-            if let Some(snap) = snap {
-                let ta = std::time::Instant::now();
-                s.apply_snapshot(snap);
-                if std::env::var("OPTCHAT_TIMING").is_ok() {
-                    eprintln!("open #{id}: snapshot arrived {:?}, applied in {:?}", ta.duration_since(t0), ta.elapsed());
-                }
-                if s.stats.loaded_ms.is_none() {
-                    s.stats.loaded_ms = Some(s.stats.launch_ms + t0.elapsed().as_secs_f64() * 1000.0);
-                }
-                cx.emit(StateEvent::Opened(id));
-            }
-        });
+        // the hub answers "open" with this task's snapshot (applied in `apply`)
+        self.stats.switch_t0 = Some(std::time::Instant::now());
+        if let Some(c) = &self.hub {
+            c.open(id);
+        }
         cx.notify();
+    }
+
+    /// older entries from the hub before the loaded ones (the page's olderLog); returns how many were added
+    pub fn prepend_older(&mut self, task: i64, entries: Vec<LogEntry>) -> usize {
+        if task != self.current {
+            return 0;
+        }
+        let first = self.cur.log.first().map(|e| e.i).unwrap_or(i64::MAX);
+        let mut older: Vec<Arc<LogEntry>> = entries.into_iter().filter(|e| e.i < first).map(Arc::new).collect();
+        older.sort_by_key(|e| e.i);
+        let n = older.len();
+        if n > 0 {
+            older.extend(self.cur.log.drain(..));
+            self.cur.log = older;
+            self.feed_rev += 1;
+        }
+        n
+    }
+    /// a full entry in place of its slim copy (the page's fullEntry)
+    pub fn replace_entry(&mut self, task: i64, e: LogEntry) {
+        if task != self.current {
+            return;
+        }
+        if let Some(x) = self.cur.log.iter_mut().find(|x| x.i == e.i) {
+            *x = Arc::new(e);
+            self.feed_rev += 1;
+        }
     }
 
     pub fn open_task(&mut self, id: i64, cx: &mut Context<Self>) {
@@ -339,7 +347,19 @@ impl AppState {
     }
 
     fn apply_snapshot(&mut self, s: Snapshot) {
-        self.tasks = s.tasks.into_iter().map(|i| (i.task.id, i)).collect();
+        self.version = s.version.clone();
+        self.build = s.build.clone();
+        self.instance = s.instance.clone();
+        self.computer_available = s.computer_available;
+        self.global = s.global.clone();
+        self.models = s.models.clone();
+        self.busy = s.busy.clone();
+        self.failed = s.failed.clone();
+        self.approvals = s.approvals.clone();
+        if self.server_log.is_empty() {
+            self.server_log = s.server_log.iter().cloned().collect();
+        }
+        self.tasks = s.tasks.iter().cloned().map(|i| (i.task.id, i)).collect();
         let mut turns: HashMap<String, TurnRecord> = s.turns.into_iter().map(|t| (t.id.clone(), t)).collect();
         if let Some(r) = &s.running {
             turns.insert(r.id.clone(), r.clone());
@@ -347,6 +367,14 @@ impl AppState {
         let mut tools: HashMap<String, ToolState> = HashMap::new();
         for t in s.running_tools {
             tools.insert(t.call_id.clone(), ToolState { call_id: t.call_id, turn_id: t.turn_id, name: t.name, input: t.input, running: true, started_at: Some(t.started_at), result: None });
+        }
+        // tools that finished before a reconnect stay (the page keeps done tool states too)
+        if self.cur.loaded {
+            for (k, t) in self.cur.tools.drain() {
+                if !t.running {
+                    tools.entry(k).or_insert(t);
+                }
+            }
         }
         self.cur = Cur {
             loaded: true,
@@ -514,6 +542,67 @@ impl AppState {
                 }
             }
             HubEvent::Ready => {}
+            HubEvent::Conn(c) => {
+                self.conn = c;
+                if c == Conn::Closed {
+                    self.cur.live.clear();
+                }
+            }
+            HubEvent::Settings { task, settings, global, tools } => {
+                if task == cur {
+                    self.cur.settings = Some(settings);
+                    if let Some(t) = tools {
+                        self.cur.tool_list = t;
+                    }
+                }
+                if let Some(g) = global {
+                    self.global = g;
+                }
+            }
+            HubEvent::Snapshot(snap) => {
+                // the server is the truth after a (re)connect or an open; another task's snapshot is a stale answer,
+                // unless the task asked for is gone (the hub then shows the main chat)
+                let mut cur = cur;
+                if snap.task != cur {
+                    if snap.tasks.iter().any(|t| t.task.id == cur) {
+                        return;
+                    }
+                    cur = snap.task;
+                    self.current = cur;
+                    self.prefs.current = cur;
+                }
+                self.prefs.tabs.retain(|t| snap.tasks.iter().any(|x| x.task.id == *t));
+                if !self.prefs.tabs.contains(&cur) {
+                    self.prefs.tabs.push(cur);
+                }
+                let first = !self.cur.loaded;
+                self.apply_snapshot(*snap);
+                if let Some(t0) = self.stats.switch_t0 {
+                    if std::env::var("OPTCHAT_TIMING").is_ok() {
+                        eprintln!("open #{cur}: snapshot applied at {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
+                    }
+                    if self.stats.loaded_ms.is_none() {
+                        self.stats.loaded_ms = crate::LAUNCH.get().map(|t| t.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
+                if first {
+                    cx.emit(StateEvent::Opened(cur));
+                }
+                // its turns and requests (the foot chips, the step tables), as the page loads them after a snapshot
+                let seq = self.open_seq;
+                self.run(cx, move |h| async move { (h.turns_recent(cur, 80).await, h.requests_recent(cur, false, 300).await) }, move |s, (turns, requests), _| {
+                    if s.open_seq != seq || s.current != cur {
+                        return;
+                    }
+                    for t in turns {
+                        s.cur.turns.entry(t.id.clone()).or_insert(t);
+                    }
+                    for r in requests {
+                        s.cur.requests.entry(r.id.clone()).or_insert(r);
+                    }
+                    s.feed_rev += 1;
+                });
+            }
         }
     }
 

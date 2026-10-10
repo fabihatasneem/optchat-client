@@ -12,21 +12,20 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_component::switch::Switch;
 use gpui_component::Sizable;
-use optchat_engine::hub::*;
-use optchat_engine::rates::Per1M;
-use optchat_engine::types::*;
+use optchat_proto::api::*;
+use optchat_proto::rates::Per1M;
+use optchat_proto::types::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-/// Run `f` on the hub's runtime and hand the result to `done` on this entity.
-pub fn fetch<E: 'static, R: Send + 'static>(state: &Entity<AppState>, cx: &mut Context<E>, f: impl FnOnce(Arc<Hub>) -> R + Send + 'static, done: impl FnOnce(&mut E, R, &mut Context<E>) + 'static) {
+use crate::client::Client;
+/// Run `f` on the client's runtime and hand the result to `done` on this entity.
+pub fn fetch<E: 'static, R: Send + 'static, F: std::future::Future<Output = R> + Send + 'static>(state: &Entity<AppState>, cx: &mut Context<E>, f: impl FnOnce(Arc<Client>) -> F + Send + 'static, done: impl FnOnce(&mut E, R, &mut Context<E>) + 'static) {
     let s = state.read(cx);
     let Some(hub) = s.hub() else { return };
     let (tx, rx) = tokio::sync::oneshot::channel();
     s.rt.spawn(async move {
-        if let Ok(r) = tokio::task::spawn_blocking(move || f(hub)).await {
-            let _ = tx.send(r);
-        }
+        let _ = tx.send(f(hub).await);
     });
     cx.spawn(async move |this, cx| {
         if let Ok(r) = rx.await {
@@ -119,7 +118,7 @@ impl MemoryPanel {
         }
         self.seen = key;
         let id = key.0;
-        fetch(&self.state, cx, move |h| (h.view_parts(id), h.cview_parts(id)), |m, (v, cv), _| {
+        fetch(&self.state, cx, move |h| async move { (h.view_parts(id).await, h.cview_parts(id).await) }, |m, (v, cv), _| {
             m.texts = v.into_iter().map(|p| ((p.t, p.l, p.i), p.text.unwrap_or_default())).collect();
             m.cview = cv;
         });
@@ -130,7 +129,7 @@ impl MemoryPanel {
         }
     }
     fn fetch_kids(&mut self, k: (i64, u32, i64), cx: &mut Context<Self>) {
-        fetch(&self.state, cx, move |h| h.node_children(k.0, k.1, k.2), move |m, r, _| {
+        fetch(&self.state, cx, move |h| async move { h.node_children(k.0, k.1, k.2).await }, move |m, r, _| {
             m.kids.insert(k, r);
         });
     }
@@ -151,7 +150,7 @@ impl MemoryPanel {
             return;
         }
         let id = self.state.read(cx).current;
-        fetch(&self.state, cx, move |h| h.search(id, &q), |m, r, _| m.hits = Some(r));
+        fetch(&self.state, cx, move |h| async move { h.search(id, &q).await }, |m, r, _| m.hits = Some(r));
     }
     /// open the path from the view's line down to message (t, i)
     fn reveal(&mut self, t: i64, i: i64, cx: &mut Context<Self>) {
@@ -416,7 +415,7 @@ impl MemoryPanel {
                             .child(seg("seg-cview", "compactions' view", which_c, cx).child(probe("mem.cview")).on_click(cx.listener(|m, _, _, cx| {
                                 m.which_c = true;
                                 let id = m.state.read(cx).current;
-                                fetch(&m.state, cx, move |h| h.cview_parts(id), |m, cv, _| m.cview = cv);
+                                fetch(&m.state, cx, move |h| async move { h.cview_parts(id).await }, |m, cv, _| m.cview = cv);
                                 cx.notify();
                             })))
                             .child(div().flex_1())
@@ -426,7 +425,7 @@ impl MemoryPanel {
                                     cx.notify();
                                 } else {
                                     let id = m.state.read(cx).current;
-                                    fetch(&m.state, cx, move |h| h.render(id), |m, r, _| m.rendered = r);
+                                    fetch(&m.state, cx, move |h| async move { h.render(id).await }, |m, r, _| m.rendered = r);
                                 }
                             }))),
                     )
@@ -483,7 +482,7 @@ impl ContextPanel {
             return;
         }
         self.loading = Some(key);
-        fetch(&self.state, cx, move |h| h.request_detail(&id), |p, d, _| {
+        fetch(&self.state, cx, move |h| async move { h.request_detail(&id).await }, |p, d, _| {
             p.err = if d.is_none() { Some("no such request".into()) } else { None };
             p.detail = d;
         });
@@ -565,7 +564,7 @@ fn msg_texts(m: &Message) -> (String, String, String) {
             ("tool_call".into(), one(&format!("{name} {s}")), format!("{name} ({call_id})\n{}", serde_json::to_string_pretty(input).unwrap_or_default()))
         }
         Body::ToolResult { call_id, content, is_error, .. } => {
-            let t = optchat_engine::adapters::result_text(content);
+            let t = optchat_proto::api::result_text(content);
             ("tool_result".into(), format!("{}{}", if *is_error { "ERROR " } else { "" }, one(&t)), format!("{call_id}{}\n{t}", if *is_error { " (error)" } else { "" }))
         }
         Body::Image { media_type, .. } => ("image".into(), format!("[image {media_type}]"), format!("[image {media_type}]")),
@@ -726,7 +725,7 @@ impl LogPanel {
         }
         self.seen = key;
         let (id, sub) = (key.0, key.1);
-        fetch(&self.state, cx, move |h| (h.breakdown(id, sub), if sub { Some(h.requests_recent(id, true, 400)) } else { None }), |p, (b, r), _| {
+        fetch(&self.state, cx, move |h| async move { (h.breakdown(id, sub).await, if sub { Some(h.requests_recent(id, true, 400).await) } else { None }) }, |p, (b, r), _| {
             p.bd = Some(b);
             p.sub = r;
         });
@@ -892,7 +891,7 @@ impl ModelsPanel {
         self.reload(cx);
     }
     fn reload(&mut self, cx: &mut Context<Self>) {
-        fetch(&self.state, cx, |h| h.models_list(), |p, r, _| {
+        fetch(&self.state, cx, |h| async move { h.models_list().await }, |p, r, _| {
             p.rows = Some(r);
             p.reloads += 1;
         });
@@ -933,7 +932,7 @@ impl ModelsPanel {
         let num = |s: String| s.parse::<f64>().unwrap_or(f64::NAN);
         let per = Per1M { input: num(g(0, cx)), cache_read: num(g(1, cx)), cache_write: num(g(2, cx)), cache_write_1h: Some(g(3, cx)).filter(|s| !s.is_empty()).map(num), out: num(g(4, cx)) };
         let note = g(5, cx);
-        self.state.update(cx, |s, cx| s.command(cx, true, move |h| h.set_rate(&model, per, &note)));
+        self.state.update(cx, |s, cx| s.command(cx, true, move |h| async move { h.set_rate(&model, per, &note).await }));
         cx.notify();
     }
 }
@@ -970,7 +969,7 @@ impl ModelsPanel {
                 .child(div().flex_1().min_w_0().overflow_hidden().line_clamp(1).text_ellipsis().text_size(px(12.)).text_color(k.muted).child(format!("{runnable} models you can run · prices per 1M tokens")))
                 .when(hidden > 0, |d| d.child(btn_small("showhidden", format!("{} {hidden} hidden", if self.show_hidden { "hide" } else { "show" }), Tone::Ghost, cx).flex_none().child(probe("models.showhidden")).on_click(cx.listener(|p, _, _, cx| { p.show_hidden = !p.show_hidden; cx.notify(); }))))
                 .child(icon_btn("mrefresh", "refresh-cw", 14., cx).child(probe("models.refresh")).tooltip(tooltip("read the providers' model lists again")).on_click(cx.listener(|p, _, _, cx| {
-                    fetch(&p.state, cx, |h| { h.refresh_catalog(); h.send(HubEvent::Models(h.models())); }, |p, _, cx| p.reload(cx));
+                    fetch(&p.state, cx, |h| async move { let _ = h.refresh_catalog().await; }, |p, _, cx| p.reload(cx));
                 }))),
         );
         let mut providers: Vec<String> = rows.iter().map(|r| r.cat.provider.clone()).collect();
@@ -1070,7 +1069,7 @@ impl ModelsPanel {
                 }))))
                 .child(div().id(SharedString::from(format!("hide{id}"))).cursor_pointer().child(if hidden { "show in pickers" } else { "hide from pickers" }).child(probe(format!("model.hide.{id}"))).on_click(move |_, _, cx| {
                     let id = id3.clone();
-                    st.update(cx, |s, cx| s.command(cx, true, move |h| h.hide_model(&id, !hidden)))
+                    st.update(cx, |s, cx| s.command(cx, true, move |h| async move { h.hide_model(&id, !hidden).await }))
                 })),
         );
         if editing {
@@ -1130,7 +1129,7 @@ impl SettingsPanel {
                         },
                         _ => return,
                     };
-                    p.state.update(cx, |s, cx| s.command(cx, false, move |h| h.update_settings(task, patch).map(|x| x.to_string())));
+                    p.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, patch).map(|x| x.to_string()) }));
                 }
             }));
         }
@@ -1150,7 +1149,7 @@ impl SettingsPanel {
     }
     fn patch(&self, p: SettingsPatch, cx: &mut Context<Self>) {
         let task = self.task;
-        self.state.update(cx, |s, cx| s.command(cx, false, move |h| h.update_settings(task, p).map(|x| x.to_string())));
+        self.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task, p).map(|x| x.to_string()) }));
     }
 }
 fn picker(id: &str, label: String, items: Vec<(String, String, bool)>, on: impl Fn(String, &mut App) + 'static) -> impl IntoElement {
@@ -1222,14 +1221,14 @@ impl SettingsPanel {
                 .child(tabs)
                 .child(section(cx).child(section_title("turns", cx)).child(field("turns at once, across all tasks")).child(picker("maxturns", g.max_turns.to_string(), [1, 2, 3, 4, 6, 8, 12, 16].iter().map(|n| (n.to_string(), n.to_string(), *n == g.max_turns)).collect(), move |v, cx| {
                     let n: u32 = v.parse().unwrap_or(4);
-                    st1.update(cx, |s, cx| s.command(cx, false, move |h| { h.update_global(Some(n), None); Ok(String::new()) }))
+                    st1.update(cx, |s, cx| s.command(cx, false, move |h| async move { { h.update_global(Some(n), None); Ok(String::new()) } }))
                 })))
                 .child(section(cx).child(section_title("dictation", cx)).child(field("speech to text")).child(
                     div()
                         .flex()
                         .gap(px(4.))
-                        .child(seg("dict-claude", "Claude", g.dictation == DictationService::Claude, cx).child(probe("settings.dict.claude")).on_click(move |_, _, cx| st2.update(cx, |s, cx| s.command(cx, false, |h| { h.update_global(None, Some(DictationService::Claude)); Ok(String::new()) }))))
-                        .child(seg("dict-codex", "Codex", g.dictation == DictationService::Codex, cx).child(probe("settings.dict.codex")).on_click(move |_, _, cx| st3.update(cx, |s, cx| s.command(cx, false, |h| { h.update_global(None, Some(DictationService::Codex)); Ok(String::new()) })))),
+                        .child(seg("dict-claude", "Claude", g.dictation == DictationService::Claude, cx).child(probe("settings.dict.claude")).on_click(move |_, _, cx| st2.update(cx, |s, cx| s.command(cx, false, |h| async move { { h.update_global(None, Some(DictationService::Claude)); Ok(String::new()) } }))))
+                        .child(seg("dict-codex", "Codex", g.dictation == DictationService::Codex, cx).child(probe("settings.dict.codex")).on_click(move |_, _, cx| st3.update(cx, |s, cx| s.command(cx, false, |h| async move { { h.update_global(None, Some(DictationService::Codex)); Ok(String::new()) } })))),
                 ))
                 .child(
                     section(cx)
@@ -1288,7 +1287,7 @@ impl SettingsPanel {
                         ),
                 )
                 .child(section(cx).child(section_title("performance", cx)).child(card(cx).child(kv_row("first frame", stats.first_frame_ms.map(|m| format!("{m:.0} ms after launch")).unwrap_or("—".into()), cx)).child(kv_row("chat loaded", stats.loaded_ms.map(|m| format!("{m:.0} ms after launch")).unwrap_or("—".into()), cx)).child(kv_row("events applied", stats.events.to_string(), cx))))
-                .child(section(cx).child(section_title(format!("server log · {}", optchat_engine::hub::VERSION), cx)).child(div().id("srvlog").max_h(px(300.)).overflow_y_scroll().p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.)).line_height(px(16.)).text_color(k.text2).child(if log.is_empty() { "—".to_string() } else { log.join("\n") })))
+                .child(section(cx).child(section_title(format!("server log · hub {} · build {} · {}", s.version, s.build, s.hub().map(|h| h.cfg.label()).unwrap_or_default()), cx)).child(div().id("srvlog").max_h(px(300.)).overflow_y_scroll().p(px(8.)).rounded(px(6.)).bg(k.code_bg).font_family("Menlo").text_size(px(11.)).line_height(px(16.)).text_color(k.text2).child(if log.is_empty() { "—".to_string() } else { log.join("\n") })))
                 .into_any_element();
         }
         let Some(st) = s.cur.settings.clone() else { return div().into_any_element() };
@@ -1297,7 +1296,7 @@ impl SettingsPanel {
         let max_depth = parent.map(|d| (d - 1).max(0)).unwrap_or(8);
         let cm_efforts = s.model(&st.compactor_model).map(|m| m.efforts.clone()).unwrap_or_default();
         let model_comp = s.model(&st.model).map(|m| m.computer_use).unwrap_or(false);
-        let cua = optchat_engine::computer::cua_available();
+        let cua = s.computer_available;
         let mut groups: Vec<(String, Vec<String>)> = vec![];
         for t in &s.cur.tool_list {
             match groups.iter_mut().find(|g| g.0 == t.group) {

@@ -1,10 +1,15 @@
-//! OptChat for Mac, GPUI edition: a native client for OptChat's endless, task-tree chat. The engine (crates/engine)
-//! runs on its own tokio runtime; this process draws the UI with GPUI and never blocks its thread on I/O.
+//! OptChat for Mac, GPUI edition: a native client of the OptChat hub (the web app's engine at chat.reframe.dev),
+//! an equal of the browser and the phone: one websocket, everything in sync. The connection runs on its own tokio
+//! runtime; this process draws the UI with GPUI and never blocks its thread on I/O.
+#![recursion_limit = "256"] // the test state's json! literal
+mod client;
 mod composer;
 mod dialogs;
 mod feed;
 mod fmt;
 mod markdown;
+mod media;
+mod mic;
 mod panels;
 mod state;
 mod statusbar;
@@ -35,23 +40,25 @@ impl AssetSource for Assets {
 
 actions!(app, [Quit, Hide, HideOthers, ShowAll]);
 
-fn default_db() -> String {
-    if let Ok(p) = std::env::var("OPTCHAT_DB") {
-        return p;
-    }
-    let home = std::env::var("HOME").unwrap_or_default();
-    format!("{home}/.reframe/agent-lab/optchat-mac-gpui/data/optchat.db")
+/// Per-viewer prefs (tabs, sidebar, theme, window): `~/Library/Application Support/com.reframe.optchat.gpui`, one file
+/// per hub instance (task ids differ between instances); OPTCHAT_PREFS_DIR overrides the folder (tests).
+fn prefs_path(cfg: &client::HubCfg) -> String {
+    let dir = std::env::var("OPTCHAT_PREFS_DIR").unwrap_or_else(|_| format!("{}/Library/Application Support/com.reframe.optchat.gpui", std::env::var("HOME").unwrap_or_default()));
+    let _ = std::fs::create_dir_all(&dir);
+    format!("{dir}/prefs{}.json", cfg.db.as_ref().map(|d| format!("-{d}")).unwrap_or_default())
 }
 
 fn main() {
     LAUNCH.get_or_init(std::time::Instant::now);
-    // an app started from Finder has a bare PATH: give children the usual tool dirs (claude, codex, git, ...)
-    std::env::set_var("PATH", optchat_engine::util::child_path());
-    let db = default_db();
-    let data_dir = format!("{}/optchat-gpui", std::path::Path::new(&db).parent().map(|p| p.display().to_string()).unwrap_or(".".into()));
-    let _ = std::fs::create_dir_all(&data_dir);
-    let prefs_path = format!("{data_dir}/prefs.json");
-    let rt: &'static tokio::runtime::Runtime = Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(4).thread_name("optchat-engine").enable_all().build().expect("tokio runtime")));
+    let cfg = match client::HubCfg::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+    };
+    let prefs_path = prefs_path(&cfg);
+    let rt: &'static tokio::runtime::Runtime = Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("optchat-client").enable_all().build().expect("tokio runtime")));
     ui::start_probe_writer();
 
     Application::new().with_assets(Assets).run(move |cx: &mut App| {
@@ -106,46 +113,23 @@ fn main() {
         let _ = win;
         cx.activate(true);
 
-        // the engine: open the database, load every task, start the loopback server — off the UI thread
+        // the hub: one websocket (snapshot, events, commands, rpc), reconnecting by itself
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let (htx, hrx) = tokio::sync::oneshot::channel();
-        let db2 = db.clone();
-        let dd = data_dir.clone();
-        rt.spawn(async move {
-            let reframe = std::env::var("OPTCHAT_REFRAME_MCP").map(|v| v != "0").unwrap_or(true);
-            let r = optchat_engine::hub::Hub::create(optchat_engine::hub::HubOpts { db_path: db2, data_dir: dd, reframe_mcp: reframe }, tx).await;
-            let _ = htx.send(r.map_err(|e| e.to_string()));
+        let first = state.read(cx).current;
+        let client = {
+            let _g = rt.enter();
+            client::Client::start(cfg.clone(), first, tx)
+        };
+        state.update(cx, |s, cx| {
+            s.stats.launch_ms = LAUNCH.get().unwrap().elapsed().as_secs_f64() * 1000.0;
+            s.attach(client, rx, cx)
         });
-        let st3 = state.clone();
-        cx.spawn(async move |cx| {
-            match hrx.await {
-                Ok(Ok(hub)) => {
-                    // tests (quit.ts): a bash tool process group from the start, without driving the UI
-                    if std::env::var("OPTCHAT_TEST_HOOKS").is_ok() && std::env::var("OPTCHAT_TEST_BASH").is_ok() {
-                        let _guard = rt.enter(); // test_bash spawns on the engine's tokio runtime
-                        hub.test_bash();
-                    }
-                    let _ = st3.update(cx, |s, cx| {
-                        s.stats.launch_ms = LAUNCH.get().unwrap().elapsed().as_secs_f64() * 1000.0;
-                        s.attach(hub, rx, cx)
-                    });
-                }
-                other => {
-                    let msg = match other { Ok(Err(e)) => e, _ => "the engine did not start".into() };
-                    let _ = st3.update(cx, |s, cx| {
-                        s.error = Some(msg);
-                        cx.notify();
-                    });
-                }
-            }
-        })
-        .detach();
         let st4 = state.clone();
         cx.on_app_quit(move |cx| {
-            let hub = st4.read(cx).hub();
+            let c = st4.read(cx).hub();
             async move {
-                if let Some(h) = hub {
-                    h.shutdown();
+                if let Some(c) = c {
+                    c.shutdown();
                 }
             }
         })

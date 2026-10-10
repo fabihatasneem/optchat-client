@@ -14,7 +14,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui::Context;
 use gpui_component::input::{InputEvent, InputState};
-use optchat_engine::types::*;
+use optchat_proto::types::*;
 
 actions!(
     optchat,
@@ -281,7 +281,7 @@ impl Workspace {
                 "ready": s.hub.is_some(), "current": s.current, "loaded": s.cur.loaded, "status": s.info().map(|i| i.task.status.as_str()),
                 "running": s.cur.running.as_ref().map(|r| r.status.clone()), "t": s.cur.t, "lastTalk": last_talk,
                 "lastKinds": s.cur.log.iter().rev().take(8).map(|e| e.kind.as_str()).collect::<Vec<_>>(),
-                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window,  "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
+                "tabs": s.prefs.tabs, "view": s.prefs.view, "fontSize": s.prefs.font_size, "settingsGlobal": s.prefs.settings_tab_global, "followSystem": s.prefs.follow_system, "narrow": self.narrow, "pid": std::process::id(), "frame": self.renders, "conn": format!("{:?}", s.conn).to_lowercase(), "reconnects": s.hub().map(|h| h.reconnects.load(std::sync::atomic::Ordering::SeqCst)).unwrap_or(0), "instance": s.instance, "hubBuild": s.build, "focus": self.focus_desc, "taskMenu": self.task_menu.is_some(), "askText": self.ask_input.read(cx).value().to_string(), "window": s.prefs.window,  "placeholderTask": self.composer.read(cx).task,  "selectedRequest": s.selected_request, "sideOpen": self.side_open(cx), "theme": th.active, "overlay": self.overlay.as_ref().map(|o| match o { Overlay::NewTask(_) => "newtask", Overlay::Palette(_) => "palette", Overlay::Metrics(_) => "metrics", Overlay::Lightbox(_) => "lightbox" }),
                 "ask": self.ask.as_ref().map(|a| a.op), "dict": s.dict.state, "approvals": s.approvals.len(), "notice": s.notice.as_ref().map(|n| n.1.clone()),
                 "model": s.cur.settings.as_ref().map(|x| x.model.clone()), "effort": s.cur.settings.as_ref().map(|x| x.effort.clone()), "tasks": s.tasks.len(),
                 "queue": s.cur.queue.len(), "unrun": s.info().and_then(|i| i.task.unrun), "draft": self.composer.read(cx).input.read(cx).value().to_string(),
@@ -469,12 +469,12 @@ impl Workspace {
         let task = self.state.read(cx).current;
         let op = a.op;
         self.state.update(cx, |s, cx| {
-            s.command(cx, true, move |h| match op {
-                "pause" => h.pause(task, &val),
-                "resume" => h.resume(task, &val, vec![]),
-                "cancel" => h.cancel(task, &val),
-                _ => h.close(task, &val),
-            })
+            s.command(cx, true, move |h| async move { match op {
+                "pause" => h.pause(task, &val).await,
+                "resume" => h.resume(task, &val, vec![]).await,
+                "cancel" => h.cancel(task, &val).await,
+                _ => h.close(task, &val).await,
+            } })
         });
         self.ask = None;
         self.composer.update(cx, |c, cx| c.focus(window, cx));
@@ -583,7 +583,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &PrevTab, window, cx| dialogs::cycle_tab(w, -1, window, cx)))
             .on_action(cx.listener(|w, _: &StopTurn, _, cx| {
                 let t = w.state.read(cx).current;
-                w.state.update(cx, |s, cx| s.command(cx, false, move |h| { h.stop(t); Ok(String::new()) }));
+                w.state.update(cx, |s, cx| s.command(cx, false, move |h| async move { { h.stop(t); Ok(String::new()) } }));
             }))
             .on_action(cx.listener(|w, _: &FocusComposer, window, cx| w.composer.update(cx, |c, cx| c.focus(window, cx))))
             .on_action(cx.listener(|w, _: &CommandPalette, window, cx| dialogs::open_palette(w, false, window, cx)))
@@ -601,11 +601,14 @@ impl Render for Workspace {
             .on_action(cx.listener(|_, _: &ZoomWindow, window, _| window.zoom_window()))
             .on_action(cx.listener(|_, _: &ToggleFullScreen, window, _| window.toggle_fullscreen()))
             .on_action(cx.listener(|w, _: &ShowShortcuts, window, cx| dialogs::open_palette(w, false, window, cx)))
-            .on_action(cx.listener(|_, _: &About, window, cx| {
+            .on_action(cx.listener(|w, _: &About, window, cx| {
+                let s = w.state.read(cx);
                 let detail = format!(
-                    "Version {} (build {})\nA native client for OptChat's endless, task-tree chat, in Rust and GPUI.\nThemes from Zed (see THEMES.md).",
-                    optchat_engine::hub::VERSION,
-                    optchat_engine::hub::BUILD
+                    "App {}\nConnected to the OptChat hub {} (version {}, build {}).\nA native client for OptChat's endless, task-tree chat, in Rust and GPUI.\nThemes from Zed (see THEMES.md).",
+                    env!("CARGO_PKG_VERSION"),
+                    s.hub().map(|h| h.cfg.label()).unwrap_or_default(),
+                    s.version,
+                    s.build
                 );
                 let _ = window.prompt(PromptLevel::Info, "OptChat for Mac", Some(&detail), &["OK"], cx);
             }))

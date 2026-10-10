@@ -486,7 +486,7 @@ pub fn blob_image<V: 'static>(state: &Entity<crate::state::AppState>, blob: &str
     if let Some(h) = s.hub() {
         let b2 = blob.to_string();
         s.rt.spawn(async move {
-            let _ = tx.send(h.store.get_blob(&b2).ok().flatten());
+            let _ = tx.send(h.get_blob(&b2).await);
         });
     }
     let eid = cx.entity_id();

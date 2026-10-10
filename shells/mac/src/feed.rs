@@ -11,7 +11,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui::Context;
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
-use optchat_engine::types::*;
+use optchat_proto::types::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -58,6 +58,7 @@ pub struct Feed {
     /// first log index shown (paging); None until the task's log is in
     from: Option<usize>,
     loading_more: bool,
+    fetching_older: bool,
     /// the user scrolled away from the bottom: new text no longer pulls the view down (follow mode off)
     pub scrolled_up: bool,
     /// UI tests: the most live text / thinking seen in this task's running turn (chars)
@@ -99,6 +100,7 @@ impl Feed {
             _subs: vec![sub],
             from: None,
             loading_more: false,
+            fetching_older: false,
             scrolled_up: false,
             live_max: (0, 0),
         };
@@ -252,7 +254,7 @@ impl Feed {
         let (tx, rx) = tokio::sync::oneshot::channel();
         if let Some(h) = st.read(cx).hub() {
             st.read(cx).rt.spawn(async move {
-                let r = h.store.get_blob(&b2).ok().flatten();
+                let r = h.get_blob(&b2).await;
                 let _ = tx.send(r);
             });
         }
@@ -340,8 +342,10 @@ pub fn build_rows(s: &AppState, from: usize) -> Vec<Row> {
     let running_id = s.cur.running.as_ref().map(|r| r.id.clone());
     let mut rows = vec![];
     let from = from.min(log.len());
-    if from > 0 {
-        rows.push(Row::LoadEarlier(from));
+    // older entries: those loaded but not shown yet, plus those still on the hub (the snapshot carries the last 120)
+    let on_hub = log.first().map(|e| e.i.max(0) as usize).unwrap_or(0);
+    if from > 0 || on_hub > 0 {
+        rows.push(Row::LoadEarlier(from + on_hub));
     }
     // groups by turnId
     let mut k = from;
@@ -659,6 +663,26 @@ impl Feed {
         self.loading_more = false;
         let Some(from) = self.from else { return };
         if from == 0 {
+            // everything loaded is shown: ask the hub for the 300 before (rpc log.range, the page's loadOlder)
+            let (task, first) = {
+                let s = self.state.read(cx);
+                (s.current, s.cur.log.first().map(|e| e.i).unwrap_or(0))
+            };
+            if first <= 0 || self.fetching_older {
+                return;
+            }
+            self.fetching_older = true;
+            let state = self.state.clone();
+            crate::panels::fetch(&state, cx, move |h| async move { h.log_range(task, (first - 300).max(0), first, false).await }, move |f: &mut Feed, r, cx| {
+                f.fetching_older = false;
+                let Ok(entries) = r else { return };
+                let added = f.state.update(cx, |s, _| s.prepend_older(task, entries));
+                if added > 0 {
+                    // the rows on screen keep their place: they moved down by `added` entries
+                    f.from = Some(added);
+                    f.load_earlier(cx);
+                }
+            });
             return;
         }
         let top = self.list.logical_scroll_top();
@@ -693,12 +717,16 @@ impl Feed {
     }
 
     fn cut_text<'a>(&self, e: &'a LogEntry) -> (std::borrow::Cow<'a, str>, Option<usize>) {
-        // long texts are shown shortened until "show all" (the web's slim copy); the full text is in memory
+        // the hub's slim copy (snapshot / log.range): already shortened, the full text on request
+        if let Some(n) = e.cut {
+            return (std::borrow::Cow::Borrowed(&e.text), Some(n as usize));
+        }
+        // long texts that arrived whole (live events) are shown shortened too, until "show all"
         let max = if e.kind == LogKind::Tool || e.kind == LogKind::Echo { 2000 } else { 8000 };
         if self.full.contains(&e.i) || e.text.chars().count() <= max {
             return (std::borrow::Cow::Borrowed(&e.text), None);
         }
-        let t = if e.kind == LogKind::Tool { optchat_engine::trim::trim_tool_text(&e.text, max).0 } else { optchat_engine::trim::head_tail(&e.text, max) };
+        let t = if e.kind == LogKind::Tool { optchat_proto::trim::trim_tool_text(&e.text, max).0 } else { optchat_proto::trim::head_tail(&e.text, max) };
         (std::borrow::Cow::Owned(t), Some(js_len(&e.text)))
     }
     fn cut_button(&self, e: &LogEntry, n: Option<usize>, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -709,6 +737,22 @@ impl Feed {
                 .mt(zx(4.))
                 .child(probe(format!("cut.{i}")))
                 .on_click(cx.listener(move |f, _, _, cx| {
+                    let slim = f.state.read(cx).cur.log.iter().any(|x| x.i == i && x.cut.is_some());
+                    if slim {
+                        // the full entry from the hub (rpc log.range full), replacing the slim one (the page's fullEntry)
+                        let task = f.state.read(cx).current;
+                        let state = f.state.clone();
+                        crate::panels::fetch(&state, cx, move |h| async move { h.log_range(task, i, i + 1, true).await }, move |f: &mut Feed, r, cx| {
+                            if let Ok(mut v) = r {
+                                if let Some(e) = v.pop() {
+                                    f.state.update(cx, |s, cx| {
+                                        s.replace_entry(task, e);
+                                        cx.notify();
+                                    });
+                                }
+                            }
+                        });
+                    }
                     f.full.insert(i);
                     f.md.remove(&i);
                     f.rev = u64::MAX;
@@ -1073,7 +1117,7 @@ impl Feed {
                         d.child(btn_small(ElementId::Name(format!("stop{}", e.i).into()), "stop", Tone::Danger, cx).on_click(move |_, _, cx| {
                             cx.stop_propagation();
                             let c3 = cid2.clone();
-                            state_e.update(cx, |s, cx| s.command(cx, false, move |h| { h.stop_tool(&c3); Ok(String::new()) }));
+                            state_e.update(cx, |s, cx| s.command(cx, false, move |h| async move { { h.stop_tool(&c3); Ok(String::new()) } }));
                         }))
                     })
                     .child(div().font_family("Menlo").text_size(zx(10.5)).text_color(k.faint).child(format!("#{}{}", e.i, echo.map(|x| format!("–{}", x.i)).unwrap_or_default()))),
@@ -1140,7 +1184,7 @@ impl Feed {
                     detail = detail.child(div().px(zx(10.)).child(b));
                 }
             } else if let Some(r) = st.as_ref().and_then(|s| s.result.clone()) {
-                detail = detail.child(lbl("output")).child(pre(format!("tres{}", e.i), optchat_engine::adapters::result_text(&r.content)));
+                detail = detail.child(lbl("output")).child(pre(format!("tres{}", e.i), optchat_proto::api::result_text(&r.content)));
             }
             let mut ims = div().flex().flex_wrap().gap(zx(8.)).p(zx(10.));
             let mut any = false;
