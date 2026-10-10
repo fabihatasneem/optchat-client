@@ -36,10 +36,12 @@ try {
     check(!!t, `a tool card is shown in #92 (${t})`);
     if (!t) return;
     const before = a.probe(t)!;
+    const key = `t${t.split(".")[1]}`;
     await a.click(t);
-    await sleep(800);
+    await a.waitFor(() => st().feed?.open?.includes(key), 3000, "tool card open").catch(() => {});
+    await sleep(500);
     await a.shot("chat-01-tool-open");
-    check(true, "tool card expanded (see screenshot: input / output)");
+    check(st().feed?.open?.includes(key) && a.probe(t)![3] >= before[3], `the tool card expands to its input / output (${key})`);
     await a.click(t, { dx: before[2] / 2, dy: before[3] / 2 }); // collapse again
     await sleep(400);
   });
@@ -47,10 +49,12 @@ try {
     const s = await newest("foot.steps.");
     check(!!s, `turn foot shows the steps chip (${s})`);
     if (s) {
+      const fk = `foot${s.slice("foot.steps.".length)}`;
       await a.click(s);
-      await sleep(700);
+      await a.waitFor(() => st().feed?.open?.includes(fk), 3000, "step table open").catch(() => {});
+      await sleep(400);
       await a.shot("chat-02-steps");
-      check(true, "step table opened (see screenshot)");
+      check(st().feed?.open?.includes(fk), "the steps chip opens the turn's step table");
       await a.click(s);
       await sleep(400);
     }
@@ -88,7 +92,7 @@ try {
       await a.click(leaf);
       await sleep(1500);
       await a.shot("chat-04b-memory-image");
-      check(true, "memory tree line opened down to the message (see screenshot for the picture)");
+      check((st().memory?.open ?? []).includes(leaf.slice(4)), `the memory line opens down to its message, with the picture (${leaf}; chat-04b-memory-image)`);
     }
     await a.key("cmd+1");
   });
@@ -98,7 +102,7 @@ try {
     await a.waitFor(() => st().overlay === "newtask", 4000, "dialog");
     await sleep(500);
     await a.shot("chat-05-continue-dialog");
-    check(true, "Continue as a new task opens the dialog preset to continue (see screenshot)");
+    check(st().newtask?.mode === "continue", `Continue as a new task opens the dialog preset to continue (mode ${st().newtask?.mode})`);
     await a.key("Escape");
     await a.waitFor(() => st().overlay === null, 4000, "closed");
   });
@@ -110,10 +114,10 @@ try {
     for (const m of ["fork", "blind", "continue", "handoff"]) {
       if (!a.probe(`newtask.mode.${m}`)) { check(false, `mode card ${m}`); continue; }
       await a.click(`newtask.mode.${m}`);
-      await sleep(350);
+      await a.waitFor(() => st().newtask?.mode === m, 2000, `mode ${m}`).catch(() => {});
       await a.shot(`chat-06-mode-${m}`);
+      check(st().newtask?.mode === m, `mode card ${m} selects ${m}`);
     }
-    check(true, "new-task dialog mode cards handoff / fork / continue / blind (see screenshots)");
     await a.key("Escape");
     await a.waitFor(() => st().overlay === null, 4000, "closed");
   });

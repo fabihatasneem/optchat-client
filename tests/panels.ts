@@ -83,9 +83,10 @@ try {
     await sleep(1200);
     await a.shot("panels-08-log");
     await a.click("log.subtree");
-    await sleep(1200);
+    await a.waitFor(() => st().log?.subtree === true, 3000, "subtree").catch(() => {});
+    await sleep(800);
     await a.shot("panels-09-log-subtree");
-    check(true, "request log with its subtree toggle (see screenshots)");
+    check(st().log?.subtree === true, "the request log switches to the task with its subtree");
   });
   await step("context", async () => {
     await a.key("cmd+3");
@@ -95,9 +96,10 @@ try {
     await a.waitProbe("ctx.wire", 8000);
     await reveal("ctx.wire");
     await a.click("ctx.wire");
-    await sleep(1200);
+    await a.waitFor(() => st().context?.wire === true, 3000, "wire").catch(() => {});
+    await sleep(800);
     await a.shot("panels-11-context-wire");
-    check(true, "context debugger shows the wire request (see screenshot)");
+    check(st().context?.wire === true, "the context debugger shows the wire request");
   });
   await step("settings", async () => {
     await a.key("cmd+6");
@@ -167,7 +169,8 @@ try {
       await a.click(hits[0][0]);
       await sleep(1200);
       await a.shot("panels-18-memory-reveal");
-      check(true, `clicked ${hits[0][0]} (see screenshot for the revealed line)`);
+      const [, t, i] = hits[0][0].split(".");
+      check(st().memory?.hit === `${t}:0:${i}`, `the hit reveals message ${i} in the tree (${st().memory?.hit})`);
     }
   });
 } catch (e) { check(false, String(e)); await a.shot("panels-fail"); } finally { await a.quit(); }

@@ -286,6 +286,7 @@ impl Render for MemoryPanel {
 }
 impl MemoryPanel {
     fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::ui::set_state_extra("memory", serde_json::json!({ "open": self.open.iter().map(|(t, l, i)| format!("{t}:{l}:{i}")).collect::<Vec<_>>(), "hit": self.hit.map(|(t, l, i)| format!("{t}:{l}:{i}")), "kids": self.kids.len() }));
         self.maybe_refresh(cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);
@@ -569,6 +570,7 @@ impl Render for ContextPanel {
 }
 impl ContextPanel {
     fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::ui::set_state_extra("context", serde_json::json!({ "wire": self.wire }));
         self.maybe(cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);
@@ -738,6 +740,7 @@ impl Render for LogPanel {
 }
 impl LogPanel {
     fn body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::ui::set_state_extra("log", serde_json::json!({ "subtree": self.subtree }));
         self.maybe(cx);
         let k = c(cx).clone();
         let s = self.state.read(cx);

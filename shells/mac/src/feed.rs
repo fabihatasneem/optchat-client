@@ -418,6 +418,9 @@ impl Render for Feed {
         crate::ui::anim::area(crate::ui::anim::FEED);
         // row probes are re-recorded by the rows rendered in this frame: drop the ones scrolled out of range
         if crate::ui::probes_on() {
+            let mut open: Vec<&String> = self.open.iter().collect();
+            open.sort();
+            crate::ui::set_state_extra("feed", serde_json::json!({ "open": open, "from": self.from, "rows": self.rows.len(), "scrolledUp": self.scrolled_up }));
             for p in ["tool.", "img.", "foot.", "feed.more", "feed.jump", "feed.last"] {
                 crate::ui::clear_probes(p);
             }

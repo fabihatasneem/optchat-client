@@ -41,9 +41,11 @@ try {
   await pal("Test: attach image");
   await sleep(500);
   await a.shot("feat-04-image");
-  check(true, "image thumbnail in the composer (see screenshot)");
+  await a.waitFor(() => st().composer?.images === 1, 4000, "image attached").catch(() => {});
+  check(st().composer?.images === 1, `an image is attached to the composer (${st().composer?.images}; thumbnail in feat-04-image)`);
   // themes: screenshot each
-  const themes = ["OptChat Light", "Solarized Dark", "Solarized Light", "Tomorrow Night Blue", "Tomorrow Night", "One Dark", "One Light", "Ayu Mirage", "Gruvbox Dark", "OptChat Dark"];
+  // every bundled theme (crates/theme builtin()), ending on the default
+  const themes = ["OptChat Light", "Ayu Dark", "Ayu Light", "Ayu Mirage", "Gruvbox Dark", "Gruvbox Dark Hard", "Gruvbox Dark Soft", "Gruvbox Light", "Gruvbox Light Hard", "Gruvbox Light Soft", "One Dark", "One Light", "Solarized Dark", "Solarized Light", "Tomorrow Night", "Tomorrow Night Blue", "OptChat Dark"];
   for (const t of themes) {
     await pal(`Theme: ${t}`);
     await sleep(400);

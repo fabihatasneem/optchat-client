@@ -364,6 +364,7 @@ impl Composer {
 impl Render for Composer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         crate::ui::anim::area(crate::ui::anim::WORKSPACE);
+        crate::ui::set_state_extra("composer", serde_json::json!({ "images": self.images.len(), "task": self.task }));
         let k = c(cx).clone();
         let s = self.state.read(cx);
         let running = self.running(cx);
