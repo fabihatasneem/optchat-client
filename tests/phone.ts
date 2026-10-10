@@ -10,7 +10,7 @@ const eng = new Deno.Command("deno", { args: ["run", "-A", `${ROOT}/tests/lib/fa
 await sleep(1200);
 const dir = await Deno.makeTempDir({ prefix: "optchat-e2e-" });
 Deno.writeTextFileSync(`${dir}/fake-tokens.json`, JSON.stringify({ phone: "fake-token" }));
-const a = await App.launch({ bare: true, dir, env: { OPTCHAT_TEST_HOOKS: "1", OPTCHAT_FAKE_MIC: `${ROOT}/tests/fixtures/dict.wav`, OPTCHAT_ENGINE: `http://127.0.0.1:${PORT}`, OPTCHAT_ENGINE_NAME: "fake", OPTCHAT_CONNECT: "phone", OPTCHAT_TEST_TOKENS: `${dir}/fake-tokens.json` } });
+const a = await App.launch({ bare: true, dir, env: { OPTCHAT_TEST_HOOKS: "1", OPTCHAT_FAKE_MIC: `${ROOT}/tests/fixtures/dict.wav`, OPTCHAT_TEST_CLIPBOARD: "pasted-from-the-clipboard", OPTCHAT_ENGINE: `http://127.0.0.1:${PORT}`, OPTCHAT_ENGINE_NAME: "fake", OPTCHAT_CONNECT: "phone", OPTCHAT_TEST_TOKENS: `${dir}/fake-tokens.json` } });
 const st = () => a.state();
 const ph = () => st()?.phone ?? {};
 const center = (p: number[]) => [p[0] + p[2] / 2, p[1] + p[3] / 2];
@@ -53,6 +53,18 @@ try {
   await press(80);
   await a.waitFor(() => ph().expanded, 3000, "composer open");
   check(st().focus === "composer", "a tap on the chat button opens the composer, focused");
+  // a long press (right click here) in the field: a "Paste" bubble; a tap inserts the clipboard at the caret
+  {
+    const f = await a.waitProbe("composer.input");
+    await a.clickAt(f[0] + 20, f[1] + f[3] / 2, `{ mouseButton: "right" }`);
+    await a.waitFor(() => !!a.probe("input.paste"), 3000, "paste bubble");
+    await shot("phone-02b-paste-bubble");
+    await a.click("input.paste");
+    await a.waitFor(() => ph().draft === "pasted-from-the-clipboard", 3000, "pasted");
+    check(true, "a long press in the field shows a Paste bubble; a tap pastes at the caret");
+    await a.key("cmd+a");
+    await a.key("BackSpace");
+  }
   await a.type("let it finish, then ask the child whether the arc renderer is stuck");
   await shot("phone-03-editing");
   await a.click("feed", { dy: 40 });

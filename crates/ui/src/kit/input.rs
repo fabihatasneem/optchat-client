@@ -86,6 +86,8 @@ pub struct InputState {
     pub disabled: bool,
     /// focus asked for before the field was drawn: applied when it is
     want_focus: bool,
+    /// the "Paste" bubble shown above this point (window coordinates), after a long press (iOS) / right click
+    pub paste_at: Option<Point<Pixels>>,
     /// how the field is drawn (from `Input`): small, boxed, disabled, text size
     opts: (bool, bool, bool, Option<Pixels>),
     undo: Vec<(String, Range<usize>)>,
@@ -117,6 +119,7 @@ impl InputState {
         });
         let s2 = cx.on_blur(&focus_handle, window, |this: &mut Self, _, cx| {
             this.selecting = false;
+            this.paste_at = None;
             cx.emit(InputEvent::Blur);
             cx.notify();
         });
@@ -134,6 +137,7 @@ impl InputState {
             disabled: false,
             want_focus: false,
             opts: (false, true, false, None),
+            paste_at: None,
             undo: vec![],
             redo: vec![],
             selecting: false,
@@ -243,6 +247,7 @@ impl InputState {
             }
         }
         self.push_undo();
+        self.paste_at = None;
         self.content = next;
         let c = r.start + text.len();
         self.selected = c..c;
@@ -552,7 +557,58 @@ impl InputState {
         w.show_character_palette();
     }
 
+    /// a long press (iOS; the backend has no edit menu) or a right click at `pos`: the caret goes there and, when the
+    /// clipboard has text, a "Paste" bubble shows above it
+    pub fn long_press(&mut self, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus_handle, cx);
+        window.request_virtual_keyboard();
+        if let Some(l) = self.layout.as_ref() {
+            let o = self.offset_for(point(pos.x - l.bounds.left(), pos.y - l.bounds.top() + self.scroll_y));
+            self.selected = o..o;
+            self.reversed = false;
+            window.notify_text_selection_changed(&self.focus_handle);
+        }
+        let has = !self.disabled && clip_text(cx).is_some_and(|t| !t.is_empty());
+        self.paste_at = has.then_some(pos);
+        cx.notify();
+    }
+    fn paste_bubble(&self, at: Point<Pixels>, cx: &mut Context<Self>) -> AnyElement {
+        let pill = div()
+            .id("paste-bubble")
+            .flex()
+            .items_center()
+            .h(px(36.))
+            .px(px(14.))
+            .rounded(px(9.))
+            .bg(hsla(0., 0., 0.17, 0.98))
+            .border_1()
+            .border_color(hsla(0., 0., 1., 0.08))
+            .shadow(vec![BoxShadow { color: hsla(0., 0., 0., 0.45), offset: point(px(0.), px(6.)), blur_radius: px(18.), spread_radius: px(0.), inset: false }])
+            .text_size(px(14.))
+            .text_color(white())
+            .cursor_pointer()
+            .child("Paste")
+            .child(crate::ui::probe("input.paste"))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down_out(cx.listener(|s, _, _, cx| {
+                s.paste_at = None;
+                cx.notify();
+            }))
+            .on_click(cx.listener(|s, _, window, cx| {
+                s.paste_at = None;
+                if let Some(t) = clip_text(cx) {
+                    s.replace(None, &t, window, cx);
+                }
+                cx.notify();
+            }));
+        deferred(anchored().position(point(at.x - px(30.), at.y - px(48.))).snap_to_window_with_margin(px(8.)).child(pill)).with_priority(4).into_any_element()
+    }
+    fn right_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        self.long_press(e.position, window, cx);
+    }
     fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.paste_at = None;
         window.focus(&self.focus_handle, cx);
         window.request_virtual_keyboard();
         let Some(l) = self.layout.as_ref() else { return };
@@ -831,10 +887,12 @@ impl Render for InputState {
             .on_action(cx.listener(Self::secondary_enter))
             .on_action(cx.listener(Self::character_palette))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::right_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_scroll_wheel(cx.listener(Self::scroll))
+            .children(self.paste_at.map(|at| self.paste_bubble(at, cx)))
             .child(TextArea { input: st, size, placeholder_color: k.faint, selection: k.selection, caret: k.accent })
     }
 }
@@ -992,6 +1050,15 @@ impl Element for TextArea {
         let focus = self.input.read(cx).focus_handle.clone();
         let scroll = self.input.read(cx).scroll_y;
         window.handle_input(&focus, ElementInputHandler::new(bounds, self.input.clone()), cx);
+        // iOS: a long press in the field (the chat button's own long press is outside any field)
+        let input = self.input.clone();
+        window.on_mouse_event::<LongPressEvent>(move |e, phase, window, cx| {
+            if phase != DispatchPhase::Bubble || !matches!(e.phase, TouchPhase::Started) || !bounds.contains(&e.start_position) {
+                return;
+            }
+            cx.stop_propagation();
+            input.update(cx, |s, cx| s.long_press(e.start_position, window, cx));
+        });
         let _ = p.placeholder;
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for q in p.selections.drain(..) {
@@ -1009,4 +1076,13 @@ impl Element for TextArea {
             }
         });
     }
+}
+
+/// the clipboard's text (UIPasteboard on iOS, NSPasteboard on macOS); UI tests set OPTCHAT_TEST_CLIPBOARD instead of
+/// touching the user's clipboard
+fn clip_text(cx: &App) -> Option<String> {
+    if let Ok(t) = std::env::var("OPTCHAT_TEST_CLIPBOARD") {
+        return Some(t);
+    }
+    cx.read_from_clipboard().and_then(|i| i.text())
 }
