@@ -113,9 +113,13 @@ extern bool optchat_qr_valid(const char *text);
 - (void)orientPreview {
     AVCaptureConnection *c = self.preview.connection;
     UIInterfaceOrientation o = self.view.window.windowScene.interfaceOrientation;
-    if (@available(iOS 17.0, *)) {
+    // no @available here: it needs compiler-rt's __isPlatformVersionAtLeast, which the Rust link doesn't bring
+    if ([c respondsToSelector:@selector(setVideoRotationAngle:)]) {
         CGFloat a = o == UIInterfaceOrientationLandscapeLeft ? 180 : o == UIInterfaceOrientationLandscapeRight ? 0 : o == UIInterfaceOrientationPortraitUpsideDown ? 270 : 90;
-        if (c && [c isVideoRotationAngleSupported:a]) c.videoRotationAngle = a;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
+        if ([c isVideoRotationAngleSupported:a]) c.videoRotationAngle = a;
+#pragma clang diagnostic pop
     } else {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
