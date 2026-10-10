@@ -746,6 +746,12 @@ impl Render for Workspace {
                 }
             }));
 
+        if self.tasks_panel.read(cx).large != narrow {
+            self.tasks_panel.update(cx, |p, cx| {
+                p.large = narrow;
+                cx.notify();
+            });
+        }
         if self.feed.read(cx).compact != narrow {
             self.feed.update(cx, |f, cx| {
                 f.compact = narrow;

@@ -18,13 +18,15 @@ pub struct TasksPanel {
     pub collapsed: std::collections::HashSet<i64>,
     /// a task menu is open: no row tooltips (they are drawn above everything and would cover the menu)
     pub menu_open: bool,
+    /// the phone layout: taller rows, larger text, separators
+    pub large: bool,
     _sub: Subscription,
 }
 impl EventEmitter<TasksEvent> for TasksPanel {}
 impl TasksPanel {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> TasksPanel {
         let _sub = cx.observe(&state, |_, _, cx| cx.notify());
-        TasksPanel { state, collapsed: Default::default(), menu_open: false, _sub }
+        TasksPanel { state, collapsed: Default::default(), menu_open: false, large: false, _sub }
     }
 }
 impl Render for TasksPanel {
@@ -116,7 +118,8 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
         _ => k.muted,
     };
     let hover = k.hover;
-    let mut meta = div().flex().gap(px(7.)).text_size(px(11.)).text_color(k.faint).whitespace_nowrap().child(div().font_family(crate::ui::MONO).child(format!("#{id}")));
+    let large = w.large;
+    let mut meta = div().flex().gap(px(7.)).text_size(px(if large { 12.5 } else { 11. })).text_color(k.faint).whitespace_nowrap().child(div().font_family(crate::ui::MONO).child(format!("#{id}")));
     if usd > 0 {
         meta = meta.child(fmt::usd(usd as f64 / 1e6));
     }
@@ -139,10 +142,11 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
         .flex()
         .items_center()
         .gap(px(7.))
-        .h(px(40.))
-        .pl(px(6. + depth as f32 * 14.))
-        .pr(px(8.))
-        .rounded(px(7.))
+        .h(px(if large { 58. } else { 40. }))
+        .pl(px(if large { 10. } else { 6. } + depth as f32 * if large { 18. } else { 14. }))
+        .pr(px(if large { 12. } else { 8. }))
+        .when(!large, |d| d.rounded(px(7.)))
+        .when(large, |d| d.border_b_1().border_color(k.line))
         .cursor_pointer()
         .text_color(if path { k.muted } else { k.text2 })
         .when(is_cur, |d| d.bg(k.accent_bg).text_color(k.text).child(div().absolute().left_0().top(px(6.)).bottom(px(6.)).w(px(2.)).bg(k.accent)))
@@ -176,7 +180,7 @@ fn row(w: &TasksPanel, x: &TaskInfo, depth: usize, path: bool, cx: &mut Context<
                 .gap(px(1.))
                 // the details as a tooltip over the title (the dot has its own)
                 .when(!w.menu_open, |d| d.tooltip(tooltip(tip)))
-                .child(div().text_size(px(13.)).overflow_hidden().line_clamp(1).text_ellipsis().when(ended, |d| d.text_color(k.muted)).child(task_name(t)))
+                .child(div().text_size(px(if large { 15.5 } else { 13. })).overflow_hidden().line_clamp(1).text_ellipsis().when(ended, |d| d.text_color(k.muted)).child(task_name(t)))
                 .child(meta),
         )
         .when(x.running, |d| d.child(spinner(SharedString::from(format!("trs{id}")), 13., k.accent)))

@@ -65,10 +65,11 @@ pub struct Phone {
     /// a horizontal trackpad swipe in progress
     swipe: f32,
     title_down: Option<f32>,
+    title_pan: f32,
 }
 impl Default for Phone {
     fn default() -> Self {
-        Phone { screen: None, last: Screen::Panel(View::Tasks), expanded: false, press: None, press_seq: 0, long: false, dict_started: None, last_tap: None, edge: None, swipe: 0., title_down: None }
+        Phone { screen: None, last: Screen::Panel(View::Tasks), expanded: false, press: None, press_seq: 0, long: false, dict_started: None, last_tap: None, edge: None, swipe: 0., title_down: None, title_pan: 0. }
     }
 }
 
@@ -144,7 +145,32 @@ impl Workspace {
         })
         .detach();
     }
-    fn chat_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// a long press from the platform (iOS: LongPressEvent; the desktop's timer path does the same)
+    fn chat_long_started(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.phone.long || dictating(self, cx) {
+            return;
+        }
+        self.phone.long = true;
+        self.phone.press.get_or_insert_with(Instant::now);
+        self.phone.dict_started = Some(Instant::now());
+        self.phone.expanded = false;
+        self.phone.screen = None;
+        self.composer.update(cx, |c, cx| c.start_dictation(window, cx));
+        cx.notify();
+    }
+    /// the long press ended: held from the touch's start for ≥ 1.2 s → push-to-talk ends with the release
+    fn chat_long_ended(&mut self, touch_began: Instant, cx: &mut Context<Self>) {
+        if !self.phone.long {
+            return;
+        }
+        self.phone.long = false;
+        self.phone.press = None;
+        if touch_began.elapsed() >= PUSH_TO_TALK {
+            self.composer.update(cx, |c, cx| c.stop_dictation(cx));
+        }
+        cx.notify();
+    }
+    fn chat_up(&mut self, clicks: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(_) = self.phone.press.take() else { return };
         if self.phone.long {
             self.phone.long = false;
@@ -155,7 +181,8 @@ impl Workspace {
             cx.notify();
             return;
         }
-        let double = self.phone.last_tap.map(|t| t.elapsed() < DOUBLE_TAP).unwrap_or(false);
+        // a double tap: the platform's click count (iOS taps carry 2) or our own timing
+        let double = clicks >= 2 || self.phone.last_tap.map(|t| t.elapsed() < DOUBLE_TAP).unwrap_or(false);
         self.phone.last_tap = Some(Instant::now());
         if double {
             // double-tap: send (stops a dictation first; resumes a paused task)
@@ -218,6 +245,10 @@ pub fn render(w: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace
                 .border_t_1()
                 .border_color(k.line)
                 .bg(k.bg2)
+                .child({
+                    let (m, e) = model_effort(w, "pc", cx);
+                    div().flex().items_center().gap(px(2.)).px(px(8.)).pt(px(6.)).child(m).child(e).child(probe("phone.accessory"))
+                })
                 .child(w.composer.clone())
                 .child(probe("phone.composer"))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
@@ -313,7 +344,7 @@ fn header(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) 
                 .id("ph-avatar")
                 .relative()
                 .cursor_pointer()
-                .child(crate::feed::logo(30., cx))
+                .child(crate::feed::logo(30., cx).rounded_full())
                 .when(alert || offline, |d| d.child(div().absolute().top(px(-2.)).right(px(-2.)).child(dot(if offline { k.amber } else { k.red }, 9.).border_2().border_color(k.bg))))
                 .child(probe("phone.avatar"))
                 .on_click(cx.listener(|w, _, _, cx| w.phone_open(Screen::Panel(View::Workspaces), cx))),
@@ -330,6 +361,20 @@ fn header(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) 
                 .child(div().flex().items_center().gap(px(4.)).max_w_full().child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).overflow_hidden().whitespace_nowrap().text_ellipsis().child(title)).child(icon("chevron-down", 12., k.muted)))
                 .child(div().flex().items_center().gap(px(5.)).text_size(px(12.)).text_color(if offline { k.amber } else { k.muted }).child(dot(if offline { k.amber } else if working { k.accent } else { k.faint }, 6.)).child(sub).child(probe("phone.subtitle")))
                 .child(probe("phone.title"))
+                .child(title_pan_area(cx.entity().downgrade()))
+                .on_scroll_wheel(cx.listener(|w, e: &ScrollWheelEvent, window, cx| {
+                    // iOS pans (and trackpad swipes) arrive as scroll events: switch once past 40 pt, at the end
+                    let d = e.delta.pixel_delta(window.line_height());
+                    if f32::from(d.x).abs() > f32::from(d.y).abs() {
+                        w.phone.title_pan += f32::from(d.x);
+                        cx.stop_propagation();
+                    }
+                    if matches!(e.touch_phase, TouchPhase::Ended) {
+                        let dx = std::mem::take(&mut w.phone.title_pan);
+                        // content moves with the finger: a pan to the left has a negative delta
+                        w.title_swipe(dx, window, cx);
+                    }
+                }))
                 .on_mouse_down(MouseButton::Left, cx.listener(|w, e: &MouseDownEvent, _, _| w.phone.title_down = Some(f32::from(e.position.x))))
                 .on_mouse_up(MouseButton::Left, cx.listener(|w, e: &MouseUpEvent, window, cx| {
                     let Some(x0) = w.phone.title_down.take() else { return };
@@ -441,10 +486,11 @@ fn bar(w: &mut Workspace, cx: &mut Context<Workspace>) -> impl IntoElement {
                         cx.stop_propagation();
                         w.chat_down(window, cx)
                     }))
-                    .on_mouse_up(MouseButton::Left, cx.listener(|w, _, window, cx| {
+                    .on_mouse_up(MouseButton::Left, cx.listener(|w, e: &MouseUpEvent, window, cx| {
                         cx.stop_propagation();
-                        w.chat_up(window, cx)
-                    })),
+                        w.chat_up(e.click_count, window, cx)
+                    }))
+                    .child(long_press_area(cx.entity().downgrade())),
             ),
         )
         .child(tab("ph-alerts", "Alerts", "bell", Screen::Panel(View::Notifications), alerts, cx))
@@ -600,46 +646,13 @@ fn status(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) 
     let ws = s.meta.get(&s.active).cloned();
     let engine = ws.as_ref().and_then(|m| s.engines.iter().find(|e| e.cfg.endpoint == m.endpoint)).map(|e| e.cfg.name.clone()).unwrap_or_default();
     let conn = format!("{:?}", s.conn).to_lowercase();
-    let set = s.cur.settings.clone();
-    let models = s.models.clone();
-    let model_label = set.as_ref().map(|x| s.model(&x.model).map(|m| m.label.clone()).unwrap_or(x.model.clone())).unwrap_or_default();
-    let efforts = set.as_ref().and_then(|x| s.model(&x.model)).map(|m| m.efforts.clone()).unwrap_or_default();
-    let task_id = t.as_ref().map(|t| t.id).unwrap_or(0);
     let head = t.as_ref().map(|t| format!("#{} · {}", t.id, task_name(t))).unwrap_or_default();
     let mode = t.as_ref().map(|t| t.mode.as_str().to_string()).unwrap_or_default();
     let depth = t.as_ref().map(|t| format!("{} level{}", t.settings.depth, if t.settings.depth == 1 { "" } else { "s" })).unwrap_or_default();
     let budget = t.as_ref().and_then(|t| t.budget.usd).map(|b| format!(" / {}", fmt::usd(b))).unwrap_or_default();
     let msgs = s.cur.t.to_string();
     let jobs = s.busy.len();
-    let st_model = w.state.clone();
-    let st_effort = w.state.clone();
-    let cur_model = set.as_ref().map(|x| x.model.clone()).unwrap_or_default();
-    let cur_effort = set.as_ref().map(|x| x.effort.clone()).unwrap_or_default();
-    let model_btn = Button::new("ps-model").ghost().label(model_label).dropdown_caret(true).dropdown_menu(move |mut m, _, _| {
-        for (title, backend) in [("Claude Code", Backend::ClaudeCode), ("Codex", Backend::Codex)] {
-            m = m.label(title);
-            for mi in models.iter().filter(|x| x.backend == backend) {
-                let id = mi.id.clone();
-                let st = st_model.clone();
-                m = m.item(PopupMenuItem::new(mi.label.clone()).checked(mi.id == cur_model).on_click(move |_, _, cx| {
-                    let id = id.clone();
-                    st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task_id, SettingsPatch { model: Some(id), ..Default::default() }).await }))
-                }));
-            }
-        }
-        m.max_h(px(420.))
-    });
-    let effort_btn = Button::new("ps-effort").ghost().label(cur_effort.clone()).dropdown_caret(true).dropdown_menu(move |mut m, _, _| {
-        for e in &efforts {
-            let st = st_effort.clone();
-            let ev = e.clone();
-            m = m.item(PopupMenuItem::new(e.clone()).checked(*e == cur_effort).on_click(move |_, _, cx| {
-                let ev = ev.clone();
-                st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task_id, SettingsPatch { effort: Some(ev), ..Default::default() }).await }))
-            }));
-        }
-        m
-    });
+    let (model_btn, effort_btn) = model_effort(w, "ps", cx);
     set_state_extra("phoneStatus", serde_json::json!({ "status": st, "cost": cost, "tokens": tok, "messages": msgs, "connection": conn }));
     div()
         .id("ph-status")
@@ -677,4 +690,100 @@ fn status(w: &mut Workspace, _window: &mut Window, cx: &mut Context<Workspace>) 
                 .child(row("pst-engine", "server", k.muted, "Engine", engine, false, cx))
                 .child(row("pst-conn", "plug", if conn == "open" { k.green } else { k.amber }, "Connection", if conn == "open" { "connected".into() } else { "reconnecting…".into() }, false, cx)),
         )
+}
+
+/// iOS: a held finger arrives as LongPressEvent (Started after ~500 ms, Ended on release); listened to over the chat
+/// button's bounds
+fn long_press_area(ws: WeakEntity<Workspace>) -> impl IntoElement {
+    canvas(
+        |b, _, _| b,
+        move |bounds, _, window, _| {
+            let ws = ws.clone();
+            let began = std::rc::Rc::new(std::cell::Cell::new(None::<Instant>));
+            window.on_mouse_event::<LongPressEvent>(move |e, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || !bounds.contains(&e.start_position) {
+                    return;
+                }
+                match e.phase {
+                    TouchPhase::Started => {
+                        // the touch began ~500 ms before the long press was recognised
+                        began.set(Some(Instant::now() - Duration::from_millis(500)));
+                        let _ = ws.update(cx, |w, cx| w.chat_long_started(window, cx));
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => {
+                        let t = began.take().unwrap_or_else(Instant::now);
+                        let _ = ws.update(cx, |w, cx| w.chat_long_ended(t, cx));
+                    }
+                    _ => {}
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_full()
+    .top_0()
+    .left_0()
+}
+
+/// iOS: a horizontal touch drag over the title switches to the next / previous open task when it ends
+fn title_pan_area(ws: WeakEntity<Workspace>) -> impl IntoElement {
+    canvas(
+        |b, _, _| b,
+        move |bounds, _, window, _| {
+            let ws = ws.clone();
+            window.on_mouse_event::<TouchDragEvent>(move |e, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || !bounds.contains(&e.start_position) || !matches!(e.phase, TouchPhase::Ended) {
+                    return;
+                }
+                let dx = f32::from(e.position.x - e.start_position.x);
+                let _ = ws.update(cx, |w, cx| {
+                    w.title_swipe(dx, window, cx);
+                });
+            });
+        },
+    )
+    .absolute()
+    .size_full()
+    .top_0()
+    .left_0()
+}
+
+/// the next turn's model and effort as menus (the composer's accessory row, the Status screen)
+fn model_effort(w: &Workspace, id: &str, cx: &mut Context<Workspace>) -> (Button, Button) {
+    let s = w.state.read(cx);
+    let task_id = s.current;
+    let set = s.cur.settings.clone();
+    let models = s.models.clone();
+    let model_label = set.as_ref().map(|x| s.model(&x.model).map(|m| m.label.clone()).unwrap_or(x.model.clone())).unwrap_or_default();
+    let efforts = set.as_ref().and_then(|x| s.model(&x.model)).map(|m| m.efforts.clone()).unwrap_or_default();
+    let st_model = w.state.clone();
+    let st_effort = w.state.clone();
+    let cur_model = set.as_ref().map(|x| x.model.clone()).unwrap_or_default();
+    let cur_effort = set.as_ref().map(|x| x.effort.clone()).unwrap_or_default();
+    let model_btn = Button::new(SharedString::from(format!("{id}-model"))).ghost().label(model_label).dropdown_caret(true).dropdown_menu(move |mut m, _, _| {
+        for (title, backend) in [("Claude Code", Backend::ClaudeCode), ("Codex", Backend::Codex)] {
+            m = m.label(title);
+            for mi in models.iter().filter(|x| x.backend == backend) {
+                let id = mi.id.clone();
+                let st = st_model.clone();
+                m = m.item(PopupMenuItem::new(mi.label.clone()).checked(mi.id == cur_model).on_click(move |_, _, cx| {
+                    let id = id.clone();
+                    st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task_id, SettingsPatch { model: Some(id), ..Default::default() }).await }))
+                }));
+            }
+        }
+        m.max_h(px(420.))
+    });
+    let effort_btn = Button::new(SharedString::from(format!("{id}-effort"))).ghost().label(cur_effort.clone()).dropdown_caret(true).dropdown_menu(move |mut m, _, _| {
+        for e in &efforts {
+            let st = st_effort.clone();
+            let ev = e.clone();
+            m = m.item(PopupMenuItem::new(e.clone()).checked(*e == cur_effort).on_click(move |_, _, cx| {
+                let ev = ev.clone();
+                st.update(cx, |s, cx| s.command(cx, false, move |h| async move { h.update_settings(task_id, SettingsPatch { effort: Some(ev), ..Default::default() }).await }))
+            }));
+        }
+        m
+    });
+    (model_btn, effort_btn)
 }
