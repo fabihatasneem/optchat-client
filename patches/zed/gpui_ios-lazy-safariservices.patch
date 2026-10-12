@@ -1,0 +1,57 @@
+diff --git a/crates/gpui_ios/Cargo.toml b/crates/gpui_ios/Cargo.toml
+index eecaf13..a7b12da 100644
+--- a/crates/gpui_ios/Cargo.toml
++++ b/crates/gpui_ios/Cargo.toml
+@@ -30,6 +30,7 @@ slotmap.workspace = true
+ 
+ [target.'cfg(target_os = "ios")'.dependencies]
+ anyhow.workspace = true
++libc.workspace = true
+ block2.workspace = true
+ futures.workspace = true
+ gpui_apple = { workspace = true, features = ["font-kit"] }
+diff --git a/crates/gpui_ios/src/ios/platform.rs b/crates/gpui_ios/src/ios/platform.rs
+index 9463e23..c0cf824 100644
+--- a/crates/gpui_ios/src/ios/platform.rs
++++ b/crates/gpui_ios/src/ios/platform.rs
+@@ -148,7 +148,9 @@ impl IosPlatform {
+                 return;
+             };
+ 
+-            if presented.downcast_ref::<SFSafariViewController>().is_some() {
++            if SAFARI_SERVICES_LOADED.load(std::sync::atomic::Ordering::Acquire)
++                && presented.downcast_ref::<SFSafariViewController>().is_some()
++            {
+                 presented.dismissViewControllerAnimated_completion(true, None);
+                 return;
+             }
+@@ -273,7 +275,7 @@ impl Platform for IosPlatform {
+                 return;
+             };
+ 
+-            if url.starts_with("https://") || url.starts_with("http://") {
++            if (url.starts_with("https://") || url.starts_with("http://")) && load_safari_services() {
+                 if let Some(view_controller) = self.presented_view_controller() {
+                     let browser = SFSafariViewController::init_with_url(
+                         SFSafariViewController::alloc(view_controller.mtm()),
+@@ -479,8 +481,18 @@ impl Drop for IosPlatformState {
+ 
+ // objc2-safari-services 0.3.2 only includes the macOS SafariServices API.
+ // Keep the missing iOS initializer typed here until the generated crate includes it.
+-#[link(name = "SafariServices", kind = "framework")]
+-unsafe extern "C" {}
++// Loaded lazily (dlopen on first use): linking it pulls WebKit and ~900 images into every launch.
++static SAFARI_SERVICES_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++fn load_safari_services() -> bool {
++    use std::sync::atomic::Ordering;
++    if SAFARI_SERVICES_LOADED.load(Ordering::Acquire) {
++        return true;
++    }
++    let path = c"/System/Library/Frameworks/SafariServices.framework/SafariServices";
++    let ok = !unsafe { libc::dlopen(path.as_ptr(), libc::RTLD_NOW) }.is_null();
++    SAFARI_SERVICES_LOADED.store(ok, Ordering::Release);
++    ok
++}
+ 
+ objc2::extern_class!(
+     #[unsafe(super(
