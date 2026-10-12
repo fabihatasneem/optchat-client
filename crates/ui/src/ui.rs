@@ -441,13 +441,9 @@ pub fn reset_frames() {
     f.work_ms.clear();
 }
 
-/// Resident memory of this process in MB (ps).
+/// Resident memory of this process in MB (from the shell's platform; 0 where it has none).
 pub fn rss_mb() -> f64 {
-    // proc_pidinfo(PROC_PIDTASKINFO): a syscall, no subprocess on the UI thread
-    let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_taskinfo>() as i32;
-    let n = unsafe { libc::proc_pidinfo(std::process::id() as i32, libc::PROC_PIDTASKINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
-    if n == size { info.pti_resident_size as f64 / (1024.0 * 1024.0) } else { 0.0 }
+    crate::platform::resident_mb()
 }
 
 /// The scroll container of a sidebar panel (inside its cached view).

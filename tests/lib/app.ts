@@ -6,6 +6,7 @@ import { BUNDLE, Cua, ROOT, sleep } from "./cua.ts";
 import { checkTestDb, HUB, TOKENS } from "./hub.ts";
 
 export const SHOTS = `${ROOT}/shots`;
+Deno.mkdirSync(SHOTS, { recursive: true }); // test output (git-ignored): probes, state, screenshots
 const TITLEBAR = 32; // points above the content area
 const SCALE = 2; // screenshot pixels per point (Retina)
 
@@ -166,7 +167,7 @@ export class App {
       await this.cmd({ op: "nudge" });
       await sleep(400);
       const png = `${SHOTS}/${name}.png`, jpg = `${SHOTS}/${name}.jpg`;
-      const r = await new Deno.Command(`${ROOT}/scripts/shot.sh`, { args: [png], stdout: "null", stderr: "null" }).output();
+      const r = await new Deno.Command(`${ROOT}/shells/mac/tools/shot.sh`, { args: [png], stdout: "null", stderr: "null" }).output();
       if (!r.success) return `${jpg} (headless: no capture)`;
       await new Deno.Command("sips", { args: ["-s", "format", "jpeg", png, "--out", jpg], stdout: "null", stderr: "null" }).output();
       try { Deno.removeSync(png); } catch { /* */ }

@@ -1,0 +1,6 @@
+{
+  "keyId": "<App Store Connect API key id>",
+  "issuerId": "<issuer id>",
+  "keyPath": "/absolute/path/outside/the/repo/AuthKey_<keyId>.p8",
+  "teamId": "<Apple team id>"
+}

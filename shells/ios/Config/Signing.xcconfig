@@ -1,0 +1,6 @@
+// Signing for OptChat (iOS). Committed defaults; team-specific values go in Signing.local.xcconfig (git-ignored):
+//   DEVELOPMENT_TEAM = <your Apple team id>
+// The release script (release/testflight.sh) passes DEVELOPMENT_TEAM from the App Store Connect config instead.
+DEVELOPMENT_TEAM =
+OPTCHAT_BUNDLE_ID = com.reframe.optchat
+#include? "Signing.local.xcconfig"

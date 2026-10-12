@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Minimal App Store Connect API client (read-only queries) with the team's API key from .secrets/asc.json.
+"""Minimal App Store Connect API client (read-only queries) with the team's API key config from
+OPTCHAT_ASC_JSON (default ~/.config/optchat/asc.json; outside the repo, see asc.example.json).
 The JWT is signed with openssl (ES256); neither the token nor the key is ever printed.
   release/asc.py app <bundle id>          the app record (id, name) or "missing"
   release/asc.py builds <bundle id>       recent builds: version, processing state, uploaded date
@@ -10,7 +11,7 @@ The JWT is signed with openssl (ES256); neither the token nor the key is ever pr
       Never submits for Beta App Review."""
 import base64, json, os, subprocess, sys, tempfile, time, urllib.request, urllib.error
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-cfg = json.load(open(os.path.join(ROOT, ".secrets/asc.json")))
+cfg = json.load(open(os.environ.get("OPTCHAT_ASC_JSON") or os.path.expanduser("~/.config/optchat/asc.json")))
 b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 def token():
     head = b64(json.dumps({"alg": "ES256", "kid": cfg["keyId"], "typ": "JWT"}).encode())

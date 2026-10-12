@@ -4,10 +4,12 @@ edition.workspace = true
 version.workspace = true
 
 # The engine client without UI (shared by the macOS and iOS apps): connections (one socket per engine), the app
-# state and its reducer (a GPUI entity, no views), rpc, reconnect, tokens (Keychain), dictation audio.
+# state and its reducer (a GPUI entity, no views), rpc, reconnect, tokens (in the shell's secure store), dictation audio.
+# No OS APIs here: OS features come through optchat-platform (implemented by the shells).
 [dependencies]
 gpui.workspace = true
-optchat-proto = { path = "../proto" }
+optchat-proto.workspace = true
+optchat-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -19,7 +21,6 @@ tokio-tungstenite = { version = "0.27", features = ["native-tls"] }
 reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
 base64.workspace = true
 uuid.workspace = true
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-cpal = "0.16"
-security-framework = "3"
-libc = "0.2"
+image.workspace = true
+cpal.workspace = true
+libc.workspace = true

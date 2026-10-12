@@ -9,7 +9,6 @@ pub mod markdown;
 pub mod notices_view;
 pub mod panels;
 pub mod phone;
-pub mod platform;
 pub mod statusbar;
 pub mod tabs;
 pub mod tasks_view;
@@ -21,6 +20,8 @@ pub mod workspaces;
 
 // the client's modules under the paths the views use
 pub use optchat_client::{client, media, mic, state, tokens, LAUNCH};
+/// the platform hooks (the optchat-platform crate), under the path the views and shells use
+pub use optchat_platform as platform;
 
 /// icons and fonts, embedded (assets/)
 pub mod assets {

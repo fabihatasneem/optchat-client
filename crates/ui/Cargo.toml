@@ -5,12 +5,14 @@ version.workspace = true
 build = "build.rs"
 
 # OptChat's UI on GPUI (macOS and iOS): theme, feed and markdown, panels, composer, status bar, workspaces panel,
-# kit components; icons and fonts bundled (assets/). Platform-only code is cfg-gated (AppKit test input on macOS).
+# kit components; icons and fonts bundled (assets/). OS features come through optchat-platform; the only cfg-gated
+# code is the AppKit headless test input (macOS), with no-op stubs elsewhere.
 [dependencies]
 gpui.workspace = true
-optchat-proto = { path = "../proto" }
-optchat-client = { path = "../client" }
-optchat-theme = { path = "../theme" }
+optchat-proto.workspace = true
+optchat-platform.workspace = true
+optchat-client.workspace = true
+optchat-theme.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -19,11 +21,10 @@ tokio.workspace = true
 chrono.workspace = true
 pulldown-cmark = { version = "0.13", default-features = false }
 smallvec = "1"
-libc = "0.2"
 unicode-segmentation = "1"
 base64.workspace = true
 uuid.workspace = true
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+image.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

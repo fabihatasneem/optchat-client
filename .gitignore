@@ -1,7 +1,43 @@
+# build output
 target/
-data/
-shots/*.tmp
-*.DS_Store
 /dist/
 /dist-dev/
-shots/ship-*
+build/
+DerivedData/
+*.xcarchive
+*.dSYM/
+*.ipa
+shells/ios/release/logs/
+shells/ios/build/
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+
+# local config and secrets: never committed
+.secrets/
+data/
+*.p8
+*.p12
+*.pem
+*.key
+*.cer
+*.der
+*.mobileprovision
+*.provisionprofile
+*.token
+.env
+.env.*
+shells/ios/Config/Signing.local.xcconfig
+test-tokens.json
+
+# test output
+shots/
+tests/scratch/
+
+# tools built on first use
+shells/mac/tools/winid
+
+# OS
+.DS_Store

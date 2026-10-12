@@ -1,7 +1,7 @@
 //! OptChat for iPhone and iPad: the shared client and UI (optchat-client, optchat-ui: the macOS app's code) in an
 //! iOS shell. The shell adds what iOS needs around the shared workspace view: safe-area insets, keyboard avoidance
 //! (the IME inset, animated like UIKit's), and footprint logging per lifecycle phase. The GPUI patches release the
-//! drawables while backgrounded (app/patches). The connection is seeded at launch for development (OPTCHAT_SEED:
+//! drawables while backgrounded (patches/zed). The connection is seeded at launch for development (OPTCHAT_SEED:
 //! base64 JSON {endpoint, workspace, token}): prefs get the engine + connection, the token goes to the
 //! shared token store (Keychain), never printed.
 #[cfg(target_os = "ios")]
@@ -39,10 +39,14 @@ mod shell {
         diag(&format!("seed: prefs written, token stored: {ok}"));
     }
 
-    /// the QR hook (optchat_ui::platform): native/qr_scanner.m presents the camera; only oc1 engine tokens end a scan
+    /// the iOS Platform (optchat-platform): tokens in the Keychain, the memory footprint, and the QR scanner
+    /// (native/qr_scanner.m presents the camera; only oc1 engine tokens end a scan)
     mod qr {
         use gpui::{App, AppContext, Window};
-        use optchat_ui::platform::{Platform, ScanDone};
+        use optchat_ui::platform::{Keychain, Platform, ScanDone, SecureStore};
+        use std::sync::Arc;
+        /// the Keychain service the app has always used (shared with the macOS app's item format)
+        const KEYCHAIN_SERVICE: &str = "com.reframe.optchat.gpui";
         use std::ffi::{c_char, c_void, CStr};
         type Tx = tokio::sync::oneshot::Sender<Option<String>>;
         unsafe extern "C" {
@@ -64,6 +68,13 @@ mod shell {
         }
         pub struct Ios;
         impl Platform for Ios {
+            fn secure_store(&self) -> Option<Arc<dyn SecureStore>> {
+                Some(Arc::new(Keychain { service: KEYCHAIN_SERVICE }))
+            }
+            fn resident_mb(&self) -> Option<f64> {
+                let mb = super::footprint_mb();
+                (mb >= 0.0).then_some(mb)
+            }
             fn can_scan_qr(&self) -> bool {
                 unsafe { optchat_can_scan_qr() }
             }
@@ -144,6 +155,8 @@ mod shell {
 
     pub fn main() {
         LAUNCH.get_or_init(std::time::Instant::now);
+        // the iOS platform: before the seed hooks touch tokens
+        optchat_ui::platform::install(std::sync::Arc::new(qr::Ios));
         let prefs_path = prefs_path();
         // OPTCHAT_RESET=1 (debug builds, tests): start from no prefs, as a fresh install would
         if cfg!(debug_assertions) && std::env::var("OPTCHAT_RESET").is_ok_and(|v| v == "1") {
@@ -156,7 +169,6 @@ mod shell {
         gpui_platform::application().with_assets(Assets).run(move |cx: &mut App| {
             kit::init(cx);
             ui::register_fonts(cx, assets::ASSETS);
-            optchat_ui::platform::install(cx, std::rc::Rc::new(qr::Ios));
             ui::set_executor(cx.background_executor().clone());
             let prefs: state::Prefs = std::fs::read_to_string(&prefs_path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
             theme::init(cx, prefs.theme.clone(), prefs.follow_system, cx.window_appearance());

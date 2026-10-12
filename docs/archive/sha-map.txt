@@ -1,0 +1,89 @@
+# old repo commit -> optchat-client commit (matched by author date + subject; filtered history)
+optchat-mac-gpui ec01da0 -> 151082f
+optchat-mac-gpui 5f13111 -> f21a9ac
+optchat-mac-gpui 35965b6 -> e6f2032
+optchat-mac-gpui 3f7f864 -> 312232d
+optchat-mac-gpui 16a5944 -> 58d9566
+optchat-mac-gpui c6e99f3 -> 8684e8d
+optchat-mac-gpui 3686857 -> d6de38f
+optchat-mac-gpui c6e2433 -> 56c1bc4
+optchat-mac-gpui ea6df6f -> b704002
+optchat-mac-gpui 576416a -> fdbbeee
+optchat-mac-gpui 8367641 -> b2519e7
+optchat-mac-gpui c3f27c2 -> f442c22
+optchat-mac-gpui e40767a -> 966dec0
+optchat-mac-gpui d0a3baf -> a679f67
+optchat-mac-gpui 8e5cb63 -> 59cd459
+optchat-mac-gpui fb51b19 -> cdcc9a8
+optchat-mac-gpui 2a15e7f -> d6127c0
+optchat-mac-gpui 4cc741e -> 95c0ea4
+optchat-mac-gpui ca751d4 -> ce78806
+optchat-mac-gpui 8ebbbd1 -> f08f38e
+optchat-mac-gpui 260b3d4 -> c572a07
+optchat-mac-gpui 6c83755 -> eedbd54
+optchat-mac-gpui 6e47043 -> dropped (engine/screenshots only)
+optchat-mac-gpui fc79a0e -> 8243e4b
+optchat-mac-gpui c85d44f -> f345e9e
+optchat-mac-gpui 86e0447 -> 5a2020e
+optchat-mac-gpui fc4bfc5 -> f549c44
+optchat-mac-gpui f05388d -> e80ffa4
+optchat-mac-gpui d46e303 -> 2ebd01b
+optchat-mac-gpui a821cdc -> 804f53c
+optchat-mac-gpui e03042a -> 5106080
+optchat-mac-gpui 1df2e16 -> 68dc0f0
+optchat-mac-gpui 6d20813 -> 23374ea
+optchat-mac-gpui dcceb31 -> a4036f9
+optchat-mac-gpui 6e08e08 -> f691f33
+optchat-mac-gpui db94590 -> 5b60c4c
+optchat-mac-gpui 29ebae2 -> ae464f6
+optchat-mac-gpui 15a4dd6 -> e033321
+optchat-mac-gpui 54fcb68 -> dropped (engine/screenshots only)
+optchat-mac-gpui 2f055de -> 21e1208
+optchat-mac-gpui 1d50d19 -> 1b3b461
+optchat-mac-gpui 1092006 -> e300597
+optchat-mac-gpui 26ab755 -> dropped (engine/screenshots only)
+optchat-mac-gpui d0f7dc7 -> f2ce73c
+optchat-mac-gpui 95465f5 -> 6055fdb
+optchat-mac-gpui b0179f9 -> 6d81d6c
+optchat-mac-gpui ab27431 -> dropped (engine/screenshots only)
+optchat-mac-gpui b8d174d -> dropped (engine/screenshots only)
+optchat-mac-gpui f55f8c6 -> dropped (engine/screenshots only)
+optchat-mac-gpui 17b0ca1 -> 296d4de
+optchat-mac-gpui 9992dac -> fe127ea
+optchat-mac-gpui a8677e2 -> 1f7c120
+optchat-ios 7fb0d8e -> f7a1a41
+optchat-ios a137eb8 -> 46be118
+optchat-ios 86ee726 -> 1d84d2c
+optchat-ios 6eebd26 -> 01e806e
+optchat-ios db963d1 -> bd0aaa7
+optchat-ios 3127623 -> c16a4bf
+optchat-ios 6a67557 -> f628cd4
+optchat-ios 4145e2f -> 712c78e
+optchat-ios 3345cdb -> 02fb611
+optchat-ios 7171c7e -> b2d880c
+optchat-ios a0dec5c -> 80233a3
+optchat-ios 1971a7e -> 304a9ce
+optchat-ios 1391307 -> 8c1391e
+optchat-ios e8d6f9b -> 6168f17
+optchat-ios 60deabb -> 51800e0
+optchat-ios 30da760 -> 1ebb1dd
+optchat-ios 9245795 -> dropped (engine/screenshots only)
+optchat-ios a759b4e -> dropped (engine/screenshots only)
+optchat-ios dafb561 -> dropped (engine/screenshots only)
+optchat-ios 2281f5b -> dropped (engine/screenshots only)
+optchat-ios d3a028b -> 1fcdabb
+optchat-ios 364abe3 -> b7aa749
+optchat-ios 2335df2 -> dropped (engine/screenshots only)
+optchat-ios 840e9e6 -> dropped (engine/screenshots only)
+optchat-ios 4f4a2b0 -> 33d66ea
+optchat-ios 92408ea -> dropped (engine/screenshots only)
+optchat-ios c9afc34 -> dropped (engine/screenshots only)
+optchat-ios f6773b9 -> 892d67c
+optchat-ios f633cd1 -> 299182e
+optchat-ios d2e40c2 -> dropped (engine/screenshots only)
+optchat-ios 6e5b3d9 -> dropped (engine/screenshots only)
+optchat-ios 68e6ac2 -> dropped (engine/screenshots only)
+optchat-ios c184808 -> dropped (engine/screenshots only)
+optchat-ios e2c4687 -> a1914cc
+optchat-ios 94949ae -> dropped (engine/screenshots only)
+optchat-ios f586528 -> 3d71feb

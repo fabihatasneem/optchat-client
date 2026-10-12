@@ -158,38 +158,3 @@ mod tests {
         assert_eq!(money(2.125), "$2.13");
     }
 }
-
-/// PATH for child processes: an app started from Finder has a bare PATH, so the usual tool dirs come first.
-pub fn child_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut dirs: Vec<String> = vec![
-        format!("{home}/.local/bin"),
-        "/usr/local/bin".into(),
-        "/opt/homebrew/bin".into(),
-        format!("{home}/.cargo/bin"),
-        format!("{home}/.deno/bin"),
-        "/usr/bin".into(),
-        "/bin".into(),
-        "/usr/sbin".into(),
-        "/sbin".into(),
-    ];
-    if let Ok(p) = std::env::var("PATH") {
-        for d in p.split(':') {
-            if !d.is_empty() && !dirs.iter().any(|x| x == d) {
-                dirs.push(d.to_string());
-            }
-        }
-    }
-    dirs.join(":")
-}
-
-/// Resolve a binary on child_path().
-pub fn which(bin: &str) -> Option<String> {
-    for d in child_path().split(':') {
-        let p = format!("{d}/{bin}");
-        if std::path::Path::new(&p).is_file() {
-            return Some(p);
-        }
-    }
-    None
-}

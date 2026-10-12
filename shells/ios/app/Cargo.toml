@@ -1,8 +1,6 @@
-# OptChat for iPhone and iPad: the shared client and UI (optchat-mac-gpui crates/client + crates/ui, the same code as
-# the macOS app) on GPUI (zed-industries/zed gpui-ios-platform, zed#63068, pinned in vendor/zed by build.sh).
-# Built by build.sh (called from OptChat.xcodeproj's script phase).
-[workspace]
-
+# OptChat for iPhone and iPad: the shared client and UI (crates/client + crates/ui, the same code as the macOS app)
+# in an iOS shell, on the workspace's one GPUI (vendor/zed: tools/zed-vendor.sh). A member of the root workspace;
+# built by build.sh (called from OptChat.xcodeproj's script phase) for an iOS target.
 [package]
 name = "optchat-ios"
 version = "0.1.0"
@@ -17,49 +15,15 @@ path = "src/main.rs"
 cc = "1"
 
 [dependencies]
-gpui = { path = "../vendor/zed/crates/gpui" }
-gpui_platform = { path = "../vendor/zed/crates/gpui_platform" }
-gpui_ios = { path = "../vendor/zed/crates/gpui_ios" }
-optchat-client = { path = "../vendor/optchat-shared/crates/client" }
-optchat-ui = { path = "../vendor/optchat-shared/crates/ui" }
-tokio = { version = "1", features = ["full"] }
-serde_json = "1"
-base64 = "0.22"
+gpui.workspace = true
+gpui_platform.workspace = true
+gpui_ios.workspace = true
+optchat-platform = { workspace = true, features = ["apple-keychain"] }
+optchat-client.workspace = true
+optchat-ui.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+base64.workspace = true
 objc2 = "0.6"
 mach2 = "0.6"
-libc = "=0.2.186" # the version the shared crates are pinned to
-
-# One GPUI: the shared crates take zed from git at the pinned rev; point every zed crate at vendor/zed (patched).
-[patch."https://github.com/zed-industries/zed"]
-collections = { path = "../vendor/zed/crates/collections" }
-derive_refineable = { path = "../vendor/zed/crates/refineable/derive_refineable" }
-gpui = { path = "../vendor/zed/crates/gpui" }
-gpui_apple = { path = "../vendor/zed/crates/gpui_apple" }
-gpui_ios = { path = "../vendor/zed/crates/gpui_ios" }
-gpui_linux = { path = "../vendor/zed/crates/gpui_linux" }
-gpui_macos = { path = "../vendor/zed/crates/gpui_macos" }
-gpui_macros = { path = "../vendor/zed/crates/gpui_macros" }
-gpui_platform = { path = "../vendor/zed/crates/gpui_platform" }
-gpui_shared_string = { path = "../vendor/zed/crates/gpui_shared_string" }
-gpui_util = { path = "../vendor/zed/crates/gpui_util" }
-gpui_web = { path = "../vendor/zed/crates/gpui_web" }
-gpui_wgpu = { path = "../vendor/zed/crates/gpui_wgpu" }
-gpui_windows = { path = "../vendor/zed/crates/gpui_windows" }
-http_client = { path = "../vendor/zed/crates/http_client" }
-refineable = { path = "../vendor/zed/crates/refineable" }
-scheduler = { path = "../vendor/zed/crates/scheduler" }
-sum_tree = { path = "../vendor/zed/crates/sum_tree" }
-ztracing = { path = "../vendor/zed/crates/ztracing" }
-ztracing_macro = { path = "../vendor/zed/crates/ztracing_macro" }
-
-# the zed workspace's crates.io patches that GPUI's dependency graph needs
-[patch.crates-io]
-async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
-async-task = { git = "https://github.com/zed-industries/async-task.git", rev = "015845a19fc31752c02367567d3b8900a406f9da" }
-
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 16
-debug = "line-tables-only"
-panic = "abort"
+libc.workspace = true

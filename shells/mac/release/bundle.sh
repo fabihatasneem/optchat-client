@@ -1,16 +1,17 @@
 #!/bin/bash
-# bundle.sh [release|debug] — builds the app, ad hoc signed. Default: a DEV build, dist-dev/OptChat Dev.app
+# shells/mac/release/bundle.sh [release|debug] — builds the app, ad hoc signed. Default: a DEV build, dist-dev/OptChat Dev.app
 # (com.reframe.optchat.gpui.dev), which tests use; the user's app in dist/OptChat.app (com.reframe.optchat.gpui) is
 # only replaced with SHIP=1 (a finished, verified build).
 set -e
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../../.." # the repo root: target/, dist/, dist-dev/
+tools/zed-vendor.sh # the submodule + our GPUI patches (no-op when in place)
 PROFILE=${1:-release}
-if [ "$PROFILE" = release ]; then cargo build --release -p optchat-app; BIN=target/release/OptChat; else cargo build -p optchat-app; BIN=target/debug/OptChat; fi
+if [ "$PROFILE" = release ]; then cargo build --release -p optchat-mac; BIN=target/release/OptChat; else cargo build -p optchat-mac; BIN=target/debug/OptChat; fi
 if [ "${SHIP:-0}" = 1 ]; then APP=dist/OptChat.app; ID=com.reframe.optchat.gpui; NAME=OptChat; else APP="dist-dev/OptChat Dev.app"; ID=com.reframe.optchat.gpui.dev; NAME="OptChat Dev"; fi
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/OptChat"
-cp packaging/OptChat.icns "$APP/Contents/Resources/OptChat.icns"
-VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+cp shells/mac/packaging/OptChat.icns "$APP/Contents/Resources/OptChat.icns"
+VERSION=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

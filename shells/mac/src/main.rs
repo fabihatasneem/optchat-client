@@ -7,6 +7,8 @@ use optchat_ui::*;
 use optchat_ui::{assets, Assets};
 use optchat_client::LAUNCH;
 
+mod platform;
+
 actions!(app, [Quit, Hide, HideOthers, ShowAll]);
 
 /// The app's prefs (engines, connections, each workspace's tabs, theme, window): `~/Library/Application
@@ -45,6 +47,9 @@ fn test_bootstrap(prefs_path: &str) {
 
 fn main() {
     LAUNCH.get_or_init(std::time::Instant::now);
+    // the macOS platform (Keychain, memory, the test QR "scanner" when OPTCHAT_TEST_QR is set): before anything
+    // touches tokens
+    optchat_platform::install(std::sync::Arc::new(crate::platform::Mac::new()));
     let prefs_path = prefs_path();
     test_bootstrap(&prefs_path);
     let rt: &'static tokio::runtime::Runtime = Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("optchat-client").enable_all().build().expect("tokio runtime")));
@@ -54,10 +59,6 @@ fn main() {
         kit::init(cx);
         let t0 = std::time::Instant::now();
         ui::register_fonts(cx, assets::ASSETS);
-        // tests: a QR "scanner" returning OPTCHAT_TEST_QR (the iOS shell installs the camera one)
-        if let Ok(q) = std::env::var("OPTCHAT_TEST_QR") {
-            platform::install(cx, std::rc::Rc::new(platform::TestScanner(q)));
-        }
         if std::env::var("OPTCHAT_TIMING").is_ok() {
             eprintln!("fonts registered in {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
         }
