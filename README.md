@@ -62,7 +62,7 @@ docs              platforms.md, ios-plan.md (the iOS design notes), archive/
 ## Getting the code
 
 ```bash
-git clone --recursive git@github.com:<owner>/optchat-client.git
+git clone --recursive https://github.com/wrishaa/optchat-client.git
 cd optchat-client
 tools/zed-vendor.sh          # applies our GPUI patches (the build scripts also run it; it's a no-op when done)
 ```
