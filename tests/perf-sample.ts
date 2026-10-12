@@ -2,7 +2,7 @@ import { App } from "./lib/app.ts";
 import { sleep } from "./lib/cua.ts";
 const a = await App.launch({ env: { OPTCHAT_TEST_HOOKS: "1" } });
 await sleep(1500);
-const pid = (await new Deno.Command("pgrep", { args: ["-f", "optchat-mac-gpui/dist/OptChat.app/Contents/MacOS/OptChat"] }).output()).stdout;
+const pid = (await new Deno.Command("pgrep", { args: ["-f", "optchat-client/dist-dev/OptChat Dev.app/Contents/MacOS/OptChat"] }).output()).stdout;
 const p = new TextDecoder().decode(pid).trim().split("\n")[0];
 const s = new Deno.Command("sample", { args: [p!, "6", "-file", "/tmp/optchat-sample.txt"], stdout: "null", stderr: "null" }).spawn();
 for (let k = 0; k < 16; k++) await a.scroll("feed", k % 8 < 4 ? "up" : "down", 6);
