@@ -1,7 +1,7 @@
 # OptChat client (GPUI)
 
 OptChat's native client, written in Rust on [GPUI](https://github.com/zed-industries/zed) (Zed's UI framework). It
-runs today on **macOS**, **iPhone** and **iPad**. Linux, Windows and Android are next; see "New platforms" below.
+runs on **Linux**, **macOS**, **iPhone** and **iPad**. Windows and Android are next; see their sections below.
 
 **It's a client only.** The OptChat *engine* is a separate TypeScript service in another repo: tasks, agents,
 memory, dictation (speech-to-text) and storage all live there. The client talks to an engine over one websocket
@@ -31,7 +31,8 @@ crates/client     connections, state/reducer (a GPUI entity), rpc, reconnect, di
 crates/ui         every view, the phone layout, kit components (input, menus, buttons), bundled fonts/icons (assets/)
 shells/mac        the macOS app: entry point, platform.rs, packaging, release/bundle.sh, tools/
 shells/ios        the iOS app crate (app/), the Xcode wrapper (OptChat.xcodeproj), release/ (TestFlight)
-shells/linux, shells/windows, shells/android   READMEs only, until someone builds them
+shells/linux      the Linux app: Wayland/X11 entry point, Secret Service tokens, local demo
+shells/windows, shells/android   READMEs only, until someone builds them
 vendor/zed        git submodule: zed-industries/zed (GPUI), pinned; our patches come from patches/zed
 patches/zed       our GPUI patches, applied to vendor/zed by tools/zed-vendor.sh
 tests             deno UI suites + a fake engine (tests/lib/fake-engine.ts)
@@ -105,31 +106,48 @@ open shells/ios/OptChat.xcodeproj         # Run: a script phase builds the crate
 For a device, copy `shells/ios/Config/Signing.local.xcconfig.example` to `Signing.local.xcconfig` (it's git-ignored)
 and set your team. More in `shells/ios/README.md`.
 
-### Linux (to be built: your first target)
+### Linux (Wayland and X11)
 
-1. **System packages.** This list comes from zed's `script/linux` at our pin; Debian/Ubuntu names:
-   ```bash
-   sudo apt install build-essential clang cmake pkg-config libasound2-dev libfontconfig-dev libssl-dev \
-     libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev libvulkan1 mesa-vulkan-drivers
-   ```
-   - Fedora: `alsa-lib-devel fontconfig-devel wayland-devel libxcb-devel libxkbcommon-x11-devel openssl-devel`.
-   - GPUI renders through wgpu, so you need a working Vulkan driver (GLES is the fallback). Wayland and X11 are both
-     on by default.
-2. **First check:** `cargo check -p optchat-ui`. The shared crates no longer link Apple APIs. If something
-   Apple-only still shows up, it's a boundary bug: fix it in the trait, not with a `cfg` in a shared crate.
-3. **Make the shell.**
-   - Copy `shells/mac` to `shells/linux` (crate `optchat-linux`). Add it to `members` in the root `Cargo.toml`, and to
-     `default-members` behind your own checks.
-   - In `platform.rs`:
-     - `secure_store()`: Secret Service, either through GPUI's credentials API (oo7) or the `keyring` crate.
-     - `resident_mb()`: `/proc/self/statm`.
-   - In `main.rs`:
-     - prefs dir: `$XDG_CONFIG_HOME/optchat`;
-     - drop the mac menu items (Hide, HideOthers);
-     - drop `gpui_platform`'s `font-kit` and `runtime_shaders` features (they're macOS/iOS-only).
-   - Dictation uses cpal, which works on Linux through ALSA/PipeWire.
-4. **Run it against the fake engine** (see Testing), then against your test engine.
-5. Packaging (AppImage or Flatpak) comes later. Zed's `script/bundle-linux` is a reference.
+Install Rust through rustup (the pinned toolchain is selected automatically), and these Debian/Ubuntu packages:
+
+```bash
+sudo apt install build-essential clang cmake pkg-config libasound2-dev libfontconfig-dev libssl-dev \
+  libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev libvulkan1 mesa-vulkan-drivers
+tools/zed-vendor.sh
+cargo run -p optchat-linux
+# Or, from any directory:
+shells/linux/run.sh
+```
+
+Fedora package equivalents: `alsa-lib-devel fontconfig-devel wayland-devel libxcb-devel
+libxkbcommon-x11-devel openssl-devel`, plus a compiler, clang, cmake, pkg-config and Vulkan drivers.
+
+- GPUI uses Vulkan/GLES and chooses Wayland or X11 from the desktop environment.
+- Preferences are in `$XDG_CONFIG_HOME/optchat/prefs.json`, falling back to `~/.config/optchat/prefs.json`.
+- Tokens use Secret Service (GNOME Keyring, KWallet or another compatible unlocked desktop keyring).
+- Desktop shortcuts use Ctrl (for example Ctrl+K, Ctrl+N, Ctrl+V and Ctrl+Q).
+- `cargo build` at the root builds the shared crates; select the Linux or macOS shell explicitly with `-p`.
+
+For a local demo with no real engine or credentials, install Deno 2.x and run:
+
+```bash
+shells/linux/demo.sh
+```
+
+The demo starts the fake engine on loopback with `alpha` and `beta`, uses temporary preferences and test tokens,
+and cleans up its engine and temporary files when the app exits. `OPTCHAT_DEMO_PORT` changes its default port
+(18790). For automated checks: `cargo build -p optchat-linux && deno run -A tests/linux.ts`.
+
+Build and test a distributable x86_64 AppImage:
+
+```bash
+shells/linux/release/bundle.sh --check
+```
+
+This produces the AppImage, SHA256 checksum and build information in `dist-dev/`. Packaging downloads are verified
+against pinned sizes and SHA256 hashes. The current local build is tested on Ubuntu 26.04 x86_64; build on the oldest
+Linux version you intend to support and test the package there before claiming broader compatibility.
+More in `shells/linux/README.md`. Flatpak packaging is future work.
 
 ### Windows (to be built, if you have a Windows machine)
 
@@ -197,6 +215,7 @@ You can also run the fake engine by itself: `deno run -A tests/lib/fake-engine.t
 - **Unit tests:** `cargo test -p optchat-proto -p optchat-theme -p optchat-client`.
 - **Caveat:** the UI harness launches the macOS bundle. In headless mode it injects mouse input as NSEvents, and
   otherwise it uses ChatGPT.app's Computer Use and `screencapture`. On Linux or Windows:
+  - Linux has `deno run -A tests/linux.ts` for native window, connection and keyboard smoke checks;
   - start with `cargo test` and a manual run against the fake engine;
   - porting the harness (launch the binary directly, inject input through GPUI from the test channel, capture
     screenshots with GPUI's headless renderer, which supports Linux) is a good early task.
@@ -205,7 +224,6 @@ You can also run the fake engine by itself: `deno run -A tests/lib/fake-engine.t
 
 **Shared crates (fixed):** `optchat-client` no longer depends on `security-framework`, the memory probe went behind
 the trait, and the token test store's unix file mode is `cfg(unix)`. Still open:
-- Key bindings use `cmd-`. They should move to GPUI's `secondary-` (cmd on macOS, ctrl elsewhere).
 - The local engine token path uses `$HOME`.
 - Mic permission UX exists only on macOS.
 
@@ -213,7 +231,7 @@ the trait, and the token test store's unix file mode is `cfg(unix)`. Still open:
 - Secret Service needs a running keyring, so headless CI should use the file store (`OPTCHAT_TOKEN_DIR`).
 - You need ALSA headers for cpal and a Vulkan driver.
 - The UI test harness is macOS-only.
-- Nobody has built Linux at our pin yet. Our pin is the iOS PR branch, not zed main.
+- The desktop shell uses our iOS PR branch pin, not zed main; keep running the Linux smoke suite when changing it.
 
 **Windows:**
 - The same blockers as Linux, except ALSA and Vulkan.

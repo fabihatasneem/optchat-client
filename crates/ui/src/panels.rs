@@ -1267,7 +1267,7 @@ impl SettingsPanel {
                                 .items_center()
                                 .justify_between()
                                 .mt(px(10.))
-                                .child(div().text_size(px(13.)).child("Chat text size").child(div().text_size(px(11.)).text_color(k.muted).child("⌘= bigger · ⌘- smaller · ⌘⇧0 actual size")))
+                                .child(div().text_size(px(13.)).child("Chat text size").child(div().text_size(px(11.)).text_color(k.muted).child(crate::ui::shortcut_label("⌘= bigger · ⌘- smaller · ⌘⇧0 actual size"))))
                                 .child(
                                     div()
                                         .flex()
