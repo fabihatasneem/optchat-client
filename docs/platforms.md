@@ -4,7 +4,7 @@
 |---|---|---|---|
 | macOS | `shells/mac` | ships (dev bundle, ad hoc signed; notarization to do) | `gpui_macos` (Metal) |
 | iOS / iPadOS | `shells/ios` | TestFlight builds | `gpui_ios` (zed PR #63068) + `patches/zed` |
-| Linux | `shells/linux` | native shell, AppImage and development Debian packaging | `gpui_linux` (Wayland + X11) on `gpui_wgpu` (Vulkan/GLES) |
+| Linux | `shells/linux` | native shell, AppImage, x86_64/ARM64 development DEB/RPM packages | `gpui_linux` (Wayland + X11) on `gpui_wgpu` (Vulkan/GLES) |
 | Windows | `shells/windows` (README only) | to be built | `gpui_windows` (DirectX, DirectWrite) |
 | Android | `shells/android` (README only) | research | **none** (no `gpui_android`; `gpui_platform` has no Android branch) |
 
@@ -62,6 +62,23 @@ dpkg-shlibdeps, while RPM uses its native ELF dependency generator. `check-insta
 Fresh Ubuntu 24.04/x86_64 and Fedora 43/x86_64 development packages require GLIBC 2.39 and pass extracted-app
 smoke checks on Ubuntu 26.04 with Wayland and XWayland. The earlier host development `.deb` and AppImage
 require GLIBC 2.43. Rootless container lifecycle qualification is recorded separately under `build/qualification/`.
-Maintainer/license metadata, baseline builds on both CPUs, clean-desktop lifecycle and real-engine tests, production
-keys and HTTPS hosting must be complete before a stable release. Flatpak is excluded from the chosen scope.
+The [2026-10-14 native CI run](https://github.com/fabihatasneem/optchat-client/actions/runs/38557757484) passed all
+four jobs for source commit `482af41980829b8468b636d10af71eae7a00bfef`: DEB/RPM builds on x86_64 and native
+ARM64, including dependencies, install, upgrade, removal and reinstall across the five agreed distributions on
+each architecture. Both RPM jobs also passed 24 HTTPS/WSS checks per Fedora version (43 and 44), covering
+DEFAULT/FUTURE policies, stricter protocol limits, certificate/hostname rejection and preservation of certificate
+verification across system-policy configuration. Development packages, checksums and build/qualification evidence
+are available in that run's artifacts; GitHub retains these artifacts for 14 days.
+
+The approved package maintainer is `Fabiha Tasneem <fabiha@reframe.so>`. Copyright/license work is deferred.
+Installed-app isolated checks on this Ubuntu 26.04 GNOME computer passed for desktop-entry launch, the Add engine
+form, actual Secret Service storage and token restoration after relaunch, Unicode/multiline input, XWayland
+clipboard, image processing, large-history rendering/scrolling, reconnect, real microphone capture/stop and clean
+exit. Wayland and XWayland were exercised; final `0local.4` packages passed 23 smoke checks on each backend.
+Native input automation was not delivered by GNOME. Wayland clipboard with real input, normal file-picker/portal
+use, logout/reboot persistence, the clean-desktop matrix and ARM64 desktop hardware remain manual qualification.
+Real-engine access is deferred by the owner. These results do not establish customer desktop support yet.
+
+Final license/notice metadata, clean-desktop and real-engine qualification, production keys and HTTPS hosting must
+be complete before a stable release. Flatpak is excluded from the chosen scope.
 See `shells/linux/release/README.md` and `release/QUALIFICATION.md` for the ordered workflow and sign-off record.
