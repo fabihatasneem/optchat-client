@@ -28,7 +28,44 @@ Use Workspaces → Add engine to connect with a scoped test token as described i
 Linux uses Ctrl shortcuts and standard Ctrl+Left/Right, Ctrl+Backspace and Ctrl+Home/End text navigation.
 F11 toggles full screen; closing the last window or Ctrl+Q exits the process.
 Dictation uses cpal/ALSA; microphone availability depends on your desktop audio configuration.
-Camera QR scanning and Flatpak packaging are not implemented.
+Camera QR scanning is not implemented. Flatpak is outside the chosen release scope.
+
+## Native packages and production distribution
+
+The agreed minimum is **Ubuntu 24.04**, with qualification on Ubuntu 24.04, Ubuntu 26.04 and Debian 13.
+Fedora RPMs are built on Fedora 43 and qualified on Fedora 43 and 44. Both x86_64 and ARM64 are in scope.
+Flatpak is outside this release's scope. Native signed APT/DNF repositories provide managed updates, following
+[OpenAI's documented Linux distribution model](https://learn.chatgpt.com/docs/linux/linux-app).
+
+Follow [the step-by-step distribution guide](release/README.md), starting with rootless Podman setup. Then:
+
+```bash
+shells/linux/release/container-build.sh deb
+shells/linux/release/container-build.sh rpm
+```
+
+Run these on each native architecture. They build from source in separate baseline containers and target directories;
+the current Ubuntu 26.04 binary is never reused. Outputs go under `dist-dev/ubuntu24.04-<CPU>/` and
+`dist-dev/fedora43-<CPU>/`, with checksums and provenance. The first x86_64 baseline DEB/RPM builds require
+GLIBC 2.39 and their extracted applications pass 23 smoke checks on each of the host's Wayland and XWayland
+backends. The earlier Ubuntu 26.04 development DEB/AppImage requires GLIBC 2.43.
+Producing package files does not establish production readiness.
+
+`release/check-install.sh` checks dependencies/install/removal/reinstall across the agreed OS versions and tests
+upgrades when a previous package is supplied. `test-native-package.sh` tests an extracted DEB/RPM with the fake
+engine on a real desktop. Clean desktop qualification, secure token persistence, real-engine behavior and final
+signed hosted repository checks remain required on both architectures. Use
+[the qualification checklist](release/QUALIFICATION.md) to record each OS/CPU result.
+
+`release/package_deb.py` and `release/package_rpm.py` can also run directly on their native baseline systems.
+The approved default maintainer is `Fabiha Tasneem <fabiha@reframe.so>`; `--maintainer` or
+`OPTCHAT_PACKAGE_MAINTAINER` can override it. Copyright/license work is deferred, with a
+[notice template](packaging/COPYRIGHT.template) to complete later. Development packages can be built now;
+production revisions require the approved notice and, for RPM, the approved SPDX expression.
+`release/apt_repository.py` prepares signed APT metadata;
+`release/rpm_repository.py` signs RPM copies and prepares signed DNF metadata. Both need an owner-supplied GPG key
+and qualified packages; they do not upload repositories or change this host's package-manager configuration.
+Customer installation and update commands are in the distribution guide, using the final HTTPS repository URLs.
 
 ## Package an AppImage
 
@@ -77,8 +114,9 @@ graphics drivers, desktop audio services and secure keyring.
 
 ### Compatibility and sharing
 
-The current package is verified on **Ubuntu 26.04 x86_64**. Its bundled binaries reference **GLIBC 2.43**. Other
-Linux distributions, older Ubuntu versions, aarch64, X11 sessions and real microphone recording have not been verified.
+The current package is verified on **Ubuntu 26.04 x86_64**. Its bundled binaries reference **GLIBC 2.43**. The package checks pass with normal launch and extract-and-run on Wayland, and with the X11 backend through
+XWayland. Other Linux distributions, older Ubuntu versions, aarch64, standalone Xorg sessions and real microphone
+recording have not been verified.
 For broader support, build the package inside the oldest intended target distribution's VM/container and test it
 there and on the other target desktops. A successful build on Ubuntu 26.04 does not establish support for older systems.
 
@@ -98,6 +136,47 @@ Share the AppImage together with its checksum. The build JSON is useful for test
 when sharing. Commit `shells/linux/release/`, `shells/linux/packaging/`, the Linux implementation and the updated
 README/platform docs. `build/`, `target/` and `dist-dev/` are generated outputs and are already git-ignored. Preference
 files and client tokens stay outside the package.
+
+## Verify the package and check usability
+
+Test an existing AppImage without rebuilding it:
+
+```bash
+shells/linux/test-package.sh
+# Or point the helper at another version:
+shells/linux/test-package.sh /absolute/path/to/OptChat.AppImage
+```
+
+The helper verifies the matching checksum and runs the 23-check fake-engine suite with normal AppImage launch,
+extract-and-run, and the X11 backend when DISPLAY is available. In a Wayland session the X11 test uses XWayland;
+it is not a test of a standalone Xorg desktop. The app runs from a temporary directory to catch source-directory
+assumptions. The helper needs this checkout and Deno; the customer's AppImage does not need development tools.
+All test instances use temporary prefs/tokens and are closed automatically.
+
+For manual checks, open the packaged application with the large fake fixture:
+
+```bash
+OPTCHAT_DEMO_BINARY="$PWD/dist-dev/OptChat-0.1.0-x86_64.AppImage" \
+OPTCHAT_DEMO_BIG=1 OPTCHAT_DEMO_PORT=18792 \
+shells/linux/demo.sh
+```
+
+This bypasses Cargo and uses the AppImage. The fixture contains 1,770 entries in the main chat and five child tasks.
+Keep the terminal open during the test. Closing the app cleans up that demo's fake engine and temporary data.
+Change the port if it is already in use. Use `APPIMAGE_EXTRACT_AND_RUN=1` only to test the FUSE-free fallback;
+normal launch should also be checked for customer usability.
+
+Manually inspect fonts/icons, resize the window, toggle full screen, scroll the long chat, switch among the provided
+tasks/workspaces, use the real keyboard and clipboard (including multiline and non-ASCII text), open/dismiss dialogs,
+and leave it idle for several minutes. Watch for freezes, clipped text, lost drafts and continuing memory growth
+when repeating the same actions. Automated probe checks do not establish that scrolling and mouse interaction feel smooth.
+
+Then copy only the AppImage/checksum into a clean desktop VM or another computer on each intended target OS.
+Verify launch outside the checkout and without development packages. Use a scoped test-engine token to verify
+real connections, secure-store persistence after reopening, attachments and dictation where supported. The fake
+engine returns fixed data; it does not verify real AI execution or speech transcription. Record the tested OS,
+desktop session, graphics hardware, package checksum and any failures. A local smoke pass alone is not a broad
+Linux compatibility claim.
 
 ## Local demo and checks
 

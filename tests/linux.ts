@@ -81,7 +81,8 @@ try {
     { mode: 0o600 },
   );
   app = new Deno.Command(appBinary, {
-    cwd: root,
+    // A packaged app must work without the source checkout as its working directory.
+    cwd: dir,
     env: {
       OPTCHAT_PREFS_DIR: dir,
       OPTCHAT_TOKEN_DIR: dir,

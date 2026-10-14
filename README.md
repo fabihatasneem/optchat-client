@@ -63,7 +63,7 @@ docs              platforms.md, ios-plan.md (the iOS design notes), archive/
 ## Getting the code
 
 ```bash
-git clone --recursive https://github.com/wrishaa/optchat-client.git
+git clone --recursive https://github.com/fabihatasneem/optchat-client.git
 cd optchat-client
 tools/zed-vendor.sh          # applies our GPUI patches (the build scripts also run it; it's a no-op when done)
 ```
@@ -147,7 +147,21 @@ shells/linux/release/bundle.sh --check
 This produces the AppImage, SHA256 checksum and build information in `dist-dev/`. Packaging downloads are verified
 against pinned sizes and SHA256 hashes. The current local build is tested on Ubuntu 26.04 x86_64; build on the oldest
 Linux version you intend to support and test the package there before claiming broader compatibility.
-More in `shells/linux/README.md`. Flatpak packaging is future work.
+Check an existing package with `shells/linux/test-package.sh` (normal launch, extract-and-run and the available
+X11 backend). Manual usability and clean-machine testing are described in `shells/linux/README.md`.
+For native DEB/RPM distribution and signed APT/DNF updates, follow
+[the step-by-step Linux release guide](shells/linux/release/README.md).
+
+Linux package metadata defaults to the approved maintainer `Fabiha Tasneem <fabiha@reframe.so>`.
+Copyright/license work is deferred; complete [the notice template](shells/linux/packaging/COPYRIGHT.template)
+later. Development packaging can continue while the production notice and RPM license expression are pending.
+
+Build DEBs on Ubuntu 24.04 and qualify them on Ubuntu 24.04, Ubuntu 26.04 and Debian 13; build RPMs on Fedora 43
+and qualify them on Fedora 43 and 44. Both x86_64 and ARM64 are in scope, using native builders. Flatpak is excluded.
+The earlier Ubuntu 26.04 development DEB/AppImage requires GLIBC 2.43. Fresh x86_64 DEB/RPM baseline builds
+now require GLIBC 2.39; their extracted applications pass the fake-engine smoke suite on Ubuntu 26.04's
+Wayland and XWayland backends. See the release guide for the remaining qualification and metadata requirements.
+Clean-desktop qualification, real-engine checks and production metadata/signing/hosting remain release requirements.
 
 ### Windows (to be built, if you have a Windows machine)
 

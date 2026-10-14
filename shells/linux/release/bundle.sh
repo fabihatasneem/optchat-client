@@ -62,6 +62,7 @@ APPIMAGE_NAME="OptChat-$VERSION-x86_64.AppImage"
 STAGED_APPIMAGE="$STAGE_DIR/$APPIMAGE_NAME"
 mkdir -p "$APPDIR/usr/share/licenses/optchat"
 cp assets/fonts/*LICENSE* assets/fonts/*OFL* "$APPDIR/usr/share/licenses/optchat/"
+cp assets/icons/LICENSE-lucide.txt "$APPDIR/usr/share/licenses/optchat/"
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 \
 LINUXDEPLOY_OUTPUT_VERSION="$VERSION" \
 LDAI_RUNTIME_FILE="$ROOT/build/appimage-tools/runtime-x86_64" \
