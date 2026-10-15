@@ -1,7 +1,7 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=OPTCHAT_WINDOWS_REVISION");
     println!("cargo:rerun-if-changed=packaging/optchat.rc.in");
-    println!("cargo:rerun-if-changed=packaging/OptChat.ico");
+    println!("cargo:rerun-if-changed=packaging/assets/OptChat.ico");
     #[cfg(target_os = "windows")]
     {
         let version = std::env::var("CARGO_PKG_VERSION").expect("package version");
@@ -13,7 +13,7 @@ fn main() {
         let numeric = version.replace('.', ",");
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let icon = root
-            .join("packaging/OptChat.ico")
+            .join("packaging/assets/OptChat.ico")
             .display()
             .to_string()
             .replace('\\', "/");

@@ -1,6 +1,6 @@
 #Requires -Version 7.4
 # Exercise Windows-style CRLF checkouts and edit preservation in disposable Git repositories.
-. "$PSScriptRoot/common.ps1"
+. "$PSScriptRoot/../release/common.ps1"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 $scratch = Join-Path $root "build/windows/vendor-fixture-$([guid]::NewGuid())"
 $source = Join-Path $scratch 'source'

@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory)][ValidateSet('x64', 'arm64')][string]$Architecture,
     [switch]$RequireSignature
 )
-. "$PSScriptRoot/common.ps1"
+. "$PSScriptRoot/../release/common.ps1"
 $path = (Resolve-Path -LiteralPath $Package).Path
 $checksum = (Get-Content -LiteralPath "$path.sha256" -Raw).Trim()
 if ($checksum -notmatch '^([a-f0-9]{64})  (.+)$') { throw 'Malformed SHA256 sidecar.' }

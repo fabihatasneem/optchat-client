@@ -36,8 +36,8 @@ Manager tokens and process memory measurement. `OPTCHAT_PREFS_DIR` isolates test
 pinned GPUI patches as the Bash helper without requiring Bash or discarding local submodule edits.
 
 `release/build.ps1` compiles and packages; `bundle.ps1` combines matching x64/ARM64 MSIX files;
-`new-test-certificate.ps1` creates a development signing identity; `check-package.ps1` inspects packages;
-`test-packaging.ps1` runs cross-platform parser and package fixture checks; `test-vendor.ps1` checks CRLF
+`new-test-certificate.ps1` creates a development signing identity. Under `tests/`, `check-package.ps1` inspects packages,
+`test-packaging.ps1` runs cross-platform parser and package fixture checks, and `test-vendor.ps1` checks CRLF
 preparation, idempotence and edit preservation. The Windows GitHub Actions workflow builds
 both architectures on native runners and retains unsigned development artifacts for 14 days.
 
@@ -113,7 +113,7 @@ The release payload must already carry approved notices. Production signing does
 To validate installation, upgrade, downgrade rejection, same-version repair and removal using two versions:
 
 ```powershell
-./shells/windows/release/test-installer.ps1 `
+./shells/windows/tests/test-installer.ps1 `
   -Installer ./dist-dev/windows-x64/OptChat-0.1.0.3-windows-x64-Setup.exe `
   -Upgrade ./dist-dev/windows-x64/OptChat-0.1.0.4-windows-x64-Setup.exe `
   -Architecture x64 -RequireSignature -SmokeTest
@@ -127,12 +127,12 @@ Logs remain under `build/windows/installer-test-*`. Run in-use upgrades, real-en
 From the repository root in developer PowerShell 7:
 
 ```powershell
-./shells/windows/release/test-packaging.ps1
-./shells/windows/release/test-vendor.ps1
+./shells/windows/tests/test-packaging.ps1
+./shells/windows/tests/test-vendor.ps1
 ./shells/windows/release/build.ps1 -Architecture x64 -Formats exe,zip,msix
-./shells/windows/release/check-package.ps1 `
+./shells/windows/tests/check-package.ps1 `
   -Package ./dist-dev/windows-x64/OptChat-0.1.0.0-windows-x64-portable.zip -Architecture x64
-./shells/windows/release/check-package.ps1 `
+./shells/windows/tests/check-package.ps1 `
   -Package ./dist-dev/windows-x64/OptChat-0.1.0.0-windows-x64-unsigned.msix -Architecture x64
 ```
 
@@ -284,3 +284,23 @@ References: [MSIX packaging](https://learn.microsoft.com/en-us/windows/msix/desk
 [signing](https://learn.microsoft.com/en-us/windows/msix/package/sign-app-package-using-signtool),
 [bundling](https://learn.microsoft.com/en-us/windows/msix/packaging-tool/bundle-msix-packages),
 [AppData virtualization](https://learn.microsoft.com/en-us/windows/msix/desktop/flexible-virtualization).
+
+## Directory layout
+
+Linux and Windows use the same platform-folder layout:
+
+```text
+shells/<platform>/
+  README.md          Installation, engine setup, updates and removal
+  BUILDING.md        Source builds, packaging and release procedure
+  Cargo.toml         Native shell crate
+  src/               Native startup and platform implementation
+  packaging/         Package manifests and templates
+    assets/          Package icons and logos
+  release/           Build, signing and repository publishing helpers
+    QUALIFICATION.md Release evidence and remaining checks
+  tests/             Package inspection and lifecycle checks
+```
+
+Platform-specific build inputs and developer launch helpers remain beside the crate.
+Shared application smoke suites remain in the repository's top-level `tests/` directory.

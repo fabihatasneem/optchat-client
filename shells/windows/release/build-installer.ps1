@@ -14,7 +14,7 @@ Assert-Windows
 $compilerPath = Find-InnoCompiler $Compiler
 $packagePath = (Resolve-Path -LiteralPath $PortablePackage).Path
 if ([System.IO.Path]::GetExtension($packagePath) -ne '.zip') { throw 'Supply a portable ZIP from build.ps1.' }
-& "$PSScriptRoot/check-package.ps1" -Package $packagePath -Architecture $Architecture
+& "$PSScriptRoot/../tests/check-package.ps1" -Package $packagePath -Architecture $Architecture
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 $stage = Join-Path $root "build/windows/installer-$([guid]::NewGuid())"
 $null = New-Item -ItemType Directory -Force $stage

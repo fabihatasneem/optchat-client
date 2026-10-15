@@ -9,7 +9,7 @@ param(
     [switch]$RequireProductionSignature,
     [switch]$SmokeTest
 )
-. "$PSScriptRoot/common.ps1"
+. "$PSScriptRoot/../release/common.ps1"
 Assert-Windows
 $first = (Resolve-Path -LiteralPath $Installer).Path
 $second = (Resolve-Path -LiteralPath $Upgrade).Path

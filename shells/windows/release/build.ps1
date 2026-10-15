@@ -105,7 +105,8 @@ try {
         $artifacts += Join-Path $output "$base-Setup.exe"
     }
     if ('msix' -in $Formats) {
-        Copy-Item "$root/shells/windows/packaging/Assets" $stage -Recurse
+        $null = New-Item -ItemType Directory -Force "$stage/Assets"
+        Copy-Item "$root/shells/windows/packaging/assets/*.png" "$stage/Assets"
         Write-PackageManifest "$root/shells/windows/packaging/AppxManifest.xml.in" "$stage/AppxManifest.xml" $Architecture $packageVersion $Publisher
         $suffix = if ($cert) { '' } else { '-unsigned' }
         $msix = Join-Path $output "$base$suffix.msix"

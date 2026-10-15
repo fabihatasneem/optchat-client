@@ -1,6 +1,6 @@
 #Requires -Version 7.4
 # Runs on Linux or Windows. Fixtures are synthetic packaging inputs, never app build artifacts.
-. "$PSScriptRoot/common.ps1"
+. "$PSScriptRoot/../release/common.ps1"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 $scripts = @(Get-ChildItem "$root/shells/windows" -Filter '*.ps1' -Recurse)
 $scripts += Get-Item "$root/tools/zed-vendor.ps1"
@@ -43,7 +43,8 @@ try {
         Expect-Failure { & "$PSScriptRoot/check-package.ps1" -Package $zip -Architecture $wrongArch }
         # Exercise MSIX layout without claiming MakeAppx schema/signing validation on Linux.
         Copy-Item "$scratch/AppxManifest.xml" $app
-        Copy-Item "$root/shells/windows/packaging/Assets" $app -Recurse -Force
+        $null = New-Item -ItemType Directory -Force "$app/Assets"
+        Copy-Item "$root/shells/windows/packaging/assets/*.png" "$app/Assets" -Force
         $msix = Join-Path $scratch "$arch.msix"
         [IO.Compression.ZipFile]::CreateFromDirectory($app, $msix)
         Write-Checksum $msix

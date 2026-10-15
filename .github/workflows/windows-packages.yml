@@ -81,20 +81,20 @@ jobs:
           if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B.V.') { throw 'Unexpected Inno Setup publisher.' }
           $setup = Start-Process $inno -WindowStyle Hidden -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/SP-', '/NOICONS', '/TASKS=')
           if ($setup.ExitCode -ne 0) { throw "Inno Setup installation failed: $($setup.ExitCode)" }
-          ./shells/windows/release/test-packaging.ps1
-          ./shells/windows/release/test-vendor.ps1
+          ./shells/windows/tests/test-packaging.ps1
+          ./shells/windows/tests/test-vendor.ps1
           ./shells/windows/release/build.ps1 -Architecture $env:PACKAGE_ARCHITECTURE -Formats exe,zip,msix
           cargo test --locked --release -p optchat-windows --target $env:PACKAGE_TARGET --target-dir target/windows
           if ($LASTEXITCODE -ne 0) { throw 'Windows shell tests failed.' }
           Get-ChildItem "dist-dev/windows-$env:PACKAGE_ARCHITECTURE" -File |
             Where-Object Extension -in @('.zip', '.msix') |
-            ForEach-Object { ./shells/windows/release/check-package.ps1 -Package $_.FullName -Architecture $env:PACKAGE_ARCHITECTURE }
+            ForEach-Object { ./shells/windows/tests/check-package.ps1 -Package $_.FullName -Architecture $env:PACKAGE_ARCHITECTURE }
           $initial = @(Get-ChildItem "dist-dev/windows-$env:PACKAGE_ARCHITECTURE/*-Setup.exe")
           if ($initial.Count -ne 1) { throw 'Expected exactly one initial installer.' }
           ./shells/windows/release/build.ps1 -Architecture $env:PACKAGE_ARCHITECTURE -Revision 1 -Formats exe,zip
           $upgrade = @(Get-ChildItem "dist-dev/windows-$env:PACKAGE_ARCHITECTURE/*-Setup.exe" | Where-Object FullName -ne $initial[0].FullName)
           if ($upgrade.Count -ne 1) { throw 'Expected exactly one upgrade installer.' }
-          ./shells/windows/release/test-installer.ps1 -Installer $initial[0].FullName -Upgrade $upgrade[0].FullName -Architecture $env:PACKAGE_ARCHITECTURE
+          ./shells/windows/tests/test-installer.ps1 -Installer $initial[0].FullName -Upgrade $upgrade[0].FullName -Architecture $env:PACKAGE_ARCHITECTURE
 
       - name: Save development packages and evidence
         if: always()
@@ -201,8 +201,8 @@ jobs:
           & "$vs\Common7\Tools\Launch-VsDevShell.ps1" -Arch $env:VS_ARCHITECTURE -HostArch $env:VS_ARCHITECTURE -SkipAutomaticLocation
           $null = Find-InnoCompiler # OptChat.iss enforces the compiler version.
           Assert-ReleaseSource (Get-Location).Path $version
-          ./shells/windows/release/test-packaging.ps1
-          ./shells/windows/release/test-vendor.ps1
+          ./shells/windows/tests/test-packaging.ps1
+          ./shells/windows/tests/test-vendor.ps1
           $signing = @{
             Publisher = $env:SIGNING_PUBLISHER
             CertificateThumbprint = $env:SIGNING_THUMBPRINT
@@ -214,7 +214,7 @@ jobs:
           ./shells/windows/release/build.ps1 -Architecture $env:PACKAGE_ARCHITECTURE -Revision $revision -Release @signing
           $env:OPTCHAT_WINDOWS_REVISION = [string]$revision
           Invoke-Native cargo @('test', '--locked', '--release', '-p', 'optchat-windows', '--target', $env:PACKAGE_TARGET, '--target-dir', 'target/windows')
-          ./shells/windows/release/test-installer.ps1 `
+          ./shells/windows/tests/test-installer.ps1 `
             -Installer "dist-dev/windows-$env:PACKAGE_ARCHITECTURE/OptChat-$baseline-windows-$env:PACKAGE_ARCHITECTURE-Setup.exe" `
             -Upgrade "dist/windows-$env:PACKAGE_ARCHITECTURE/OptChat-$version-windows-$env:PACKAGE_ARCHITECTURE-Setup.exe" `
             -Architecture $env:PACKAGE_ARCHITECTURE -RequireSignature -RequireProductionSignature -SmokeTest
