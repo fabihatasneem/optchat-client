@@ -3990,6 +3990,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "optchat-windows"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "embed-resource",
+ "gpui",
+ "gpui_platform",
+ "optchat-client",
+ "optchat-platform",
+ "optchat-ui",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

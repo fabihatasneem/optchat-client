@@ -1,7 +1,8 @@
 # OptChat client (GPUI)
 
 OptChat's native client, written in Rust on [GPUI](https://github.com/zed-industries/zed) (Zed's UI framework). It
-runs on **Linux**, **macOS**, **iPhone** and **iPad**. Windows and Android are next; see their sections below.
+runs on **Linux**, **macOS**, **iPhone** and **iPad**. Windows build files are prepared for native testing;
+Android is next. See their sections below.
 
 **It's a client only.** The OptChat *engine* is a separate TypeScript service in another repo: tasks, agents,
 memory, dictation (speech-to-text) and storage all live there. The client talks to an engine over one websocket
@@ -32,7 +33,8 @@ crates/ui         every view, the phone layout, kit components (input, menus, bu
 shells/mac        the macOS app: entry point, platform.rs, packaging, release/bundle.sh, tools/
 shells/ios        the iOS app crate (app/), the Xcode wrapper (OptChat.xcodeproj), release/ (TestFlight)
 shells/linux      the Linux app: Wayland/X11 entry point, Secret Service tokens, local demo
-shells/windows, shells/android   READMEs only, until someone builds them
+shells/windows    Windows shell + MSIX/ZIP build files (native testing pending)
+shells/android    README only, until someone builds it
 vendor/zed        git submodule: zed-industries/zed (GPUI), pinned; our patches come from patches/zed
 patches/zed       our GPUI patches, applied to vendor/zed by tools/zed-vendor.sh
 tests             deno UI suites + a fake engine (tests/lib/fake-engine.ts)
@@ -163,18 +165,24 @@ now require GLIBC 2.39; their extracted applications pass the fake-engine smoke 
 Wayland and XWayland backends. See the release guide for the remaining qualification and metadata requirements.
 Clean-desktop qualification, real-engine checks and production metadata/signing/hosting remain release requirements.
 
-### Windows (to be built, if you have a Windows machine)
+### Windows (build files ready; native testing pending)
 
-1. Install Visual Studio Build Tools (MSVC and the Spectre-mitigated libs), the Windows 10/11 SDK
-   (≥ 10.0.20348) and CMake. See zed's `docs/src/development/windows.md` at our pin (`vendor/zed/docs/...`).
-2. GPUI's Windows backend (`gpui_windows`: DirectX and DirectWrite) is in our pin. We haven't tested it.
-3. Make `shells/windows` the same way as Linux:
-   - `secure_store()`: Windows Credential Manager (GPUI credentials or `keyring`).
-   - `resident_mb()`: `GetProcessMemoryInfo`.
-   - prefs: `%APPDATA%\OptChat`.
-   - Note: `HOME` isn't set on Windows, and the shared code still reads it for the local engine's token file. That's
-     fine to ignore at first, because a Windows machine has no local engine.
-4. Releasing will need Authenticode signing and an installer (MSIX or WiX). Not now.
+The native shell in `shells/windows` uses DirectX/DirectWrite, Credential Manager for tokens and
+`%APPDATA%\OptChat` for settings. Build on Windows with PowerShell 7.4+, Rust, MSVC, the Windows SDK
+and CMake. Both x64 and ARM64 are targeted; 32-bit Windows is outside the release scope.
+
+```powershell
+# From the matching Visual Studio developer PowerShell, with PowerShell 7.4+:
+./shells/windows/release/build.ps1 -Architecture x64
+# On an ARM64 Windows machine with its native C++ tools:
+./shells/windows/release/build.ps1 -Architecture arm64
+```
+
+Each build produces a portable ZIP and an unsigned MSIX under `dist-dev/windows-<architecture>/`, plus
+SHA256 sidecars and build metadata. Installable MSIX packages require signing and certificate trust.
+An optional MSIX bundle combines both architectures. See the [Windows guide](shells/windows/README.md)
+for the verified vendor-package comparison, toolchain setup, test signing, installation and qualification steps.
+No native Windows build, install or GUI qualification has been performed on this Linux host.
 
 ### Android (to be built, if you have an Android device; research first)
 
@@ -248,11 +256,11 @@ the trait, and the token test store's unix file mode is `cfg(unix)`. Still open:
 - The desktop shell uses our iOS PR branch pin, not zed main; keep running the Linux smoke suite when changing it.
 
 **Windows:**
-- The same blockers as Linux, except ALSA and Vulkan.
-- No `HOME`.
-- Bundled fonts loading through DirectWrite is unverified.
-- Authenticode signing and an installer are needed.
-- `gpui_windows` is untested by us.
+- Native build and package files are ready; actual MSVC builds and Windows desktop checks remain.
+- Bundled fonts through DirectWrite, GPU drivers, clipboard, IME, file dialogs and microphone need native checks.
+- MSIX signing and certificate trust are required for installation. Public distribution needs production signing
+  and the deferred project/dependency notice review.
+- Local engine token discovery still needs `OPTCHAT_LOCAL_TOKEN_FILE` when `HOME` is unset.
 
 **Android:**
 - There's no GPUI backend (see above).
