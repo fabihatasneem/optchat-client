@@ -110,9 +110,8 @@ and perform ARM64 desktop qualification before publishing ARM64 support.
 The [Linux development packages workflow](../../../.github/workflows/linux-packages.yml)
 uses GitHub's native `ubuntu-24.04` and `ubuntu-24.04-arm` runners with these same baseline containers. GitHub
 [requires a manually dispatched workflow to exist on the default branch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
-While this work remains on `fabiha/linux-appimage`, relevant source pushes to that branch trigger the builds
-directly; no default-branch merge is needed for this initial ARM64 qualification. After the workflow is reviewed
-and merged to the default branch, push the release source, open
+Matching source pushes trigger automatic builds. For manual runs, after the workflow is reviewed
+and merged to the default branch, open
 **Actions → Linux development packages → Run workflow**, and select the release branch. Each native DEB/RPM job
 builds `0local` and `0local.1`, checks package lifecycle including upgrade,
 and uploads the packages, checksums, build reports and qualification logs as a development artifact. It does not

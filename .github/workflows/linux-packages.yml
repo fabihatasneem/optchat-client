@@ -3,7 +3,7 @@ name: Linux development packages
 on:
   workflow_dispatch:
   push:
-    branches: [fabiha/linux-appimage]
+    branches: [fabiha/linux-packages]
     paths:
       - .github/workflows/linux-packages.yml
       - Cargo.toml
