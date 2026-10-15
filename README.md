@@ -1,5 +1,7 @@
 # OptChat client (GPUI)
 
+OptChat lets you open your engine's workspaces, chats and tasks in a native app.
+
 OptChat's native client, written in Rust on [GPUI](https://github.com/zed-industries/zed) (Zed's UI framework). It
 runs on **Linux**, **macOS**, **iPhone** and **iPad**. Windows and Android are next; see their sections below.
 
@@ -7,15 +9,26 @@ runs on **Linux**, **macOS**, **iPhone** and **iPad**. Windows and Android are n
 memory, dictation (speech-to-text) and storage all live there. The client talks to an engine over one websocket
 (`/engine/ws`), plus HTTPS for blobs and `/stt`.
 
-Fabiha: welcome! You'll start on Linux, then Windows if you have a Windows machine, then Android if you have an
-Android device. The sections marked *to be built* are yours.
+## Install on Linux
+
+Start with the **[Linux installation guide](docs/linux-installation.md)**. It explains how to choose a DEB or RPM,
+download it, check the file, install it and connect to your engine. Installing a prebuilt package does not require
+Rust, Deno, Podman or a source checkout.
+
+Linux downloads are currently **development previews**, available from
+[Linux development packages in GitHub Actions](https://github.com/fabihatasneem/optchat-client/actions/workflows/linux-packages.yml).
+A stable Linux release and public APT/DNF update repositories have not been published yet.
+
+Developers can use the [Linux source/build guide](shells/linux/README.md). Maintainers preparing packages and
+releases should use the [Linux release guide](shells/linux/release/README.md).
 
 ## Connecting to an engine
 
-1. **Get a test engine.** Ask risha for a test engine endpoint and a test workspace. Never develop against anyone's
-   real workspaces. If you run an engine yourself, its owner page is `/engine` on that engine.
-2. **Get a client token.** On the engine's `/engine` admin page, open **Client tokens** and create one scoped to your
-   test workspace. It looks like `oc1.<header>.<secret>`; the header carries the engine's addresses.
+1. **Get an engine client token.** Ask your engine administrator for a token scoped to the workspaces you can use.
+   If you manage the engine, open its `/engine` admin page, choose **Client tokens**, and create a scoped token.
+   OptChat is the desktop client; installing it does not install or create an engine.
+2. **Keep the token private.** It starts with `oc1.` and includes the engine addresses and a secret. Do not share
+   it in screenshots, issues or logs. For preview testing and development, request a separate test workspace.
 3. **Add the engine.** In the app, open **Workspaces → Add engine** and paste the token (phones can scan it as a QR
    code). Every workspace in the token's scope connects by itself.
    - Tokens go to the OS secure store (Keychain on Apple), never to prefs or logs.
@@ -54,6 +67,8 @@ docs              platforms.md, ios-plan.md (the iOS design notes), archive/
 
 - Anything published on crates.io is a normal Cargo dependency (`[workspace.dependencies]` in the root
   `Cargo.toml`).
+- `native-tls` has a documented [local Linux policy patch](third_party/native-tls/OPTCHAT-PATCH.md) so Fedora's
+  security settings apply to the client's secure connections.
 - GPUI isn't published, so it comes in as a **git submodule** (`vendor/zed`), never as copied source:
   - The submodule is upstream zed, branch `gpui-ios-platform` (zed PR #63068), pinned at `97dc71d`.
   - `tools/zed-vendor.sh` applies `patches/zed/*.patch` to it.
@@ -61,6 +76,10 @@ docs              platforms.md, ios-plan.md (the iOS design notes), archive/
     GPUI.
 
 ## Getting the code
+
+The following sections are for developers building from source. Linux package users can follow the
+[installation guide](docs/linux-installation.md) instead. A Linux source build needs a revision that includes
+the Linux scripts; the commit shown on a successful Linux workflow run is one way to select the tested source.
 
 ```bash
 git clone --recursive https://github.com/fabihatasneem/optchat-client.git
@@ -74,7 +93,7 @@ tools/zed-vendor.sh          # applies our GPUI patches (the build scripts also 
   - `git status` ignores the patched files inside `vendor/zed` (`ignore = dirty`).
   - After a pull that moves the pin, run `git submodule update vendor/zed && tools/zed-vendor.sh`.
 
-## Prerequisites (all platforms)
+## Prerequisites for building from source (all platforms)
 
 - **Rust:** rustup. The toolchain (1.98.1) comes from `rust-toolchain.toml` automatically.
 - **Deno 2.x:** for the tests and the fake engine.
@@ -107,6 +126,9 @@ For a device, copy `shells/ios/Config/Signing.local.xcconfig.example` to `Signin
 and set your team. More in `shells/ios/README.md`.
 
 ### Linux (Wayland and X11)
+
+To install a downloaded package, use the [Linux installation guide](docs/linux-installation.md).
+The commands below build the application from source.
 
 Install Rust through rustup (the pinned toolchain is selected automatically), and these Debian/Ubuntu packages:
 

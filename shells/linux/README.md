@@ -1,11 +1,19 @@
 # OptChat for Linux
 
+**Installing the app?** Follow the [Linux installation guide](../../docs/linux-installation.md) for package
+downloads, installation, first launch, updates and troubleshooting. Prebuilt packages do not need Rust or Podman.
+
+This README covers source development and packaging. For release maintainers, the
+[release guide](release/README.md) covers building, qualification, signing and publication.
+
 The native Rust/GPUI shell runs the shared OptChat UI on Wayland and X11. Linux hooks stay in `src/platform.rs`:
 Secret Service token storage (oo7), resident memory from `/proc/self/statm`, and the optional test QR hook.
 
-## Setup and run
+## Build and run from source
 
-Install rustup and the packages listed below. `rust-toolchain.toml` selects Rust 1.98.1.
+Start from a source checkout containing `shells/linux/run.sh`; use the source commit shown on a successful Linux
+workflow run if the default checkout does not include it. Install [rustup](https://rustup.rs/) and the packages
+listed below. `rust-toolchain.toml` selects Rust 1.98.1.
 
 ```bash
 sudo apt install build-essential clang cmake pkg-config libasound2-dev libfontconfig-dev libssl-dev \

@@ -1,4 +1,8 @@
-# Linux distribution, step by step
+# Linux package build and release guide
+
+This guide is for maintainers building, testing, signing and publishing Linux packages.
+**To install OptChat on your own computer, start with the [Linux installation guide](../../../docs/linux-installation.md).**
+Installing a prebuilt package does not require the build tools described here.
 
 The agreed minimum build system is **Ubuntu 24.04**. Build a DEB there and qualify that same package on Ubuntu 24.04,
 Ubuntu 26.04 and Debian 13. Build the RPM separately on **Fedora 43** and qualify it on Fedora 43 and Fedora 44.
@@ -17,7 +21,9 @@ write baseline builds into separate directories and reject newer binaries with i
 The x86_64 DEB development revisions `0local`/`0local.1` have passed container dependency, install, upgrade, removal/purge, data
 preservation and reinstall checks on Ubuntu 24.04, Ubuntu 26.04 and Debian 13. Fedora 43 and Fedora 44 have passed
 the equivalent RPM checks. Signed APT metadata and RPM/repomd rehearsals also passed using ephemeral test keys.
-Native ARM64 builds, the clean desktop matrix, real engines and production signing/hosting remain separate steps.
+Native x86_64 and ARM64 builds and container lifecycle checks have passed in CI; see
+[the recorded results](../../../docs/platforms.md#managed-linux-distribution). The clean desktop matrix,
+real engines and production signing/hosting remain separate steps.
 
 Development revision `0local.2` refreshes both packages with the approved maintainer contact. Its package metadata,
 changelogs and checksums have been verified; the application binaries match the previously tested `0local.1`
@@ -113,10 +119,26 @@ uses GitHub's native `ubuntu-24.04` and `ubuntu-24.04-arm` runners with these sa
 Matching source pushes trigger automatic builds. For manual runs, after the workflow is reviewed
 and merged to the default branch, open
 **Actions → Linux development packages → Run workflow**, and select the release branch. Each native DEB/RPM job
-builds `0local` and `0local.1`, checks package lifecycle including upgrade,
-and uploads the packages, checksums, build reports and qualification logs as a development artifact. It does not
+builds an older and newer development revision and checks package lifecycle including upgrade. CI uses
+`0local.<2 × run number>` and `0local.<2 × run number + 1>`, so a later workflow run has a higher package version;
+rerunning the same workflow run keeps its version numbers. After successful checks it uploads
+a user download named `linux-deb-<CPU>` or `linux-rpm-<CPU>`: the newer installer, its checksum, an `INSTALL.md`
+with exact installation commands, and a `build-info/` folder. Separate `linux-evidence-<format>-<CPU>` artifacts
+contain both revisions, build reports and qualification logs for maintainers. The workflow does not
 sign packages or publish a release. Both RPM jobs also run the HTTPS/WSS policy checks on Fedora 43 and 44.
 Downloaded packages still require the desktop qualification in step 5.
+
+`prepare_download.py` assembles the user download and verifies that the package, checksum and build report agree.
+For example, after creating a development DEB:
+
+```bash
+python3 shells/linux/release/prepare_download.py \
+  dist-dev/ubuntu24.04-x86_64/optchat_0.1.0-0local_amd64.deb \
+  --output-dir build/downloads/deb-x86_64
+```
+
+Use a new or empty output directory. Its contents can be zipped and shared together. Existing older CI archives
+contain `dist-dev/` and `build/` instead; the installation guide explains how to find the installer in those archives.
 
 Run the same TLS qualification locally after building the baseline RPM:
 

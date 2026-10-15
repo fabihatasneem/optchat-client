@@ -8,6 +8,7 @@ on:
       - .github/workflows/linux-packages.yml
       - Cargo.toml
       - Cargo.lock
+      - docs/linux-installation.md
       - rust-toolchain.toml
       - crates/**
       - shells/linux/**
@@ -60,8 +61,12 @@ jobs:
 
       - name: Build two development revisions on the native baseline
         run: |
-          shells/linux/release/container-build.sh "$PACKAGE_FORMAT"
-          shells/linux/release/container-build.sh "$PACKAGE_FORMAT" --revision 0local.1
+          previous_revision="0local.$((GITHUB_RUN_NUMBER * 2))"
+          current_revision="0local.$((GITHUB_RUN_NUMBER * 2 + 1))"
+          printf 'OPTCHAT_PREVIOUS_REVISION=%s\nOPTCHAT_CURRENT_REVISION=%s\n' \
+            "$previous_revision" "$current_revision" >> "$GITHUB_ENV"
+          shells/linux/release/container-build.sh "$PACKAGE_FORMAT" --revision "$previous_revision"
+          shells/linux/release/container-build.sh "$PACKAGE_FORMAT" --revision "$current_revision"
 
       - name: Check dependencies, upgrade, removal and reinstall
         run: |
@@ -71,26 +76,40 @@ jobs:
               architecture=amd64
               if [ "$PACKAGE_ARCHITECTURE" = aarch64 ]; then architecture=arm64; fi
               directory="dist-dev/ubuntu24.04-$PACKAGE_ARCHITECTURE"
-              previous="$directory/optchat_${version}-0local_${architecture}.deb"
-              current="$directory/optchat_${version}-0local.1_${architecture}.deb"
+              previous="$directory/optchat_${version}-${OPTCHAT_PREVIOUS_REVISION}_${architecture}.deb"
+              current="$directory/optchat_${version}-${OPTCHAT_CURRENT_REVISION}_${architecture}.deb"
               ;;
             rpm)
               directory="dist-dev/fedora43-$PACKAGE_ARCHITECTURE"
-              previous="$directory/optchat-${version}-0local.fc43.${PACKAGE_ARCHITECTURE}.rpm"
-              current="$directory/optchat-${version}-0local.1.fc43.${PACKAGE_ARCHITECTURE}.rpm"
+              previous="$directory/optchat-${version}-${OPTCHAT_PREVIOUS_REVISION}.fc43.${PACKAGE_ARCHITECTURE}.rpm"
+              current="$directory/optchat-${version}-${OPTCHAT_CURRENT_REVISION}.fc43.${PACKAGE_ARCHITECTURE}.rpm"
               ;;
           esac
           shells/linux/release/check-install.sh "$current" "$previous"
+          printf 'OPTCHAT_CURRENT_PACKAGE=%s\n' "$current" >> "$GITHUB_ENV"
 
       - name: Qualify HTTPS and WSS against Fedora crypto policies
         if: matrix.format == 'rpm'
         run: shells/linux/release/check-tls.sh
 
-      - name: Save development packages and build evidence
-        if: always()
+      - name: Prepare the user download
+        run: |
+          python3 shells/linux/release/prepare_download.py "$OPTCHAT_CURRENT_PACKAGE" \
+            --output-dir "build/downloads/$PACKAGE_FORMAT-$PACKAGE_ARCHITECTURE"
+
+      - name: Save the user download
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: linux-${{ matrix.format }}-${{ matrix.architecture }}
+          path: build/downloads/${{ matrix.format }}-${{ matrix.architecture }}/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Save build and qualification evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-evidence-${{ matrix.format }}-${{ matrix.architecture }}
           path: |
             dist-dev/ubuntu24.04-${{ matrix.architecture }}/
             dist-dev/fedora43-${{ matrix.architecture }}/
