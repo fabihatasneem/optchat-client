@@ -44,4 +44,4 @@ try {
     try { & "$fixture/tools/zed-vendor.ps1" } catch { $rejected = $true }
     if (-not $rejected -or (Get-FileHash "$zed/one.rs").Hash -ne $before) { throw 'Vendor helper did not preserve user edits.' }
     Write-Host 'PASS: vendor preparation from CRLF, idempotence and preservation of extra edits in a patched file.'
-} finally { Remove-Item -LiteralPath $scratch -Recurse -Force }
+} finally { Remove-BuildDirectory $root $scratch }

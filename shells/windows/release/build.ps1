@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('x64', 'arm64')][string]$Architecture = 'x64',
-    [ValidateSet('zip', 'msix')][string[]]$Formats = @('zip', 'msix'),
+    [ValidateSet('exe', 'zip', 'msix')][string[]]$Formats = @('exe'),
     [UInt16]$Revision = 0,
     [string]$Publisher = 'CN=OptChat Development',
     [string]$CertificateThumbprint,
@@ -21,6 +21,7 @@ if ($LicenseNotice) {
     if ((Get-Item -LiteralPath $LicenseNotice).Length -eq 0) { throw 'License notice is empty.' }
 }
 $cert = Get-SigningCertificate $CertificateThumbprint $Publisher
+if ($Release -and $cert.Subject -eq $cert.Issuer) { throw 'Production signing cannot use a self-signed certificate.' }
 if ($TimestampUrl -and $TimestampUrl -notmatch '^https://') { throw 'Use an HTTPS RFC 3161 timestamp server.' }
 $target = if ($Architecture -eq 'x64') { 'x86_64-pc-windows-msvc' } else { 'aarch64-pc-windows-msvc' }
 foreach ($name in @('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', "CARGO_TARGET_$($target.ToUpperInvariant().Replace('-', '_'))_RUSTFLAGS")) {
@@ -32,7 +33,9 @@ foreach ($tool in @('git', 'cargo', 'rustup', 'cmake', 'cl.exe', 'link.exe', 'du
 }
 $env:GPUI_FXC_PATH = Find-SdkTool 'fxc.exe'
 $makeappx = if ('msix' -in $Formats) { Find-SdkTool 'makeappx.exe' } else { $null }
+$innoCompiler = if ('exe' -in $Formats) { Find-InnoCompiler } else { $null }
 Push-Location $root
+$oldRevision = $env:OPTCHAT_WINDOWS_REVISION
 try {
     & "$root/tools/zed-vendor.ps1"
     Invoke-Native rustup @('target', 'add', $target)
@@ -42,13 +45,20 @@ try {
     $version = $package.version
     if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Use a three-part numeric workspace version for Windows packaging.' }
     $packageVersion = "$version.$Revision"
+    if (@($packageVersion.Split('.') | Where-Object { [uint64]$_ -gt 65535 }).Count) { throw 'Version components must be <= 65535.' }
+    if ($Release) { Assert-ReleaseSource $root $packageVersion }
     $output = Join-Path $root "$(if ($Release) { 'dist' } else { 'dist-dev' })/windows-$Architecture"
+    $base = "OptChat-$packageVersion-windows-$Architecture"
+    if (@(Get-ChildItem -Path "$output/$base-*" -File -ErrorAction SilentlyContinue).Count) {
+        throw "Artifacts already exist for $base. Use a new revision."
+    }
     $null = New-Item -ItemType Directory -Force $output
     $stageRoot = Join-Path $root "build/windows/$Architecture/$([guid]::NewGuid())"
     $stage = Join-Path $stageRoot 'OptChat'
     $null = New-Item -ItemType Directory -Force $stage
     # Separate targets ensure a host/Linux binary can never enter a Windows package.
     $targetDir = Join-Path $root 'target/windows'
+    $env:OPTCHAT_WINDOWS_REVISION = [string]$Revision
     Invoke-Native cargo @('build', '--locked', '--release', '-p', 'optchat-windows', '--target', $target, '--target-dir', $targetDir)
     $binary = Join-Path $targetDir "$target/release/optchat.exe"
     if ((Get-PeArchitecture $binary) -ne $Architecture) { throw 'Executable architecture does not match the requested package.' }
@@ -66,6 +76,7 @@ try {
     if ($LicenseNotice) { Copy-Item -LiteralPath $LicenseNotice -Destination "$notices/PROJECT-NOTICE.txt" }
     else { Write-Utf8 "$notices/DEVELOPMENT-ONLY.txt" "Project/dependency license review is deferred. This is a development build, not approved for public distribution.`n" }
     if ($cert) { Sign-Artifact "$stage/optchat.exe" $CertificateThumbprint $TimestampUrl }
+    if ($Release) { Assert-ProductionSignature "$stage/optchat.exe" $CertificateThumbprint }
     $commit = & git rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read source revision.' }
     $info = [ordered]@{
@@ -74,15 +85,24 @@ try {
         gpui_commit = (& git -C vendor/zed rev-parse HEAD); rustc = (& rustc --version)
         built_utc = (Get-Date).ToUniversalTime().ToString('o'); static_crt = $true
         signed = [bool]$cert; publisher = $Publisher; release = [bool]$Release
+        license_notice_supplied = [bool]$LicenseNotice
+        license_notice_sha256 = if ($LicenseNotice) { (Get-FileHash -LiteralPath $LicenseNotice -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
     }
     Write-Utf8 "$stage/build-info.json" ($info | ConvertTo-Json)
-    Copy-Item "$stageRoot/imports.txt" "$stage/imports.txt"
-    $base = "OptChat-$packageVersion-windows-$Architecture"
-    if ('zip' -in $Formats) {
-        $zip = Join-Path $output "$base-portable.zip"
+    $artifacts = @()
+    # The ZIP is an internal input unless explicitly requested as a public format.
+    if ('zip' -in $Formats -or 'exe' -in $Formats) {
+        $zipDirectory = if ('zip' -in $Formats) { $output } else { $stageRoot }
+        $zip = Join-Path $zipDirectory "$base-portable.zip"
         if (Test-Path $zip) { throw "Output exists: $zip. Move it aside or increment Revision." }
         Compress-Archive -Path $stage -DestinationPath $zip
         Write-Checksum $zip
+        if ('zip' -in $Formats) { $artifacts += $zip }
+    }
+    if ('exe' -in $Formats) {
+        & "$PSScriptRoot/build-installer.ps1" -PortablePackage $zip -Architecture $Architecture `
+            -Compiler $innoCompiler -CertificateThumbprint $CertificateThumbprint -TimestampUrl $TimestampUrl -OutputDirectory $output
+        $artifacts += Join-Path $output "$base-Setup.exe"
     }
     if ('msix' -in $Formats) {
         Copy-Item "$root/shells/windows/packaging/Assets" $stage -Recurse
@@ -92,8 +112,11 @@ try {
         if (Test-Path $msix) { throw "Output exists: $msix. Move it aside or increment Revision." }
         Invoke-Native $makeappx @('pack', '/d', $stage, '/p', $msix, '/h', 'SHA256', '/o')
         if ($cert) { Sign-Artifact $msix $CertificateThumbprint $TimestampUrl }
+        if ($Release) { Assert-ProductionSignature $msix $CertificateThumbprint }
         Write-Checksum $msix
+        $artifacts += $msix
     }
-    Copy-Item "$stage/build-info.json" "$output/$base-build-info.json"
+    $compilerVersion = if ($innoCompiler) { '6.7.3' } else { $null } # OptChat.iss checks the actual compiler version.
+    Write-ReleaseManifest -Info $info -Artifacts $artifacts -Destination "$output/$base-release.json" -CompilerVersion $compilerVersion
     Write-Host "Packages saved to $output. Native install and desktop qualification are still required."
-} finally { Pop-Location }
+} finally { $env:OPTCHAT_WINDOWS_REVISION = $oldRevision; Pop-Location }

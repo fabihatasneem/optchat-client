@@ -1,20 +1,21 @@
 # OptChat client (GPUI)
 
 OptChat's native client, written in Rust on [GPUI](https://github.com/zed-industries/zed) (Zed's UI framework). It
-runs on **Linux**, **macOS**, **iPhone** and **iPad**. Windows build files are prepared for native testing;
-Android is next. See their sections below.
+runs on **Linux**, **macOS**, **Windows**, **iPhone** and **iPad**. Android support is in development.
+
+See the [Windows installation guide](shells/windows/README.md) for installation, updates and engine setup.
+
+**License status:** The project license and dependency redistribution review are deferred. Public release
+approval remains pending; the Windows installer checked into this branch is a development-signed test build.
 
 **It's a client only.** The OptChat *engine* is a separate TypeScript service in another repo: tasks, agents,
 memory, dictation (speech-to-text) and storage all live there. The client talks to an engine over one websocket
 (`/engine/ws`), plus HTTPS for blobs and `/stt`.
 
-Fabiha: welcome! You'll start on Linux, then Windows if you have a Windows machine, then Android if you have an
-Android device. The sections marked *to be built* are yours.
-
 ## Connecting to an engine
 
-1. **Get a test engine.** Ask risha for a test engine endpoint and a test workspace. Never develop against anyone's
-   real workspaces. If you run an engine yourself, its owner page is `/engine` on that engine.
+1. **Choose an engine.** Obtain access from your OptChat engine administrator. If you run an engine yourself,
+   its administration page is `/engine` on that engine. Use a dedicated test workspace for development.
 2. **Get a client token.** On the engine's `/engine` admin page, open **Client tokens** and create one scoped to your
    test workspace. It looks like `oc1.<header>.<secret>`; the header carries the engine's addresses.
 3. **Add the engine.** In the app, open **Workspaces → Add engine** and paste the token (phones can scan it as a QR
@@ -33,7 +34,7 @@ crates/ui         every view, the phone layout, kit components (input, menus, bu
 shells/mac        the macOS app: entry point, platform.rs, packaging, release/bundle.sh, tools/
 shells/ios        the iOS app crate (app/), the Xcode wrapper (OptChat.xcodeproj), release/ (TestFlight)
 shells/linux      the Linux app: Wayland/X11 entry point, Secret Service tokens, local demo
-shells/windows    Windows shell + MSIX/ZIP build files (native testing pending)
+shells/windows    Windows shell, EXE installer, portable ZIP and MSIX packaging
 shells/android    README only, until someone builds it
 vendor/zed        git submodule: zed-industries/zed (GPUI), pinned; our patches come from patches/zed
 patches/zed       our GPUI patches, applied to vendor/zed by tools/zed-vendor.sh
@@ -76,7 +77,7 @@ tools/zed-vendor.sh          # applies our GPUI patches (the build scripts also 
   - `git status` ignores the patched files inside `vendor/zed` (`ignore = dirty`).
   - After a pull that moves the pin, run `git submodule update vendor/zed && tools/zed-vendor.sh`.
 
-## Prerequisites (all platforms)
+## Source-build prerequisites (developers, all platforms)
 
 - **Rust:** rustup. The toolchain (1.98.1) comes from `rust-toolchain.toml` automatically.
 - **Deno 2.x:** for the tests and the fake engine.
@@ -165,11 +166,12 @@ now require GLIBC 2.39; their extracted applications pass the fake-engine smoke 
 Wayland and XWayland backends. See the release guide for the remaining qualification and metadata requirements.
 Clean-desktop qualification, real-engine checks and production metadata/signing/hosting remain release requirements.
 
-### Windows (build files ready; native testing pending)
+### Windows
 
-The native shell in `shells/windows` uses DirectX/DirectWrite, Credential Manager for tokens and
-`%APPDATA%\OptChat` for settings. Build on Windows with PowerShell 7.4+, Rust, MSVC, the Windows SDK
-and CMake. Both x64 and ARM64 are targeted; 32-bit Windows is outside the release scope.
+To install a prebuilt app, follow the [Windows installation guide](shells/windows/README.md).
+The native shell uses DirectX/DirectWrite, Credential Manager for tokens and `%APPDATA%\OptChat` for settings.
+The following commands are for developers with PowerShell 7.4+, Rust, MSVC, the Windows SDK and CMake.
+Both x64 and ARM64 are targeted; 32-bit Windows is outside the release scope.
 
 ```powershell
 # From the matching Visual Studio developer PowerShell, with PowerShell 7.4+:
@@ -178,11 +180,11 @@ and CMake. Both x64 and ARM64 are targeted; 32-bit Windows is outside the releas
 ./shells/windows/release/build.ps1 -Architecture arm64
 ```
 
-Each build produces a portable ZIP and an unsigned MSIX under `dist-dev/windows-<architecture>/`, plus
-SHA256 sidecars and build metadata. Installable MSIX packages require signing and certificate trust.
-An optional MSIX bundle combines both architectures. See the [Windows guide](shells/windows/README.md)
-for the verified vendor-package comparison, toolchain setup, test signing, installation and qualification steps.
-No native Windows build, install or GUI qualification has been performed on this Linux host.
+Each build produces an EXE installer under `dist-dev/windows-<architecture>/`, plus a SHA256 sidecar and a
+generated release manifest. Inno Setup 6.7.3 is required for packaging. Use `-Formats exe,zip,msix` to also build
+the optional portable ZIP and MSIX. Installable MSIX packages require signing and certificate trust. An optional MSIX bundle
+combines both architectures. See [the maintainer guide](shells/windows/BUILDING.md) for packaging and signing,
+and [the qualification record](shells/windows/release/QUALIFICATION.md) for release validation.
 
 ### Android (to be built, if you have an Android device; research first)
 
@@ -256,7 +258,8 @@ the trait, and the token test store's unix file mode is `cfg(unix)`. Still open:
 - The desktop shell uses our iOS PR branch pin, not zed main; keep running the Linux smoke suite when changing it.
 
 **Windows:**
-- Native build and package files are ready; actual MSVC builds and Windows desktop checks remain.
+- Native x64 build, MSIX installation and fake-engine smoke checks passed on one Windows machine.
+- EXE installation, upgrade and removal are tested on x64. Clean-machine, real-engine and ARM64 checks remain.
 - Bundled fonts through DirectWrite, GPU drivers, clipboard, IME, file dialogs and microphone need native checks.
 - MSIX signing and certificate trust are required for installation. Public distribution needs production signing
   and the deferred project/dependency notice review.

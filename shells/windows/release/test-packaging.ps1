@@ -48,7 +48,8 @@ try {
         [IO.Compression.ZipFile]::CreateFromDirectory($app, $msix)
         Write-Checksum $msix
         & "$PSScriptRoot/check-package.ps1" -Package $msix -Architecture $arch
-        Remove-Item "$app/AppxManifest.xml", "$app/Assets" -Recurse -Force
+        Remove-Item -LiteralPath "$app/AppxManifest.xml"
+        Remove-BuildDirectory $root "$app/Assets"
         [IO.File]::AppendAllText($zip, 'corruption')
         Expect-Failure { & "$PSScriptRoot/check-package.ps1" -Package $zip -Architecture $arch }
     }
@@ -57,5 +58,34 @@ try {
     Expect-Failure { Write-PackageManifest "$root/shells/windows/packaging/AppxManifest.xml.in" "$scratch/bad.xml" 'x86' '0.1.0.0' 'CN=Test' }
     Expect-Failure { Write-PackageManifest "$root/shells/windows/packaging/AppxManifest.xml.in" "$scratch/bad.xml" 'x64' '0.1.0-beta' 'CN=Test' }
     Expect-Failure { Write-PackageManifest "$root/shells/windows/packaging/AppxManifest.xml.in" "$scratch/bad.xml" 'x64' '0.1.0.65536' 'CN=Test' }
+    $manifestPath = Join-Path $scratch 'release.json'
+    Write-ReleaseManifest -Info @{version='0.1.0.42'; release=$false; source_dirty=$true} `
+        -Artifacts @("$scratch/x64.zip", "$scratch/arm64.zip") -Destination $manifestPath -CompilerVersion 'fixture'
+    $release = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($release.schema_version -ne 1 -or $release.artifacts.Count -ne 2 -or -not $release.build.source_dirty) {
+        throw 'Release manifest lost artifact or source information.'
+    }
+    foreach ($artifact in $release.artifacts) {
+        $file = Get-Item -LiteralPath (Join-Path $scratch $artifact.file)
+        if ($artifact.bytes -ne $file.Length -or $artifact.sha256 -cne (Get-FileHash $file.FullName).Hash.ToLowerInvariant()) {
+            throw 'Release manifest did not hash the actual output bytes.'
+        }
+    }
+    $source = Join-Path $scratch 'source'
+    $null = New-Item -ItemType Directory $source
+    Invoke-Native git @('init', '--quiet', $source)
+    Write-Utf8 "$source/source.txt" 'fixture'
+    Invoke-Native git @('-C', $source, 'add', 'source.txt')
+    Invoke-Native git @('-C', $source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'fixture')
+    Expect-Failure { Assert-ReleaseSource $source '0.1.0.42' }
+    Invoke-Native git @('-C', $source, 'tag', 'windows-v0.1.0.42')
+    Assert-ReleaseSource $source '0.1.0.42'
+    Write-Utf8 "$source/untracked.txt" 'must not release'
+    Expect-Failure { Assert-ReleaseSource $source '0.1.0.42' }
+    Remove-Item -LiteralPath "$source/untracked.txt"
+    Write-Utf8 "$source/source.txt" 'modified'
+    Expect-Failure { Assert-ReleaseSource $source '0.1.0.42' }
+    Expect-Failure { Remove-BuildDirectory $root $root }
+    Write-Host 'PASS: generated artifact hashes, release tag/clean-source guards and cleanup boundary.'
     Write-Host 'PASS: PowerShell parsing, both architecture layouts, manifest escaping/minimum OS, wrong-architecture and corruption rejection.'
-} finally { Remove-Item -LiteralPath $scratch -Recurse -Force }
+} finally { Remove-BuildDirectory $root $scratch }

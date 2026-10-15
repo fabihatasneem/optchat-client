@@ -1,49 +1,72 @@
-# Windows qualification record
+# Windows release qualification
 
-Prepared on Linux on 2026-10-15. Windows packages and native behavior have **not** been qualified yet.
-Record source commit/dirty state, artifact SHA256, version, signing thumbprint, CPU, Windows edition/build,
-GPU/driver and results for each candidate. Synthetic test packages are never distributable applications.
+Updated 2026-10-15. **Production approval is pending.**
 
-## Intended matrix
+## Current candidate
 
-- Windows 10 22H2 x64 (build 19045): native x64 ZIP and signed MSIX.
-- Current Windows 11 x64: native x64 ZIP, signed MSIX, bundle selection.
-- Windows 11 ARM64: native ARM64 ZIP, signed MSIX, bundle selection.
-- Windows 11 ARM64 with x64 emulation: optional fallback checks, not a substitute for ARM64.
-- Standard user and managed deployment where offered. Server, S mode and 32-bit are excluded initially.
+- Installer: `releases/windows/x64/OptChat-0.1.0.4-windows-x64-Setup.exe` (8,077,536 bytes).
+- SHA256: `c495c2fd1372093e7df68b44a30e36aee156a4f8c36c06005eb99c88965e6f0f`.
+- Source: `ae0c06b9f2f7988974cc5b9ba6e3328af6fa3823` plus uncommitted packaging/UI changes.
+- Generated provenance: `releases/windows/x64/OptChat-0.1.0.4-windows-x64-release.json`.
+- Signing: `CN=OptChat Development`, thumbprint `BBF7C8723A53DA06B05C7B1E1D9F9A276AACA68A`, no timestamp.
+  Verification passes with local development trust; this is not public publisher signing.
+- Build: Rust 1.98.1, VS Build Tools 17.14.41, Windows SDK 10.0.26100, Inno Setup 6.7.3.
+- Machine: Windows 11 Pro 10.0.26200 (26200.9457), x64, AMD Radeon Graphics driver 31.0.21923.13006.
 
-## Ordered native checks
+## Completed checks
 
-1. Build with the documented native MSVC/SDK tools. Record Rust, VS, SDK and source revisions. Confirm MakeAppx
-   schema validation, correct PE machine, DLL imports, icon/version resources and clean-machine runtime completeness.
-2. Run `test-packaging.ps1`, native shell tests and `check-package.ps1 -RequireSignature` on the signed candidate.
-3. Install for a standard user. Confirm Start entry/icon, window, taskbar, last-window exit and relaunch.
-4. Connect to a fake engine for controlled UI checks, then a real engine. Test HTTPS/WSS, certificate/hostname
-   rejection, engine additions, workspace switching, reconnect and token restoration.
-5. Confirm tokens use Credential Manager and never prefs. Check settings/tokens after relaunch and logout/reboot,
-   using isolated entries. Long engine/workspace keys and Unicode secrets must round-trip.
-6. Check Ctrl shortcuts, Unicode/multiline input, IME, clipboard text/images, file dialogs/attachments, fonts,
-   scrolling/large history, multiple monitors and DPI (100/150/200%).
-7. Check actual WASAPI microphone capture/stop, privacy enabled/denied and no input device. No camera/QR scanner
-   is implemented in this shell.
-8. Upgrade using a higher version and the same identity/publisher. Verify settings/tokens and in-use app behavior.
-   Check bundle selection: ARM64 on ARM hardware, x64 on Intel/AMD.
-9. Remove MSIX. Confirm registration/shortcuts disappear while `%APPDATA%\OptChat` and test credentials remain.
-   Reinstall and verify restoration. Clean up only isolated test settings/credentials.
-10. Verify intended managed policies, corporate trust roots, proxy/network, Defender/SmartScreen, production
-    signing, redistribution notices and hosting before public distribution.
+| Check | Evidence |
+| --- | --- |
+| Native release build | 0.1.0.3 and 0.1.0.4 built with static CRT and checked DLL imports. |
+| Native shell tests | 2 passed: settings-path isolation and Credential Manager Unicode round-trip/deletion/limits. |
+| Per-user installation | 0.1.0.3 installed in a fresh test directory with Start shortcut and uninstall registration. |
+| Upgrade | 0.1.0.3 to 0.1.0.4; resource/package versions agree, preferences retained. |
+| Payload cleanup | Upgrade removed obsolete imports.txt and INSTALL.txt. |
+| Downgrade | 0.1.0.3 rejected over 0.1.0.4 without changing the installed version. |
+| Repair | Same-version reinstall passed and retained the settings canary. |
+| Signatures | Setup, installed application and uninstaller verified with the local development certificate. |
+| Installed app smoke | All 36 checks in tests/windows.ts passed from the installed location. |
+| Uninstall | App, shortcut and registration removed; settings canary retained, then cleaned up by the test. |
+| Packaging fixtures | Both PE architectures, layouts, manifest escaping/OS minimums, checksum corruption and wrong-architecture rejection. |
+| Release guards | Dirty/untracked source and absent release tags rejected; generated hashes match actual output bytes. |
+| Vendor preparation | CRLF source, idempotence and preservation of additional edits passed. |
+| Workflow validation | actionlint 1.7.12, YAML parsing and embedded PowerShell syntax passed. |
 
-## Evidence
+Logs: `build/windows/recommendation-build.log`, `build/windows/recommendation-lifecycle.log`, and
+`build/windows/installer-test-05023dc1-b484-4dc6-8021-8dba329aac17/`. These are local ignored evidence.
+The isolated installer test did not replace the existing MSIX installation.
 
-- Linux checks passed on 2026-10-15: PowerShell 7.6.7 parsed the scripts and exercised both architecture layouts,
-  XML escaping/minimum OS, checksum corruption and architecture mismatch rejection. Disposable Git fixtures
-  passed preparation from CRLF, idempotence and preservation of extra edits in a patched file. The real pinned
-  vendor checkout also passed the PowerShell preparation helper's idempotence check.
-- Rust formatting, locked workspace metadata, `optchat-proto` checking, workflow actionlint and PNG/ICO checks
-  passed. The actual Windows platform module and its tests type-checked for both Windows MSVC targets in an
-  isolated harness using the real shared Platform trait and placeholder GPUI App/Window types. This verifies
-  the Windows API bindings, not the full GPUI application or native linking.
-- Native MSVC/MakeAppx build: pending.
-- Native install/upgrade/removal: pending.
-- Clean desktop, real engine and ARM64 hardware: pending.
-- Production certificate, notice and hosting: pending.
+The smoke suite exercises app handlers/GPUI dispatch with a fake engine: first-run token setup, two workspaces
+over one socket, rendering probes, Unicode/multiline input, Ctrl shortcuts, notices, reconnect, exit and relaunch.
+It uses temporary file-backed test tokens. It does not establish native mouse, clipboard, IME, visual, microphone,
+real-engine or credential persistence across upgrades. The Download updates button has not been visually qualified.
+
+Earlier 0.1.0.1/0.1.0.2 x64 ZIP/MSIX builds passed MakeAppx validation, inspection and development-signature
+checks; 0.1.0.1 MSIX activated successfully. This does not qualify the current optional MSIX output or migration
+between installation formats. The superseded checked-in 0.1.0.2 files are retained locally under
+`build/windows/superseded-0.1.0.2/`.
+
+## Required before publishing
+
+- [ ] Commit and tag the exact source, then build the production candidate in CI.
+- [ ] Configure the protected release environment and native signing runners; run the changed workflow.
+- [ ] Provide trusted organization signing with RFC 3161 timestamps for the app, setup and uninstaller.
+- [ ] Supply approved project and dependency notices. Review is deferred at the owner's request.
+- [ ] Test clean Windows 10 22H2 x64, current Windows 11 x64 and Windows 11 ARM64 standard-user profiles.
+- [ ] Verify startup without developer tools, Start/taskbar icons, shortcuts, last-window exit and relaunch.
+- [ ] Test upgrade from the previous public version with its saved data, an in-use upgrade, uninstall/reinstall,
+  and Credential Manager retention using isolated credentials. CI's lower-version fixture uses the same source
+  as the candidate; it tests installation mechanics, not historical data migrations.
+- [ ] Exercise a real engine, HTTPS/WSS, invalid certificates/hostnames, proxies, corporate trust, token
+  restoration, reconnection and workspace switching.
+- [ ] Inspect fonts/icons, scrolling, large histories, multiple monitors and 100/150/200% DPI. Test native input,
+  IME, clipboard text/images, attachments, dialogs and microphone capture/stop/permission denial.
+- [ ] Verify Defender/SmartScreen behavior with the actual publisher signature and download URL.
+- [ ] Review release notes and hashes, publish the approved draft, and verify download/manual update links.
+
+Setup.exe is the initial public format. ZIP/MSIX/bundles are opt-in and need separate qualification before being
+offered. Qualify managed deployment and MSIX-to-EXE migration separately. Server, S mode and 32-bit Windows are
+outside initial support. Updates are manual; App settings opens release downloads.
+
+See [BUILDING.md](../BUILDING.md) for release configuration. Local checks do not replace the outstanding
+platform qualification and release approval.

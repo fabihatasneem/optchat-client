@@ -12,6 +12,22 @@ function Assert-Windows {
     if (-not $IsWindows) { throw 'Build, package and sign on Windows with MSVC and the Windows SDK.' }
 }
 
+function Find-InnoCompiler {
+    param([string]$Path)
+    if ($Path) {
+        return (Resolve-Path -LiteralPath $Path).Path
+    }
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, "$env:LOCALAPPDATA/Programs")) {
+        foreach ($version in @('7', '6')) {
+            $candidate = Join-Path $base "Inno Setup $version/ISCC.exe"
+            if (Test-Path $candidate) { return $candidate }
+        }
+    }
+    throw 'Inno Setup 6.7.3 is required on the packaging machine. Install it from jrsoftware.org or pass -Compiler to build-installer.ps1.'
+}
+
 function Find-SdkTool {
     param([Parameter(Mandatory)][string]$Name)
     $command = Get-Command $Name -ErrorAction SilentlyContinue
@@ -78,7 +94,7 @@ function Get-SigningCertificate {
         throw 'Signing certificate must be current and have an accessible private key.'
     }
     if ($cert.Subject -cne $Publisher) { throw 'Certificate subject must exactly match the MSIX Publisher.' }
-    if ('1.3.6.1.5.5.7.3.3' -notin @($cert.EnhancedKeyUsageList.ObjectId.Value)) {
+    if ('1.3.6.1.5.5.7.3.3' -notin @($cert.EnhancedKeyUsageList | ForEach-Object { $_.ObjectId })) {
         throw 'Signing certificate must have the Code Signing EKU.'
     }
     return $cert
@@ -100,4 +116,71 @@ function Write-Checksum {
     param([string]$Path)
     $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
     Write-Utf8 "$Path.sha256" "$hash  $([System.IO.Path]::GetFileName($Path))`n"
+}
+
+function Remove-BuildDirectory {
+    param([string]$Root, [string]$Path)
+    $parent = [IO.Path]::GetFullPath((Join-Path $Root 'build/windows')) + [IO.Path]::DirectorySeparatorChar
+    $absolute = [IO.Path]::GetFullPath($Path)
+    if (-not $absolute.StartsWith($parent, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Refusing to remove a directory outside build/windows.'
+    }
+    if (Test-Path -LiteralPath $absolute) { Remove-Item -LiteralPath $absolute -Recurse -Force }
+}
+
+function Assert-ReleaseSource {
+    param([string]$Root, [string]$Version)
+    $status = @(& git -C $Root status --porcelain --untracked-files=normal)
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the source checkout.' }
+    if ($status.Count) { throw 'Release builds require a clean source checkout. Commit source changes first.' }
+    if (Test-Path -LiteralPath "$Root/vendor/zed/.git") {
+        $untracked = @(& git -C "$Root/vendor/zed" ls-files --others --exclude-standard)
+        if ($LASTEXITCODE -ne 0 -or $untracked.Count) { throw 'Release vendor checkout contains untracked source files.' }
+    }
+    $tags = @(& git -C $Root tag --points-at HEAD)
+    if ($LASTEXITCODE -ne 0 -or "windows-v$Version" -cnotin $tags) {
+        throw "Release builds require tag windows-v$Version at HEAD."
+    }
+}
+
+function Assert-ProductionSignature {
+    param([string]$Path, [string]$Thumbprint)
+    Invoke-Native (Find-SdkTool 'signtool.exe') @('verify', '/pa', '/all', $Path)
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or
+        $signature.SignerCertificate.Thumbprint -ne $Thumbprint -or
+        $signature.SignerCertificate.Subject -eq $signature.SignerCertificate.Issuer -or
+        -not $signature.TimeStamperCertificate) {
+        throw "A trusted, timestamped publisher signature is required: $Path"
+    }
+}
+
+function Write-ReleaseManifest {
+    param([object]$Info, [string[]]$Artifacts, [string]$Destination, [string]$CompilerVersion)
+    $entries = @($Artifacts | Sort-Object | ForEach-Object {
+        $file = Get-Item -LiteralPath $_
+        $signature = if ($IsWindows -and $file.Extension -in @('.exe', '.msix')) {
+            Get-AuthenticodeSignature -LiteralPath $file.FullName
+        } else { $null }
+        [ordered]@{
+            file = $file.Name
+            bytes = $file.Length
+            sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            signature = if ($signature) {
+                [ordered]@{
+                    status = [string]$signature.Status
+                    publisher = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { $null }
+                    thumbprint = if ($signature.SignerCertificate) { $signature.SignerCertificate.Thumbprint } else { $null }
+                    timestamped = [bool]$signature.TimeStamperCertificate
+                }
+            } else { $null }
+        }
+    })
+    $manifest = [ordered]@{
+        schema_version = 1
+        build = $Info
+        packaging = @{ inno_setup_version = $CompilerVersion }
+        artifacts = $entries
+    }
+    Write-Utf8 $Destination (($manifest | ConvertTo-Json -Depth 10) + "`n")
 }

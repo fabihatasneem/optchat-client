@@ -40,4 +40,4 @@ try {
     }
     Write-Host "PASS: checksum, $Architecture PE, metadata, notices and package layout."
     if (-not $RequireSignature) { Write-Host 'Signature trust was not checked. Native install and desktop qualification remain.' }
-} finally { Remove-Item -LiteralPath $unpack -Recurse -Force }
+} finally { Remove-BuildDirectory $root $unpack }
