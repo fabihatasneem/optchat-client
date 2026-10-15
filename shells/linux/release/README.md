@@ -8,6 +8,12 @@ The agreed minimum build system is **Ubuntu 24.04**. Build a DEB there and quali
 Ubuntu 26.04 and Debian 13. Build the RPM separately on **Fedora 43** and qualify it on Fedora 43 and Fedora 44.
 Both x86_64 and ARM64 are in scope. Flatpak is outside this release's scope.
 
+The [Linux preview release](https://github.com/fabihatasneem/optchat-client/releases/tag/linux-v0.1.0-preview.7)
+provides direct DEB/RPM downloads for both architectures, with SHA256 sidecars and a release provenance manifest.
+Its packages are the verified `0local.7` outputs of [CI run 38689085276](https://github.com/fabihatasneem/optchat-client/actions/runs/38689085276),
+built from source commit `78d8c1d1fef864b4e760b95fe4963b75afef659d`. They are unsigned development previews;
+manual Linux desktop testing remains pending. The release tag identifies the package source commit.
+
 Native DEB/RPM packages with signed package-manager repositories follow the current
 [OpenAI Linux distribution model](https://learn.chatgpt.com/docs/linux/linux-app). ARM64 uses a native ARM64 builder:
 an x86_64 host with Podman does not become an ARM64 builder. GitHub provides

@@ -11,13 +11,20 @@ memory, dictation (speech-to-text) and storage all live there. The client talks 
 
 ## Install on Linux
 
-Start with the **[Linux installation guide](docs/linux-installation.md)**. It explains how to choose a DEB or RPM,
-download it, check the file, install it and connect to your engine. Installing a prebuilt package does not require
-Rust, Deno, Podman or a source checkout.
+Download the package for your system:
 
-Linux downloads are currently **development previews**, available from
-[Linux development packages in GitHub Actions](https://github.com/fabihatasneem/optchat-client/actions/workflows/linux-packages.yml).
-A stable Linux release and public APT/DNF update repositories have not been published yet.
+| Linux distribution | Intel / AMD 64-bit | ARM64 |
+|---|---|---|
+| Ubuntu 24.04/26.04, Debian 13 | [Download .deb](https://github.com/fabihatasneem/optchat-client/releases/download/linux-v0.1.0-preview.7/optchat_0.1.0-0local.7_amd64.deb) | [Download .deb](https://github.com/fabihatasneem/optchat-client/releases/download/linux-v0.1.0-preview.7/optchat_0.1.0-0local.7_arm64.deb) |
+| Fedora 43/44 | [Download .rpm](https://github.com/fabihatasneem/optchat-client/releases/download/linux-v0.1.0-preview.7/optchat-0.1.0-0local.7.fc43.x86_64.rpm) | [Download .rpm](https://github.com/fabihatasneem/optchat-client/releases/download/linux-v0.1.0-preview.7/optchat-0.1.0-0local.7.fc43.aarch64.rpm) |
+
+See the **[Linux installation guide](docs/linux-installation.md)** for installation and engine setup.
+[Release notes and checksums](https://github.com/fabihatasneem/optchat-client/releases/tag/linux-v0.1.0-preview.7)
+are available on GitHub Releases.
+
+**Release status:** These unsigned development previews have passed automated package lifecycle checks.
+Manual desktop and real-engine qualification are pending. Stable releases and public APT/DNF update
+repositories have not been published yet. Project license and dependency redistribution review are deferred.
 
 Developers can use the [Linux source/build guide](shells/linux/README.md). Maintainers preparing packages and
 releases should use the [Linux release guide](shells/linux/release/README.md).
