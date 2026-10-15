@@ -117,6 +117,16 @@ cargo run -p optchat-mac                  # debug run
 shells/mac/release/bundle.sh              # dist-dev/OptChat Dev.app (com.reframe.optchat.gpui.dev, ad hoc signed)
 ```
 
+- **Dev builds share state with an installed OptChat.** Both use the prefs dir
+  `~/Library/Application Support/com.reframe.optchat.gpui` and the Keychain service `com.reframe.optchat.gpui`, so a
+  dev run can change an installed app's engines and tokens. To keep them apart, point the dev build at temp dirs
+  (the token store becomes a 0600 file there instead of the Keychain):
+  ```bash
+  mkdir -p /tmp/oc-dev/prefs /tmp/oc-dev/tokens
+  OPTCHAT_PREFS_DIR=/tmp/oc-dev/prefs OPTCHAT_TOKEN_DIR=/tmp/oc-dev/tokens cargo run -p optchat-mac
+  OPTCHAT_PREFS_DIR=/tmp/oc-dev/prefs OPTCHAT_TOKEN_DIR=/tmp/oc-dev/tokens \
+    "dist-dev/OptChat Dev.app/Contents/MacOS/OptChat"
+  ```
 - `SHIP=1 shells/mac/release/bundle.sh` replaces `dist/OptChat.app`. Only run it for a finished, verified build.
 - Notarization isn't set up yet. More in `shells/mac/README.md`.
 
@@ -128,6 +138,28 @@ You need Xcode and `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`.
 shells/ios/app/build.sh                   # simulator build of the Rust binary (no bundle)
 open shells/ios/OptChat.xcodeproj         # Run: a script phase builds the crate, Xcode bundles and signs
 ```
+
+To build and run on a simulator without Xcode's UI:
+
+```bash
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+xcodebuild -project shells/ios/OptChat.xcodeproj -scheme OptChat -configuration Debug \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath target/xcode build
+xcrun simctl boot "<your sim name or UDID>"       # see: xcrun simctl list devices
+xcrun simctl install booted target/xcode/Build/Products/Debug-iphonesimulator/OptChat.app
+xcrun simctl launch booted com.reframe.optchat
+```
+
+- Use your own simulator (`xcrun simctl create ...`) so you don't overwrite someone else's install.
+- The first launch shows an empty app. That is normal until you add an engine.
+- **Pointing the sim at a local engine:** the simulator shares the Mac's network, so a local engine is reachable at
+  `localhost`. Create a client token for a test workspace on the engine's `/engine` page, then either paste it in
+  **Workspaces → Add engine**, or seed it at launch (Debug builds; test tokens only):
+  ```bash
+  SIMCTL_CHILD_OPTCHAT_RESET=1 SIMCTL_CHILD_OPTCHAT_SEED_OC1="$(printf %s "$OC1_TOKEN" | base64)" \
+    xcrun simctl launch booted com.reframe.optchat
+  ```
+  Other hooks are listed in `shells/ios/README.md`.
 
 For a device, copy `shells/ios/Config/Signing.local.xcconfig.example` to `Signing.local.xcconfig` (it's git-ignored)
 and set your team. More in `shells/ios/README.md`.
@@ -247,6 +279,10 @@ OPTCHAT_E2E_HEADLESS=1 deno run -A tests/localtoken.ts  # the local engine's own
 OPTCHAT_E2E_HEADLESS=1 deno run -A tests/phone.ts       # phone layout, gestures, fake dictation
 OPTCHAT_E2E_HEADLESS=1 deno run -A tests/perf-fake.ts   # a 1,770-entry chat: frame times, memory
 ```
+
+Each suite runs on its own and exits 0 when it passes (run from the repo root, with deno 2.x). Together they take a
+few minutes; the harness sets its own temp prefs and token dirs, so it never touches an installed app. If the
+bundle is stale after a pull, rebuild it first.
 
 You can also run the fake engine by itself: `deno run -A tests/lib/fake-engine.ts 18790 alpha beta`.
 
