@@ -8,7 +8,6 @@ on:
       - .github/workflows/linux-packages.yml
       - Cargo.toml
       - Cargo.lock
-      - docs/linux-installation.md
       - rust-toolchain.toml
       - crates/**
       - shells/linux/**
@@ -85,12 +84,12 @@ jobs:
               current="$directory/optchat-${version}-${OPTCHAT_CURRENT_REVISION}.fc43.${PACKAGE_ARCHITECTURE}.rpm"
               ;;
           esac
-          shells/linux/release/check-install.sh "$current" "$previous"
+          shells/linux/tests/check-install.sh "$current" "$previous"
           printf 'OPTCHAT_CURRENT_PACKAGE=%s\n' "$current" >> "$GITHUB_ENV"
 
       - name: Qualify HTTPS and WSS against Fedora crypto policies
         if: matrix.format == 'rpm'
-        run: shells/linux/release/check-tls.sh
+        run: shells/linux/tests/check-tls.sh
 
       - name: Prepare the user download
         run: |

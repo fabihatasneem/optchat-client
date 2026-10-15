@@ -46,7 +46,7 @@ def main():
         desktop = ROOT / "shells/linux/packaging/com.reframe.optchat.gpui.desktop"
         subprocess.run(["desktop-file-validate", str(desktop)], check=True)
         shutil.copyfile(desktop, package / "usr/share/applications" / desktop.name)
-        icon = ROOT / "shells/linux/packaging/com.reframe.optchat.gpui.png"
+        icon = ROOT / "shells/linux/packaging/assets/com.reframe.optchat.gpui.png"
         shutil.copyfile(icon, package / "usr/share/icons/hicolor/512x512/apps" / icon.name)
         copy_notices(package / "usr/share/doc/optchat/font-licenses")
         copy_manual(package / "usr/share/man/man1", version, compressed=True)

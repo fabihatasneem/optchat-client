@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Run the existing fake-engine suite against an extracted DEB/RPM on a real desktop.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 if [ "$#" = 0 ] || [ "${1:-}" = --help ]; then
-  echo "Usage: shells/linux/test-native-package.sh /path/to/optchat.deb|optchat.rpm"
+  echo "Usage: shells/linux/tests/test-native-package.sh /path/to/optchat.deb|optchat.rpm"
   echo "Verify checksum, extract to a temporary directory, and test available desktop backends."
   echo "This does not install the package or test the production Secret Service/real engine."
   exit 0

@@ -49,7 +49,7 @@ def prepare(package, output):
     system = "Ubuntu 24.04/26.04 or Debian 13" if package_format == "deb" else "Fedora 43/44"
     install = "sudo apt update\n" if package_format == "deb" else ""
     install += f"sudo {'apt' if package_format == 'deb' else 'dnf'} install {shlex.quote('./' + package.name)}"
-    guide = (ROOT / "docs/linux-installation.md").read_text()
+    guide = (ROOT / "shells/linux/README.md").read_text()
     guide = "\n".join("#" + line if line.startswith("#") else line for line in guide.splitlines()) + "\n"
     (output / "INSTALL.md").write_text(
         "# Install this OptChat download\n\n"

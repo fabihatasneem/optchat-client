@@ -47,7 +47,7 @@ Shared bindings use GPUI's `secondary-` modifier (Command on macOS, Ctrl elsewhe
 live in the shell. `shells/linux/release/bundle.sh --check` builds an AppImage and verifies the packaged executable
 before moving it to `dist-dev/` alongside its checksum and build information. Packaging tools and the AppImage
 runtime are pinned and verified by size/SHA256. The current package is tested on Ubuntu 26.04 x86_64 and references
-GLIBC 2.43. `shells/linux/test-package.sh` passes on Wayland and the X11 backend through XWayland; compatibility
+GLIBC 2.43. `shells/linux/tests/test-package.sh` passes on Wayland and the X11 backend through XWayland; compatibility
 with other distributions/older releases and standalone Xorg desktops is not yet verified. Camera scanning and the
 full mouse-driven UI suite remain future work. Flatpak is outside the chosen release scope.
 
@@ -81,4 +81,4 @@ Real-engine access is deferred by the owner. These results do not establish cust
 
 Final license/notice metadata, clean-desktop and real-engine qualification, production keys and HTTPS hosting must
 be complete before a stable release. Flatpak is excluded from the chosen scope.
-See `shells/linux/release/README.md` and `release/QUALIFICATION.md` for the ordered workflow and sign-off record.
+See `shells/linux/BUILDING.md` and `release/QUALIFICATION.md` for the ordered workflow and sign-off record.

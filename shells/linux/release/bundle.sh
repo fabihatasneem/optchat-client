@@ -71,7 +71,7 @@ build/appimage-tools/linuxdeploy-x86_64.AppImage \
   --appdir "$APPDIR" \
   --executable "$BINARY" \
   --desktop-file shells/linux/packaging/com.reframe.optchat.gpui.desktop \
-  --icon-file shells/linux/packaging/com.reframe.optchat.gpui.png \
+  --icon-file shells/linux/packaging/assets/com.reframe.optchat.gpui.png \
   --library "$(pkg-config --variable=libdir fontconfig)/libfontconfig.so.1" \
   --library "$(pkg-config --variable=libdir freetype2)/libfreetype.so.6" \
   --output appimage

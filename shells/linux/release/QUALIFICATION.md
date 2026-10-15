@@ -60,7 +60,7 @@ Notes, limitations, failure links and log paths: ______
 
 There is no genuine previous production version yet. Record that explicitly. Test the upgrade mechanism with two
 development revisions built from the baseline: `--revision 0local`, then `--revision 0local.1`.
-Pass the newer package first and older package second to `check-install.sh`. A private test repository can use
+Pass the newer package first and older package second to `shells/linux/tests/check-install.sh`. A private test repository can use
 `--allow-development` to rehearse managed updates. Production repositories reject these development revisions.
 This exercises the package manager without inventing evidence of upgrading an earlier customer release.
 

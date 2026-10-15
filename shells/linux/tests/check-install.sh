@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 if [ "$#" = 0 ] || [ "${1:-}" = --help ]; then
-  echo "Usage: shells/linux/release/check-install.sh PACKAGE.deb|PACKAGE.rpm [PREVIOUS_PACKAGE]"
+  echo "Usage: shells/linux/tests/check-install.sh PACKAGE.deb|PACKAGE.rpm [PREVIOUS_PACKAGE]"
   echo "DEB: Ubuntu 24.04, Ubuntu 26.04, Debian 13. RPM: Fedora 43, Fedora 44."
   echo "Checks native architecture, checksums, dependencies, install/remove/reinstall and upgrade if provided."
   echo "Desktop, microphone and Secret Service tests still require real desktop VMs/hardware."
@@ -31,7 +31,7 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$ROOT/build/qualification"
 LOGDIR="$(mktemp -d "$ROOT/build/qualification/$STAMP-$FORMAT-$ARCH.XXXXXXXX")"
 CHECK_SCRIPT="$LOGDIR/install-check-container.sh"
-cp -- "$ROOT/shells/linux/release/install-check-container.sh" "$CHECK_SCRIPT"
+cp -- "$ROOT/shells/linux/tests/install-check-container.sh" "$CHECK_SCRIPT"
 ORIGINAL_PACKAGE="$PACKAGE"
 ORIGINAL_PREVIOUS="$PREVIOUS"
 snapshot_package() {

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Verify an existing AppImage using isolated fake engines and an empty app working directory.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 if [ "${1:-}" = --help ]; then
-  echo "Usage: shells/linux/test-package.sh [/absolute/path/to/OptChat.AppImage]"
+  echo "Usage: shells/linux/tests/test-package.sh [/absolute/path/to/OptChat.AppImage]"
   echo "Check checksum, normal launch, extract-and-run, and the available X11 backend."
   exit 0
 fi

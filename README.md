@@ -18,7 +18,7 @@ Download the package for your system:
 | Ubuntu 24.04/26.04, Debian 13 | [Download .deb](https://github.com/fabihatasneem/optchat-client/releases/download/linux-v0.1.0-preview.7/optchat_0.1.0-0local.7_amd64.deb) | [Download .deb](https://github.com/fabihatasneem/optchat-client/releases/download/linux-v0.1.0-preview.7/optchat_0.1.0-0local.7_arm64.deb) |
 | Fedora 43/44 | [Download .rpm](https://github.com/fabihatasneem/optchat-client/releases/download/linux-v0.1.0-preview.7/optchat-0.1.0-0local.7.fc43.x86_64.rpm) | [Download .rpm](https://github.com/fabihatasneem/optchat-client/releases/download/linux-v0.1.0-preview.7/optchat-0.1.0-0local.7.fc43.aarch64.rpm) |
 
-See the **[Linux installation guide](docs/linux-installation.md)** for installation and engine setup.
+See the **[Linux installation guide](shells/linux/README.md)** for installation and engine setup.
 [Release notes and checksums](https://github.com/fabihatasneem/optchat-client/releases/tag/linux-v0.1.0-preview.7)
 are available on GitHub Releases.
 
@@ -26,8 +26,7 @@ are available on GitHub Releases.
 Manual desktop and real-engine qualification are pending. Stable releases and public APT/DNF update
 repositories have not been published yet. Project license and dependency redistribution review are deferred.
 
-Developers can use the [Linux source/build guide](shells/linux/README.md). Maintainers preparing packages and
-releases should use the [Linux release guide](shells/linux/release/README.md).
+Developers and release maintainers can use the [Linux build and release guide](shells/linux/BUILDING.md).
 
 ## Connecting to an engine
 
@@ -85,7 +84,7 @@ docs              platforms.md, ios-plan.md (the iOS design notes), archive/
 ## Getting the code
 
 The following sections are for developers building from source. Linux package users can follow the
-[installation guide](docs/linux-installation.md) instead. A Linux source build needs a revision that includes
+[installation guide](shells/linux/README.md) instead. A Linux source build needs a revision that includes
 the Linux scripts; the commit shown on a successful Linux workflow run is one way to select the tested source.
 
 ```bash
@@ -166,7 +165,7 @@ and set your team. More in `shells/ios/README.md`.
 
 ### Linux (Wayland and X11)
 
-To install a downloaded package, use the [Linux installation guide](docs/linux-installation.md).
+To install a downloaded package, use the [Linux installation guide](shells/linux/README.md).
 The commands below build the application from source.
 
 Install Rust through rustup (the pinned toolchain is selected automatically), and these Debian/Ubuntu packages:
@@ -208,10 +207,10 @@ shells/linux/release/bundle.sh --check
 This produces the AppImage, SHA256 checksum and build information in `dist-dev/`. Packaging downloads are verified
 against pinned sizes and SHA256 hashes. The current local build is tested on Ubuntu 26.04 x86_64; build on the oldest
 Linux version you intend to support and test the package there before claiming broader compatibility.
-Check an existing package with `shells/linux/test-package.sh` (normal launch, extract-and-run and the available
+Check an existing package with `shells/linux/tests/test-package.sh` (normal launch, extract-and-run and the available
 X11 backend). Manual usability and clean-machine testing are described in `shells/linux/README.md`.
 For native DEB/RPM distribution and signed APT/DNF updates, follow
-[the step-by-step Linux release guide](shells/linux/release/README.md).
+[the step-by-step Linux release guide](shells/linux/BUILDING.md).
 
 Linux package metadata defaults to the approved maintainer `Fabiha Tasneem <fabiha@reframe.so>`.
 Copyright/license work is deferred; complete [the notice template](shells/linux/packaging/COPYRIGHT.template)
