@@ -17,6 +17,10 @@ memory, dictation (speech-to-text) and storage all live there. The client talks 
 
 ## Install on Linux
 
+**Already have this repository?** The [Linux installers](releases/linux/README.md) are in
+`releases/linux/x86_64/`, alongside the Windows and Android folders under [releases/](releases/README.md).
+Use the `.deb` for Ubuntu/Debian or the `.rpm` for Fedora. These checked-in files are the `0local.4` test builds.
+
 Download the package for your system:
 
 | Linux distribution | Intel / AMD 64-bit | ARM64 |

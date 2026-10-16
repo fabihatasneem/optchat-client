@@ -36,6 +36,11 @@ Choose one download:
 
 ## 2. Download the installer
 
+If you already have a source checkout, the `0local.4` Intel/AMD test installers are in
+`releases/linux/x86_64/` from the repository root. Use its `.deb` on Ubuntu/Debian or `.rpm` on Fedora;
+each has an adjacent checksum. You can continue at step 3 using that folder. The links above provide
+the newer `0local.7` preview and ARM64 packages.
+
 1. Select the matching `.deb` or `.rpm` link above and save the file.
 2. Continue with installation below. Keep only one OptChat installer in that folder.
 
