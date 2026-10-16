@@ -46,3 +46,9 @@ shells/mac/tools/winid
 # Python build tools
 __pycache__/
 *.pyc
+
+# Android local tools, signing keys and Gradle state
+.gradle/
+local.properties
+*.jks
+*.keystore

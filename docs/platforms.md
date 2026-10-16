@@ -6,22 +6,22 @@
 | iOS / iPadOS | `shells/ios` | TestFlight builds | `gpui_ios` (zed PR #63068) + `patches/zed` |
 | Linux | `shells/linux` | native shell, AppImage, x86_64/ARM64 development DEB/RPM packages | `gpui_linux` (Wayland + X11) on `gpui_wgpu` (Vulkan/GLES) |
 | Windows | `shells/windows` | native shell + MSIX/ZIP build files; Windows qualification pending | `gpui_windows` (DirectX, DirectWrite) |
-| Android | `shells/android` (README only) | research | **none** (no `gpui_android`; `gpui_platform` has no Android branch) |
+| Android | `shells/android` | [Shared-client development APK on OnePlus 9 / Android 14](../shells/android/QUALIFICATION.md) | Patched `gpui-mobile` over the existing pin; no Android backend inside pinned Zed |
 
 ## What a shell provides (`optchat_platform::Platform`)
 
-| Hook | macOS | iOS | Linux | Windows | Android (plan) |
+| Hook | macOS | iOS | Linux | Windows | Android |
 |---|---|---|---|---|---|
 | `secure_store` (client tokens) | Keychain | Keychain | Secret Service (oo7) | Credential Manager | Keystore (JNI) |
-| `resident_mb` (perf probes) | `proc_pidinfo` | `task_info` footprint | `/proc/self/statm` | `GetProcessMemoryInfo` | `/proc/self/statm` |
-| `can_scan_qr` / `scan_qr` | test hook only | AVCaptureSession | test hook only | no | CameraX / ML Kit |
+| `resident_mb` (perf probes) | `proc_pidinfo` | `task_info` footprint | `/proc/self/statm` | `GetProcessMemoryInfo` | not implemented |
+| `can_scan_qr` / `scan_qr` | test hook only | AVCaptureSession | test hook only | no | no |
 
 Covered by GPUI itself (no hook needed): clipboard, opening URLs, windows, IME, credentials API (an alternative
 token store).
 
 **Not behind the trait yet** (candidates for the next hooks):
 - **Dictation capture:** cpal in `crates/client/src/mic.rs`. It works on macOS, iOS, Linux (ALSA) and Windows
-  (WASAPI); macOS has the mic-permission check.
+  (WASAPI); macOS has the existing mic-permission check; Android requests access through `Platform::prepare_microphone`.
 - **Prefs directory:** chosen by each shell's `main.rs`.
 - **Local engine token path:** `$HOME/.reframe/data/workspaces/local-client-token`, desktop only.
 - **Headless test input:** AppKit-only, in `crates/ui/src/testcmd.rs`, with no-op stubs elsewhere.

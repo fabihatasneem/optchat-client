@@ -57,7 +57,7 @@ shells/mac        the macOS app: entry point, platform.rs, packaging, release/bu
 shells/ios        the iOS app crate (app/), the Xcode wrapper (OptChat.xcodeproj), release/ (TestFlight)
 shells/linux      the Linux app: Wayland/X11 entry point, Secret Service tokens, local demo
 shells/windows    Windows shell, EXE installer, portable ZIP and MSIX packaging
-shells/android    README only, until someone builds it
+shells/android    Android app using the shared client/UI, GPUI backend adaptation and APK packaging
 vendor/zed        git submodule: zed-industries/zed (GPUI), pinned; our patches come from patches/zed
 patches/zed       our GPUI patches, applied to vendor/zed by tools/zed-vendor.sh
 tests             deno UI suites + a fake engine (tests/lib/fake-engine.ts)
@@ -249,23 +249,20 @@ the optional portable ZIP and MSIX. Installable MSIX packages require signing an
 combines both architectures. See [the maintainer guide](shells/windows/BUILDING.md) for packaging and signing,
 and [the qualification record](shells/windows/release/QUALIFICATION.md) for release validation.
 
-### Android (to be built, if you have an Android device; research first)
+### Android (development build)
 
-**There is no GPUI Android backend in our pinned zed.**
-- `gpui_platform` has backends for mac, ios, linux, windows and web, and there is no `gpui_android` crate.
-- Some groundwork exists:
-  - GPUI's platform trait documents lifecycle, memory-warning and inset hooks with their Android mappings.
-  - `gpui` has a `cfg(any(linux, android))` dependency.
-  - The wgpu renderer handles Android surface loss.
-- We don't know of an upstream Android backend. Check zed's PRs before starting.
+The Android shell runs the shared OptChat client and phone UI using a patched `gpui-mobile` backend over
+our existing GPUI pin. Download and connection instructions are in the [Android guide](shells/android/README.md).
+The initial hello-window experiment has been replaced by the client.
 
-So Android is either:
-- **(a)** a new `gpui_android` backend (android-activity, wgpu with Vulkan/GLES via `gpui_wgpu`, a text system, touch
-  and IME), carried as patches like our iOS ones; or
-- **(b)** a different shell, for example a Kotlin UI reusing only `optchat-proto`. `optchat-client`'s state is a GPUI
-  entity, so it isn't reusable without GPUI.
+```powershell
+./shells/android/build-app.ps1
+```
 
-First step: a short written comparison of the two, plus a "hello window" spike for (a). Don't port the app yet.
+The build produces an ARM64 development APK, checksum and source/tool manifest under `dist-dev/android-app/`.
+Android tokens use AES-GCM encryption with an Android Keystore key. HTTPS/WSS use rustls with bundled public
+trust roots. See the [maintainer guide](shells/android/BUILDING.md), [research](shells/android/RESEARCH.md) and
+[device qualification](shells/android/QUALIFICATION.md). Play publication and production signing remain future work.
 
 ## Adding a platform shell (checklist)
 
@@ -333,11 +330,11 @@ the trait, and the token test store's unix file mode is `cfg(unix)`. Still open:
 - Local engine token discovery still needs `OPTCHAT_LOCAL_TOKEN_FILE` when `HOME` is unset.
 
 **Android:**
-- There's no GPUI backend (see above).
-- `native-tls` means OpenSSL on Android; rustls is likely needed.
-- cpal needs AAudio/oboe and the RECORD_AUDIO permission.
-- The secure store means Android Keystore through JNI.
-- QR scanning means CameraX or ML Kit.
+- The adapted community backend is carried separately from pinned Zed; it still needs broader device qualification.
+- ARM64 on the tested OnePlus 9 / Android 14 is the current development target.
+- Tokens can be pasted; QR scanning is not implemented.
+- Microphone permission is requested on dictation use; real capture/STT and a real engine remain unqualified.
+- Other Android versions, 16 KB runtime compatibility, accessibility, long background use and performance need checks.
 
 **macOS/iOS:** both depend on the GPUI pin above. Don't bump it without re-running the iOS simulator build and the
 fake-engine suites.

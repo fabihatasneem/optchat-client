@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/proto", "crates/theme", "crates/platform", "crates/client", "crates/ui", "shells/mac", "shells/linux", "shells/windows", "shells/ios/app"]
+members = ["crates/proto", "crates/theme", "crates/platform", "crates/client", "crates/ui", "shells/mac", "shells/linux", "shells/windows", "shells/ios/app", "shells/android/app"]
 # Root builds are portable: build shared crates by default, select the native shell with
 # cargo run -p optchat-linux / optchat-mac / optchat-windows. The iOS build script selects its own target.
 # vendor/zed is zed's own workspace (path deps under the root would otherwise join this one)
-exclude = ["vendor", "third_party/native-tls"]
+exclude = ["vendor", "vendor/gpui-mobile", "third_party/native-tls"]
 default-members = ["crates/proto", "crates/theme", "crates/platform", "crates/client", "crates/ui"]
 
 [workspace.package]
