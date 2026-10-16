@@ -85,9 +85,10 @@ jobs:
           if ((Get-FileHash $inno -Algorithm SHA256).Hash -ne $expectedHash) { throw 'Inno Setup checksum mismatch.' }
           $signature = Get-AuthenticodeSignature $inno
           if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B.V.') { throw 'Unexpected Inno Setup publisher.' }
-          $setup = Start-Process $inno -WindowStyle Hidden -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/SP-', '/NOICONS', '/TASKS=')
+          $innoDirectory = Join-Path $env:LOCALAPPDATA 'Programs/Inno Setup 6'
+          $setup = Start-Process $inno -WindowStyle Hidden -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/SP-', '/NOICONS', '/TASKS=', "/DIR=`"$innoDirectory`"")
           if ($setup.ExitCode -ne 0) { throw "Inno Setup installation failed: $($setup.ExitCode)" }
-          $env:OPTCHAT_INNO_COMPILER = Join-Path $env:LOCALAPPDATA 'Programs/Inno Setup 6/ISCC.exe'
+          $env:OPTCHAT_INNO_COMPILER = Join-Path $innoDirectory 'ISCC.exe'
           if (-not (Test-Path -LiteralPath $env:OPTCHAT_INNO_COMPILER)) { throw 'Pinned Inno Setup compiler is missing.' }
           ./shells/windows/tests/test-inno-selection.ps1
           ./shells/windows/tests/test-packaging.ps1
