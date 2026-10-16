@@ -5,12 +5,12 @@
 | macOS | `shells/mac` | ships (dev bundle, ad hoc signed; notarization to do) | `gpui_macos` (Metal) |
 | iOS / iPadOS | `shells/ios` | TestFlight builds | `gpui_ios` (zed PR #63068) + `patches/zed` |
 | Linux | `shells/linux` | native shell, AppImage, x86_64/ARM64 development DEB/RPM packages | `gpui_linux` (Wayland + X11) on `gpui_wgpu` (Vulkan/GLES) |
-| Windows | `shells/windows` (README only) | to be built | `gpui_windows` (DirectX, DirectWrite) |
+| Windows | `shells/windows` | native shell + MSIX/ZIP build files; Windows qualification pending | `gpui_windows` (DirectX, DirectWrite) |
 | Android | `shells/android` (README only) | research | **none** (no `gpui_android`; `gpui_platform` has no Android branch) |
 
 ## What a shell provides (`optchat_platform::Platform`)
 
-| Hook | macOS | iOS | Linux | Windows (plan) | Android (plan) |
+| Hook | macOS | iOS | Linux | Windows | Android (plan) |
 |---|---|---|---|---|---|
 | `secure_store` (client tokens) | Keychain | Keychain | Secret Service (oo7) | Credential Manager | Keystore (JNI) |
 | `resident_mb` (perf probes) | `proc_pidinfo` | `task_info` footprint | `/proc/self/statm` | `GetProcessMemoryInfo` | `/proc/self/statm` |
@@ -36,7 +36,14 @@ equivalents: `alsa-lib-devel fontconfig-devel wayland-devel libxcb-devel libxkbc
 ## Windows toolchain
 
 You need MSVC build tools (with the Spectre-mitigated libs), the Windows SDK ≥ 10.0.20348 and CMake. See
-`vendor/zed/docs/src/development/windows.md`.
+`vendor/zed/docs/src/development/windows.md`. Windows build scripts target `x86_64-pc-windows-msvc` and
+`aarch64-pc-windows-msvc`, with static CRT linkage, app resources and MSIX packaging. Use PowerShell 7.4+;
+`tools/zed-vendor.ps1` applies the same pinned GPUI patches without requiring Bash. The native shell stores
+settings in `%APPDATA%\OptChat`, uses Credential Manager for tokens and exits when its last window closes.
+Windows 10 22H2/Windows 11 x64 and Windows 11 ARM64 are intended qualification targets; 32-bit, Windows 7/8,
+Windows Server, S mode and a Store listing are outside the initial scope. These are targets, not verified support.
+See [the Windows guide](../shells/windows/README.md) and
+[qualification checklist](../shells/windows/release/QUALIFICATION.md).
 
 ## Linux checks
 

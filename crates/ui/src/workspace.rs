@@ -1033,7 +1033,7 @@ impl Workspace {
             // nothing connected (or no token): what to do next
             let st = self.state.read(cx);
             let (title, sub) = if st.engines.is_empty() {
-                ("Add an OptChat engine", "Its address, then connect one of its workspaces with a client token (kept in the Keychain).")
+                ("Add an OptChat engine", "Ask your engine administrator for a client token, then choose Add engine and paste it. Your workspaces connect automatically.")
             } else if st.meta.is_empty() {
                 ("Connect a workspace", "Open the workspace menu (the icon at the top left) and connect one with its client token.")
             } else {
