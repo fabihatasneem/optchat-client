@@ -19,6 +19,11 @@ if (-not (Test-Path "$zed/Cargo.toml")) {
     if ($LASTEXITCODE -ne 0) { throw 'Initialize the pinned vendor/zed submodule before building.' }
 }
 if ((Git-Zed @('rev-parse', 'HEAD')) -ne $commit) { throw "vendor/zed must be at $commit" }
+# Cargo resolves Android's backend manifest even when building a desktop shell.
+if (Test-Path "$root/shells/android/prepare-backend.ps1") {
+    & "$root/shells/android/prepare-backend.ps1"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the workspace Android backend.' }
+}
 $patches = @(Get-ChildItem "$root/patches/zed/*.patch" | Sort-Object Name)
 if ($env:ZED_OPTIONAL_PATCHES -eq '1') {
     $patches += @(Get-ChildItem "$root/patches/zed/optional/*.patch" | Sort-Object Name)

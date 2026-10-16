@@ -3,6 +3,8 @@ name: Windows packages
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "fabiha/cross-platform-builds"
     tags:
       - "windows-v*"
   pull_request:
@@ -17,7 +19,11 @@ on:
       - "crates/**"
       - "assets/**"
       - "patches/zed/**"
+      - "patches/gpui-mobile/**"
       - "tools/zed-vendor.ps1"
+      - "shells/android/prepare-backend.ps1"
+      - "vendor/gpui-mobile"
+      - ".gitmodules"
       - "shells/windows/**"
       - "tests/windows.ts"
       - "vendor/zed"

@@ -5,7 +5,8 @@ OptChat lets you open your engine's workspaces, chats and tasks in a native app.
 OptChat's native client, written in Rust on [GPUI](https://github.com/zed-industries/zed) (Zed's UI framework). It
 runs on **Linux**, **macOS**, **Windows**, **iPhone** and **iPad**. Android support is in development.
 
-See the [Windows installation guide](shells/windows/README.md) for installation, updates and engine setup.
+See the [Windows installation guide](shells/windows/README.md) and
+[Android installation guide](shells/android/README.md) for installation, updates and engine setup.
 
 **License status:** The project license and dependency redistribution review are deferred. Public release
 approval remains pending; the Windows installer checked into this branch is a development-signed test build.
@@ -101,6 +102,8 @@ tools/zed-vendor.sh          # applies our GPUI patches (the build scripts also 
 
 - If you cloned without `--recursive`, run `git submodule update --init --depth 1 vendor/zed`, or just
   `tools/zed-vendor.sh`, which initializes the submodule too.
+- The shared workspace also resolves Android's `vendor/gpui-mobile` dependency. The vendor setup scripts
+  initialize it and apply its pinned Android patch on every platform; desktop builds do not need the Android SDK.
 - Submodule tips:
   - `git status` ignores the patched files inside `vendor/zed` (`ignore = dirty`).
   - After a pull that moves the pin, run `git submodule update vendor/zed && tools/zed-vendor.sh`.

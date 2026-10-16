@@ -3,7 +3,7 @@ name: Linux development packages
 on:
   workflow_dispatch:
   push:
-    branches: [fabiha/linux-packages]
+    branches: [fabiha/linux-packages, fabiha/cross-platform-builds]
     paths:
       - .github/workflows/linux-packages.yml
       - Cargo.toml
@@ -15,6 +15,9 @@ on:
       - patches/**
       - third_party/native-tls/**
       - tools/zed-vendor.sh
+      - tools/gpui-mobile-vendor.sh
+      - vendor/gpui-mobile
+      - .gitmodules
       - tests/linux-tls.py
 
 permissions:
