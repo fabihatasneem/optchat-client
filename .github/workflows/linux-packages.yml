@@ -1,9 +1,10 @@
-name: Linux development packages
+name: Linux packages
 
 on:
   workflow_dispatch:
   push:
     branches: [fabiha/linux-packages, fabiha/cross-platform-builds]
+    tags: [linux-v*-preview.*]
     paths:
       - .github/workflows/linux-packages.yml
       - Cargo.toml
@@ -16,6 +17,9 @@ on:
       - third_party/native-tls/**
       - tools/zed-vendor.sh
       - tools/gpui-mobile-vendor.sh
+      - tools/release_version.py
+      - tools/prepare_linux_release.py
+      - tests/release-tools.py
       - vendor/gpui-mobile
       - .gitmodules
       - tests/linux-tls.py
@@ -54,6 +58,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate tag and derive package versions
+        id: version
+        run: |
+          python3 tools/release_version.py linux --github-output "$GITHUB_OUTPUT"
+          python3 tests/release-tools.py
+
       - name: Prepare rootless Podman
         run: |
           sudo apt-get update
@@ -63,8 +73,8 @@ jobs:
 
       - name: Build two development revisions on the native baseline
         run: |
-          previous_revision="0local.$((GITHUB_RUN_NUMBER * 2))"
-          current_revision="0local.$((GITHUB_RUN_NUMBER * 2 + 1))"
+          previous_revision="${{ steps.version.outputs.previous_revision }}"
+          current_revision="${{ steps.version.outputs.revision }}"
           printf 'OPTCHAT_PREVIOUS_REVISION=%s\nOPTCHAT_CURRENT_REVISION=%s\n' \
             "$previous_revision" "$current_revision" >> "$GITHUB_ENV"
           shells/linux/release/container-build.sh "$PACKAGE_FORMAT" --revision "$previous_revision"
@@ -118,3 +128,37 @@ jobs:
             build/qualification/
           if-no-files-found: warn
           retention-days: 14
+
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/linux-v')
+    needs: native-packages
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: linux-[dr]*
+          path: downloads
+      - name: Verify all four installers and stage the release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 tools/prepare_linux_release.py downloads --output-dir build/linux-release \
+            --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT" --ci-run-url "$CI_RUN_URL"
+      - name: Create draft preview with verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          # Existing releases/assets are never changed by a retry.
+          gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease \
+            --title "OptChat $RELEASE_TAG" --notes-file build/linux-release/release-notes.md
+          rm build/linux-release/release-notes.md
+          gh release upload "$RELEASE_TAG" build/linux-release/*

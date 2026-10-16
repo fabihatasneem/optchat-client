@@ -8,6 +8,8 @@ import re
 import shlex
 import shutil
 import sys
+import subprocess
+from urllib.parse import quote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[3]
 ARCHITECTURES = {
@@ -50,6 +52,20 @@ def prepare(package, output):
     install = "sudo apt update\n" if package_format == "deb" else ""
     install += f"sudo {'apt' if package_format == 'deb' else 'dnf'} install {shlex.quote('./' + package.name)}"
     guide = (ROOT / "shells/linux/README.md").read_text()
+    # The guide is embedded outside the source tree; point repository links at the
+    # exact documentation commit rather than leaving links to absent local files.
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    def repository_link(match):
+        label, target = match.groups()
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc or target.startswith("#"):
+            return match[0]
+        path = (ROOT / "shells/linux" / parsed.path).resolve().relative_to(ROOT)
+        url = f"https://github.com/fabihatasneem/optchat-client/blob/{commit}/{quote(path.as_posix())}"
+        if parsed.fragment:
+            url += "#" + parsed.fragment
+        return f"[{label}]({url})"
+    guide = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", repository_link, guide)
     guide = "\n".join("#" + line if line.startswith("#") else line for line in guide.splitlines()) + "\n"
     (output / "INSTALL.md").write_text(
         "# Install this OptChat download\n\n"

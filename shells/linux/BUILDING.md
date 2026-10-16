@@ -3,6 +3,25 @@
 This guide is for maintainers building, testing, signing and publishing Linux packages.
 **To install OptChat on your own computer, start with the [installation guide](README.md).**
 
+## Automated preview releases
+
+The Linux workflow reads the version from `Cargo.toml`. Normal branch runs keep increasing development
+package revisions automatically. A `linux-v<version>-preview.<revision>` tag selects an exact `0local.<revision>`
+and its previous revision for upgrade checks; the tag's version must match Cargo. Choose a new revision greater
+than the last distributed preview (currently 7). Retries of the same run/tag retain their versions.
+
+After all four native DEB/RPM jobs and their lifecycle/Fedora TLS checks succeed, the tag workflow verifies
+each installer's architecture, checksum and clean source commit, then creates a **draft prerelease** with
+installers, build reports, installation guides and `linux-release.json`. It never publishes automatically or
+overwrites an existing release/asset. Review desktop and real-engine qualification before publishing.
+Version tags and pushes require explicit maintainer action. For example, the next unused preview revision
+can be selected with `linux-v0.1.0-preview.8`; this example does not create or push a tag.
+
+This automation distributes development previews. Production DEB/RPM metadata, signed APT/DNF repository
+setup, key ownership and hosting still follow the production sections below; the deferred notice requirements
+are not bypassed. The checked-in `releases/linux/` packages remain selected, verified snapshots rather than
+outputs automatically committed back to Git.
+
 The agreed minimum build system is **Ubuntu 24.04**. Build a DEB there and qualify that same package on Ubuntu 24.04,
 Ubuntu 26.04 and Debian 13. Build the RPM separately on **Fedora 43** and qualify it on Fedora 43 and Fedora 44.
 Both x86_64 and ARM64 are in scope. Flatpak is outside this release's scope.

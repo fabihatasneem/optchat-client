@@ -11,7 +11,10 @@ $testPackage = "$package.test"
 $component = "$package/.OptChatActivity"
 $output = Join-Path $root 'build/android/client-check'
 $null = New-Item -ItemType Directory -Force -Path $output
-if (!$Apk) { $Apk = Join-Path $root 'dist-dev/android-app/OptChat-0.1.0-dev-arm64.apk' }
+if (!$Apk) {
+    $latest = Get-Content (Join-Path $root 'dist-dev/android-app/build-info.json') -Raw | ConvertFrom-Json
+    $Apk = Join-Path $root "dist-dev/android-app/$($latest.artifact)"
+}
 if (!(Test-Path -LiteralPath $Apk)) { throw 'Run build-app.ps1 first.' }
 $deno = (Get-Command deno.exe -ErrorAction Stop).Source
 $devices = @(& $adb devices | Select-Object -Skip 1 | Where-Object { $_ -match '^\S+\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })

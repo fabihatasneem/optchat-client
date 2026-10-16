@@ -4,7 +4,9 @@ param(
     [string]$SdkRoot,
     [string]$JavaHome,
     [string]$GradlePath,
-    [switch]$SkipNative
+    [switch]$SkipNative,
+    [ValidateRange(1, 2100000000)][int]$VersionCode = 1,
+    [switch]$Release
 )
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -15,14 +17,34 @@ Push-Location $root
 try {
     & (Join-Path $root 'tools/zed-vendor.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Could not prepare pinned GPUI.' }
-    & (Join-Path $PSScriptRoot 'prepare-backend.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'Could not prepare Android backend.' }
+    # zed-vendor.ps1 prepares and verifies both workspace backends.
+    $metadataText = & cargo metadata --locked --no-deps --format-version 1
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve workspace version.' }
+    $baseVersion = (($metadataText | ConvertFrom-Json).packages | Where-Object name -eq 'optchat-android').version
+    if ($baseVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Expected a numeric Cargo workspace version.' }
+    $versionName = if ($Release) { "$baseVersion.$VersionCode" } else { "$baseVersion-dev.$VersionCode" }
+    $variant = if ($Release) { 'release' } else { 'debug' }
+    $name = "OptChat-$versionName-arm64.apk"
+    $output = Join-Path $root "$(if ($Release) { 'dist' } else { 'dist-dev' })/android-app"
+    if (Test-Path (Join-Path $output $name)) { throw 'Installer already exists; increment VersionCode.' }
+    if ($Release) {
+        if ($SkipNative) { throw 'Release builds cannot reuse an unverified native library.' }
+        if (@(& git status --porcelain).Count) { throw 'Release builds require committed, clean source.' }
+        $tags = @(& git tag --points-at HEAD)
+        if ($LASTEXITCODE -ne 0 -or "android-v$baseVersion.$VersionCode" -cnotin $tags) { throw 'Release needs its exact version tag at HEAD.' }
+        foreach ($setting in @('OPTCHAT_ANDROID_KEYSTORE', 'OPTCHAT_ANDROID_STORE_PASSWORD', 'OPTCHAT_ANDROID_KEY_ALIAS', 'OPTCHAT_ANDROID_KEY_PASSWORD', 'OPTCHAT_ANDROID_CERT_SHA256')) {
+            if (-not [Environment]::GetEnvironmentVariable($setting)) { throw "Configure $setting for signing." }
+        }
+    }
     if (!$SkipNative) {
-        & cargo build --locked -p optchat-android --target aarch64-linux-android -j 2
+        $cargoArguments = @('build', '--locked', '-p', 'optchat-android', '--target', 'aarch64-linux-android', '-j', '2')
+        if ($Release) { $cargoArguments += '--release' }
+        & cargo @cargoArguments
         if ($LASTEXITCODE -ne 0) { throw 'Rust Android build failed.' }
     }
     $targetDirectory = if ($env:CARGO_TARGET_DIR) { [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR) } else { Join-Path $root 'target' }
-    $native = Join-Path $targetDirectory 'aarch64-linux-android/debug/liboptchat_android.so'
+    $profile = if ($Release) { 'release' } else { 'debug' }
+    $native = Join-Path $targetDirectory "aarch64-linux-android/$profile/liboptchat_android.so"
     if (!(Test-Path -LiteralPath $native)) { throw 'Build the native OptChat library first.' }
     $jniDirectory = Join-Path $root 'build/android/app/jniLibs/arm64-v8a'
     $null = New-Item -ItemType Directory -Force -Path $jniDirectory
@@ -41,18 +63,28 @@ try {
         $localGradle = Join-Path $env:LOCALAPPDATA 'OptChat/AndroidTools/gradle-8.13/bin/gradle.bat'
         $GradlePath = if (Test-Path -LiteralPath $localGradle) { $localGradle } else { Join-Path $PSScriptRoot 'app/gradlew.bat' }
     }
-    $apk = Join-Path $PSScriptRoot 'app/app/build/outputs/apk/debug/app-debug.apk'
+    $apk = Join-Path $PSScriptRoot "app/app/build/outputs/apk/$variant/app-$variant.apk"
     # A new APK avoids unused payload left behind by incremental ZIP updates after a native rebuild.
     if (Test-Path -LiteralPath $apk) { Remove-Item -LiteralPath $apk }
-    & $GradlePath -p (Join-Path $PSScriptRoot 'app') assembleDebug --console=plain
+    $task = if ($Release) { 'assembleRelease' } else { 'assembleDebug' }
+    & $GradlePath -p (Join-Path $PSScriptRoot 'app') $task --console=plain "-PoptchatVersionCode=$VersionCode" "-PoptchatVersionName=$versionName"
     if ($LASTEXITCODE -ne 0) { throw 'APK assembly failed.' }
-    & (Join-Path $env:ANDROID_HOME 'build-tools/36.0.0/apksigner.bat') verify --verbose $apk
+    $signature = & (Join-Path $env:ANDROID_HOME 'build-tools/36.0.0/apksigner.bat') verify --verbose --print-certs $apk
     if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
+    $certificate = [regex]::Match(($signature -join "`n"), 'Signer #1 certificate SHA-256 digest: ([a-fA-F0-9]{64})').Groups[1].Value.ToLowerInvariant()
+    if (-not $certificate) { throw 'APK signer certificate fingerprint is missing.' }
+    if ($Release -and $certificate -cne $env:OPTCHAT_ANDROID_CERT_SHA256.Replace(':', '').ToLowerInvariant()) {
+        throw 'APK is not signed by the configured production certificate.'
+    }
+    $badging = & (Join-Path $env:ANDROID_HOME 'build-tools/36.0.0/aapt2.exe') dump badging $apk
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect packaged Android version.' }
+    $packageLine = ($badging | Where-Object { $_ -match '^package:' }) -join ''
+    if ($packageLine -notmatch "versionCode='$VersionCode'" -or $packageLine -notmatch "versionName='$([regex]::Escape($versionName))'") {
+        throw 'Packaged Android version differs from the requested version.'
+    }
     & (Join-Path $env:ANDROID_HOME 'build-tools/36.0.0/zipalign.exe') -c -P 16 -v 4 $apk
     if ($LASTEXITCODE -ne 0) { throw 'APK page alignment verification failed.' }
-    $output = Join-Path $root 'dist-dev/android-app'
     $null = New-Item -ItemType Directory -Force -Path $output
-    $name = 'OptChat-0.1.0-dev-arm64.apk'
     $package = Join-Path $output $name
     Copy-Item -LiteralPath $apk -Destination $package
     $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -77,11 +109,13 @@ try {
         $sourceHashes[$relative] = (Get-FileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant()
     }
     $metadata = [ordered]@{
-        kind = 'development OptChat Android client'
+        kind = if ($Release) { 'signed OptChat Android release candidate' } else { 'development OptChat Android client' }
         applicationId = 'com.reframe.optchat.gpui.android'
-        versionCode = 1
-        versionName = '0.1.0-dev'
-        signing = 'Android debug keystore; development only'
+        versionCode = $VersionCode
+        versionName = $versionName
+        signing = if ($Release) { 'owner-provided release keystore' } else { 'Android debug keystore; development only' }
+        release = [bool]$Release
+        signerCertificateSha256 = $certificate
         abi = 'arm64-v8a'
         sourceCommit = (& git rev-parse HEAD)
         workingTreeDirty = [bool](@(& git status --porcelain).Count)
@@ -105,5 +139,6 @@ try {
         builtAt = [DateTimeOffset]::UtcNow.ToString('o')
     }
     [IO.File]::WriteAllText((Join-Path $output 'build-info.json'), ($metadata | ConvertTo-Json -Depth 5) + "`n")
+    [IO.File]::WriteAllText((Join-Path $output "$name.build.json"), ($metadata | ConvertTo-Json -Depth 5) + "`n")
     Write-Output "Built $package"
 } finally { Pop-Location }

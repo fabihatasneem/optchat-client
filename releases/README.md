@@ -2,7 +2,7 @@
 
 Choose the folder for your operating system:
 
-- [Linux](linux/README.md): DEB for Ubuntu/Debian and RPM for Fedora, both Intel/AMD 64-bit.
+- [Linux](linux/README.md): DEB for Ubuntu/Debian and RPM for Fedora, for Intel/AMD 64-bit and ARM64.
 - [Windows](../shells/windows/README.md): [x64 installer](windows/x64/OptChat-0.1.0.4-windows-x64-Setup.exe).
 - [Android](../shells/android/README.md): [ARM64 APK](android/OptChat-0.1.0-dev-arm64.apk).
 

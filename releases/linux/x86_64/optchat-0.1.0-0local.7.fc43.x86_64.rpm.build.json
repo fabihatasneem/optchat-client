@@ -1,7 +1,7 @@
 {
   "format": "rpm",
   "maintainer": "Fabiha Tasneem <fabiha@reframe.so>",
-  "version": "0.1.0-0local.4.fc43",
+  "version": "0.1.0-0local.7.fc43",
   "architecture": "x86_64",
   "depends": [
     "ca-certificates",
@@ -69,7 +69,7 @@
   "license_expression": "LicenseRef-Unspecified",
   "packaged_smoke_test": "not_run",
   "package_signature": "unsigned",
-  "sha256": "6d31135ad8f7fdf07d31735c6ce462ed9bd3562a74487660e4a868ba5da92a22",
+  "sha256": "f5606ab615d564968051918155f6b640947e22ddbe656eda9e1efd8c7b40b810",
   "build_os": {
     "NAME": "Fedora Linux",
     "ID": "fedora",
@@ -95,9 +95,9 @@
     "VARIANT_ID": "container"
   },
   "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
-  "source_revision": "32bcb70797b7b92c45d1a0ce0d62d3a14288d343",
-  "source_has_local_changes": true,
+  "source_revision": "78d8c1d1fef864b4e760b95fe4963b75afef659d",
+  "source_has_local_changes": false,
   "install_upgrade_remove_test": "not_run",
   "builder_image": "localhost/optchat-build-fedora43-x86_64:1.98.1",
-  "builder_image_id": "92c6c396bafc2fd97fd7d9be32c2a3f01fb68132fe0114660c848c95c1652261"
+  "builder_image_id": "8a6f92ba76a6469b4d6d6aaa545b6ded1245063dd3d8b5d832240df249c06bf6"
 }
