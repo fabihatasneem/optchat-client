@@ -14,6 +14,8 @@ function Assert-Windows {
 
 function Find-InnoCompiler {
     param([string]$Path)
+    # CI installs a checksum-verified compiler, which must win over runner PATH shims.
+    if (-not $Path -and $env:OPTCHAT_INNO_COMPILER) { $Path = $env:OPTCHAT_INNO_COMPILER }
     if ($Path) {
         return (Resolve-Path -LiteralPath $Path).Path
     }

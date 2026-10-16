@@ -102,6 +102,7 @@ To wrap an existing portable ZIP without recompiling:
 ./shells/windows/release/build-installer.ps1 `
   -PortablePackage ./dist-dev/windows-x64/OptChat-0.1.0.0-windows-x64-portable.zip -Architecture x64
 # If ISCC.exe is not discoverable, pass -Compiler 'C:\path\to\ISCC.exe'.
+# For build.ps1, set OPTCHAT_INNO_COMPILER to that exact compiler path when multiple versions are installed.
 ```
 
 This wraps the existing payload without rebuilding Rust, verifies its checksum and architecture, and writes
