@@ -2,13 +2,14 @@
 
 Native desktop client for connecting to OptChat engines and workspaces.
 
-**Release status:** The checked-in installer is a development-signed test build. Public release approval is
-pending trusted publisher signing and platform qualification. The project license and dependency
-redistribution review are deferred.
+**Release status:** These are development test builds. The x64 installer has a development signature;
+the ARM64 CI installer is unsigned. Public release approval is pending trusted publisher signing and
+platform qualification. The project license and dependency redistribution review are deferred.
 
 ## Install
 
-1. [Download the x64 test installer](../../releases/windows/x64/OptChat-0.1.0.4-windows-x64-Setup.exe) for an Intel or AMD 64-bit PC.
+1. Choose the test installer for your PC: [Intel/AMD x64](../../releases/windows/x64/OptChat-0.1.0.4-windows-x64-Setup.exe)
+   or [Windows 11 ARM64](../../releases/windows/arm64/OptChat-0.1.0.1-windows-arm64-Setup.exe).
 2. Open the installer and select **Install**.
 3. Launch **OptChat** from the Start menu.
 
@@ -18,6 +19,10 @@ Administrator access is not required. A desktop shortcut is optional.
 Windows 10 22H2 or later and a DirectX-compatible graphics driver are required.
 ARM64 packages use `arm64` in the filename and require Windows 11.
 Check **Settings > System > About > System type** to identify your PC's architecture.
+The architecture folders contain SHA256 checksums and build reports. The ARM64 folder also contains an
+optional portable ZIP. The x64 and ARM64 snapshots have separate development revision histories;
+install updates for your own architecture. The [qualification record](release/QUALIFICATION.md) identifies
+the source and checks for each snapshot.
 
 ## Connect to an engine
 

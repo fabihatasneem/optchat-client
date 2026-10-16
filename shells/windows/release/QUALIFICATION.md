@@ -1,8 +1,8 @@
 # Windows release qualification
 
-Updated 2026-10-15. **Production approval is pending.**
+Updated 2026-10-16. **Production approval is pending.**
 
-## Current candidate
+## Current x64 candidate
 
 - Installer: `releases/windows/x64/OptChat-0.1.0.4-windows-x64-Setup.exe` (8,077,536 bytes).
 - SHA256: `c495c2fd1372093e7df68b44a30e36aee156a4f8c36c06005eb99c88965e6f0f`.
@@ -13,7 +13,25 @@ Updated 2026-10-15. **Production approval is pending.**
 - Build: Rust 1.98.1, VS Build Tools 17.14.41, Windows SDK 10.0.26100, Inno Setup 6.7.3.
 - Machine: Windows 11 Pro 10.0.26200 (26200.9457), x64, AMD Radeon Graphics driver 31.0.21923.13006.
 
-## Completed checks
+## ARM64 CI candidate
+
+- [Installer](../../../releases/windows/arm64/OptChat-0.1.0.1-windows-arm64-Setup.exe): 7,683,427 bytes.
+- SHA256: `ba42d2c07329c96fd97a7ce83e528bc7beca63b93c461214aa8ed78b3d7456ed`.
+- Source: clean commit `8ee568eda3ceaa0ffda3dd71683c9041705b97a1`, native `aarch64-pc-windows-msvc`.
+- Signing: unsigned development build; production publisher signing remains pending.
+- [Original build-report data](../../../releases/windows/arm64/OptChat-0.1.0.1-windows-arm64-release.json)
+  and the optional portable ZIP/checksum are kept alongside the installer.
+- [Native CI run](https://github.com/fabihatasneem/optchat-client/actions/runs/38893377242) passed both x64 and
+  ARM64 jobs, including shell unit tests, package inspection, install/upgrade/downgrade rejection, same-version
+  repair and uninstall. The upgrade fixture covers revisions 0 to 1 from the same source.
+- The downloaded `windows-arm64` archive matched GitHub's digest
+  `3cb00e7ffdeb007df0225b4e959174324c0559f89663619c289dab8edcf80a60`.
+  Installer/ZIP hashes matched the report, and the portable app's PE machine field was ARM64 (`0xaa64`).
+
+These CI checks do not establish native graphical input, real-engine use, production signing or the complete
+Windows desktop matrix. The earlier x64 desktop evidence below applies to its recorded candidate.
+
+## Completed x64 desktop checks
 
 | Check | Evidence |
 | --- | --- |

@@ -9,7 +9,7 @@ See the [Windows installation guide](shells/windows/README.md) and
 [Android installation guide](shells/android/README.md) for installation, updates and engine setup.
 
 **License status:** The project license and dependency redistribution review are deferred. Public release
-approval remains pending; the Windows installer checked into this branch is a development-signed test build.
+approval remains pending; Windows installers are development test builds with package-specific signing status.
 
 **It's a client only.** The OptChat *engine* is a separate TypeScript service in another repo: tasks, agents,
 memory, dictation (speech-to-text) and storage all live there. The client talks to an engine over one websocket
