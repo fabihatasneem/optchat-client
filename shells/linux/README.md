@@ -106,6 +106,9 @@ private; do not include them in screenshots, support messages or logs.
 
 Useful shortcuts: **Ctrl+K** opens the command palette, **F11** toggles full screen, and **Ctrl+Q** quits.
 
+**Running your own engine on this machine?** [`local-engine/optchat-local`](local-engine/README.md) starts a local
+reframe hypervisor with the OptChat engine and opens it at https://chat.reframe.dev/ in Chrome, or in this app.
+
 ## Updating and removing the app
 
 For now, check [GitHub Releases](https://github.com/fabihatasneem/optchat-client/releases) for a newer Linux preview
