@@ -9,6 +9,7 @@ pub mod markdown;
 pub mod notices_view;
 pub mod panels;
 pub mod phone;
+pub mod select;
 pub mod statusbar;
 pub mod tabs;
 pub mod tasks_view;

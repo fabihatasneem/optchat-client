@@ -1,6 +1,7 @@
 //! Markdown (GitHub-flavoured: nested and loose lists, task lists, tables, strikethrough, autolinks) parsed once with
 //! pulldown-cmark into a small block tree, rendered to GPUI elements with the theme's colors. Code blocks get a
 //! language bar, light syntax colors and a copy button. Nothing is ever rendered as HTML.
+use crate::select::selectable;
 use crate::theme::{c, C};
 use crate::ui::zx;
 use crate::ui::icon;
@@ -321,18 +322,18 @@ fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Wi
     if il.text.len() > at {
         fill(&mut runs, il.text.len() - at);
     }
-    let st = StyledText::new(SharedString::from(il.text.clone())).with_runs(runs);
+    let text = SharedString::from(il.text.clone());
+    let st = StyledText::new(text.clone()).with_runs(runs);
+    let layout = st.layout().clone();
+    let key = id.to_string();
     let line_h = size * 1.6;
+    let d = div().text_size(zx(size)).line_height(zx(line_h)).text_color(color);
     if links.is_empty() {
-        div().text_size(zx(size)).line_height(zx(line_h)).text_color(color).child(st).into_any_element()
+        d.child(selectable(key, text, layout, st)).into_any_element()
     } else {
         let ranges: Vec<Range<usize>> = links.iter().map(|l| l.0.clone()).collect();
         let urls: Vec<String> = links.into_iter().map(|l| l.1).collect();
-        div()
-            .text_size(zx(size))
-            .line_height(zx(line_h))
-            .text_color(color)
-            .child(InteractiveText::new(id, st).on_click(ranges, move |ix, _w, cx| cx.open_url(&urls[ix])))
+        d.child(selectable(key, text, layout, InteractiveText::new(id, st).on_click(ranges, move |ix, _w, cx| cx.open_url(&urls[ix]))))
             .into_any_element()
     }
 }
@@ -418,13 +419,13 @@ fn block(id: &str, b: &Block, o: &Opts, k: &C, window: &Window, cx: &App) -> Any
             let mut t = div().flex().flex_col().text_size(zx(13.));
             let mut hr = div().flex();
             for i in 0..cols {
-                hr = hr.child(cell(head.get(i), format!("{id}.h{i}"), true));
+                hr = hr.child(cell(head.get(i), format!("{id}.r0.{i}"), true));
             }
             t = t.child(hr);
             for (r, row) in rows.iter().enumerate() {
                 let mut rr = div().flex();
                 for i in 0..cols {
-                    rr = rr.child(cell(row.get(i), format!("{id}.r{r}.{i}"), false));
+                    rr = rr.child(cell(row.get(i), format!("{id}.r{}.{i}", r + 1), false));
                 }
                 t = t.child(rr);
             }
@@ -477,7 +478,11 @@ pub fn code_block(id: &str, lang: &str, text: &str, k: &C, _cx: &App) -> Statefu
                 .font_family(crate::ui::MONO)
                 .text_size(zx(12.5))
                 .line_height(zx(19.))
-                .child(highlight(text, lang, k)),
+                .child({
+                    let st = highlight(text, lang, k);
+                    let layout = st.layout().clone();
+                    selectable(format!("{id}.code"), text.to_string(), layout, st)
+                }),
         )
 }
 

@@ -329,8 +329,12 @@ impl Workspace {
                 Timer::after(std::time::Duration::from_millis(if headless { 33 } else { 250 })).await;
                 for c in crate::testcmd::take() {
                     if crate::testcmd::is_mouse(&c) {
-                        if let Ok(Some(v)) = cx.update(|window, _| crate::testcmd::view_of(window)) {
-                            crate::testcmd::mouse_input(&c, v);
+                        match cx.update(|window, _| crate::testcmd::view_of(window)) {
+                            Ok(Some(v)) => crate::testcmd::mouse_input(&c, v),
+                            Ok(None) => {
+                                let _ = cx.update(|window, cx| crate::testcmd::mouse_dispatch(&c, window, cx));
+                            }
+                            Err(_) => {}
                         }
                     } else if crate::testcmd::is_input(&c) {
                         // synthetic input goes through the window's dispatch (never inside an entity update)

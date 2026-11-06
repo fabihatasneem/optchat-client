@@ -319,6 +319,12 @@ pub fn probes_on() -> bool {
     std::env::var("OPTCHAT_PROBES").is_ok()
 }
 /// An invisible absolute child that records its parent's bounds under `name`.
+/// record bounds under a probe name directly (elements that paint themselves)
+pub fn set_probe(name: impl Into<String>, b: Bounds<Pixels>) {
+    if probes_on() {
+        PROBES.get_or_init(|| Mutex::new(HashMap::new())).lock().insert(name.into(), [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height)]);
+    }
+}
 pub fn probe(name: impl Into<String>) -> impl IntoElement {
     let name = name.into();
     canvas(

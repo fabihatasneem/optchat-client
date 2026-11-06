@@ -19,4 +19,5 @@ pub fn font_size(cx: &App) -> Pixels {
 pub fn init(cx: &mut App) {
     input::bind(cx);
     menu::bind(cx);
+    crate::select::bind(cx);
 }

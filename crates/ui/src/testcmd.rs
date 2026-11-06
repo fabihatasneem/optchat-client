@@ -45,6 +45,51 @@ pub fn view_of(_window: &Window) -> Option<usize> {
 #[cfg(not(target_os = "macos"))]
 pub fn mouse_input(_c: &Value, _view: usize) {}
 
+/// synthetic mouse input through GPUI's own dispatch, where there is no native path (Linux): hit tests of the last
+/// laid-out frame, like `input`
+pub fn mouse_dispatch(c: &Value, window: &mut Window, cx: &mut App) {
+    let f = |k: &str| c[k].as_f64().unwrap_or(0.0) as f32;
+    let m = Modifiers { shift: c["shift"].as_bool().unwrap_or(false), ..Default::default() };
+    let button = match c["button"].as_str() {
+        Some("right") => MouseButton::Right,
+        Some("middle") => MouseButton::Middle,
+        _ => MouseButton::Left,
+    };
+    let send = |e: PlatformInput, window: &mut Window, cx: &mut App| {
+        window.dispatch_event(e, cx);
+    };
+    let mv = |x: f32, y: f32, pressed: Option<MouseButton>| PlatformInput::MouseMove(MouseMoveEvent { position: point(px(x), px(y)), pressed_button: pressed, modifiers: m });
+    let down = |x: f32, y: f32, n: usize| PlatformInput::MouseDown(MouseDownEvent { button, position: point(px(x), px(y)), modifiers: m, click_count: n, first_mouse: false });
+    let up = |x: f32, y: f32, n: usize| PlatformInput::MouseUp(MouseUpEvent { button, position: point(px(x), px(y)), modifiers: m, click_count: n });
+    match c["op"].as_str().unwrap_or("") {
+        "move" => send(mv(f("x"), f("y"), None), window, cx),
+        "click" => {
+            send(mv(f("x"), f("y"), None), window, cx);
+            for i in 1..=c["count"].as_u64().unwrap_or(1) as usize {
+                send(down(f("x"), f("y"), i), window, cx);
+                send(up(f("x"), f("y"), i), window, cx);
+            }
+        }
+        "drag" => {
+            let (x0, y0, x1, y1) = (f("x0"), f("y0"), f("x1"), f("y1"));
+            send(mv(x0, y0, None), window, cx);
+            send(down(x0, y0, 1), window, cx);
+            for i in 1..=8 {
+                let t = i as f32 / 8.0;
+                send(mv(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, Some(button)), window, cx);
+            }
+            send(up(x1, y1, 1), window, cx);
+        }
+        "down" => {
+            send(mv(f("x"), f("y"), None), window, cx);
+            send(down(f("x"), f("y"), 1), window, cx);
+        }
+        "up" => send(up(f("x"), f("y"), 1), window, cx),
+        _ => {}
+    }
+    crate::ui::set_state_extra("lastCmd", serde_json::json!({ "op": c["op"], "ok": true }));
+}
+
 fn key_of(k: &str) -> Option<Keystroke> {
     // Computer Use names (cmd+shift+p, Return, Escape) → GPUI's (cmd-shift-p, enter, escape)
     let parts: Vec<String> = k.split('+').map(|p| match p {
@@ -398,6 +443,8 @@ pub fn run(w: &mut Workspace, c: &Value, window: &mut Window, cx: &mut Context<W
                 )
             });
         }
+        // the clipboard's text, into the state file (copy tests)
+        "readClipboard" => crate::ui::set_state_extra("clipboard", serde_json::json!(cx.read_from_clipboard().and_then(|c| c.text()))),
         "close" => w.close_overlay(window, cx),
         "quit" => cx.quit(),
         "resize" => window.resize(size(px(c["w"].as_f64().unwrap_or(400.) as f32), px(c["h"].as_f64().unwrap_or(860.) as f32))),
