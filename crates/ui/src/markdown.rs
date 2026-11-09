@@ -218,8 +218,16 @@ pub fn parse(text: &str) -> Doc {
             Event::Text(s) => {
                 if let Some((_, t)) = code.as_mut() {
                     t.push_str(&s);
-                } else {
+                } else if style.link.is_some() {
                     inline.get_or_insert_with(Inline::default).push(&s, &style);
+                } else {
+                    let il = inline.get_or_insert_with(Inline::default);
+                    for (r, url) in linkify(&s) {
+                        match url {
+                            Some(u) => il.push(&s[r], &Style { link: Some(u), ..style.clone() }),
+                            None => il.push(&s[r], &style),
+                        }
+                    }
                 }
             }
             Event::Code(s) => {
@@ -267,6 +275,86 @@ pub fn parse(text: &str) -> Doc {
     }
 }
 
+/// Splits text into plain and bare-link pieces: `https://…`, `http://…`, `www.…`, `mailto:…` (GitHub-style
+/// autolinks). Trailing punctuation and an unbalanced closing bracket stay outside the link.
+pub fn linkify(s: &str) -> Vec<(Range<usize>, Option<String>)> {
+    let mut out = vec![];
+    let mut at = 0;
+    let mut i = 0;
+    let b = s.as_bytes();
+    while i < b.len() {
+        let rest = &s[i..];
+        let boundary = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'/' || b[i - 1] == b'.' || b[i - 1] == b'@');
+        let lower = |p: &str| rest.len() >= p.len() && rest.is_char_boundary(p.len()) && rest[..p.len()].eq_ignore_ascii_case(p);
+        let start = if !boundary {
+            None
+        } else if lower("https://") || lower("http://") {
+            Some("")
+        } else if lower("www.") {
+            Some("https://")
+        } else if lower("mailto:") {
+            Some("")
+        } else {
+            None
+        };
+        if let Some(prefix) = start {
+            let mut end = i + rest.find(|c: char| c.is_whitespace() || c == '<' || c == '>' || c == '"' || c == '`').unwrap_or(rest.len());
+            // trim trailing punctuation, and closing brackets that don't close something inside the link
+            loop {
+                let t = &s[i..end];
+                let Some(last) = t.chars().last() else { break };
+                let unbalanced = |o: char, c: char| last == c && t.matches(c).count() > t.matches(o).count();
+                if ".,;:!?'*_~".contains(last) || unbalanced('(', ')') || unbalanced('[', ']') || unbalanced('{', '}') {
+                    end -= last.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            let t = &s[i..end];
+            let body = t.splitn(2, ':').nth(1).unwrap_or("").trim_start_matches('/');
+            let ok = if prefix.is_empty() { body.len() > 1 && (t.to_ascii_lowercase().starts_with("mailto:") || body.contains('.') || body.starts_with("localhost")) } else { t.len() > 4 && t[4..].contains('.') };
+            if ok {
+                if i > at {
+                    out.push((at..i, None));
+                }
+                out.push((i..end, Some(format!("{prefix}{t}"))));
+                at = end;
+                i = end;
+                continue;
+            }
+        }
+        i += rest.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+    }
+    if at < s.len() {
+        out.push((at..s.len(), None));
+    }
+    out
+}
+
+/// Link blue: readable on the theme's background, regardless of the theme's accent.
+pub fn link_color(k: &C) -> Hsla {
+    if k.dark { rgb(0x6cb6ff).into() } else { rgb(0x0a5fd0).into() }
+}
+
+/// Plain (not markdown) text with its bare links clickable and blue, selectable like the rest of the feed.
+pub fn linked_text(key: impl Into<String>, text: &str, size: f32, line_h: f32, color: Hsla, window: &Window, cx: &App) -> AnyElement {
+    let mut il = Inline::default();
+    for (r, url) in linkify(text) {
+        il.push(&text[r], &Style { link: url, ..Style::default() });
+    }
+    let k = c(cx);
+    styled_lh(ElementId::Name(key.into().into()), &il, size, line_h, color, &k, window)
+}
+
+/// Opens a link in the default browser (UI tests record it instead).
+fn open_link(url: &str, cx: &mut App) {
+    if crate::ui::probes_on() && std::env::var("OPTCHAT_TEST_HOOKS").is_ok() {
+        crate::ui::set_state_extra("openedUrl", serde_json::json!(url));
+    } else {
+        cx.open_url(url);
+    }
+}
+
 /// Plain text of a doc (copy).
 pub fn plain(text: &str) -> String {
     text.to_string()
@@ -278,6 +366,11 @@ pub struct Opts {
 }
 
 fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Window) -> AnyElement {
+    styled_lh(id, il, size, size * 1.6, color, k, window)
+}
+
+fn styled_lh(id: ElementId, il: &Inline, size: f32, line_h: f32, color: Hsla, k: &C, window: &Window) -> AnyElement {
+    let blue = link_color(k);
     let base = window.text_style().font();
     let mono = Font { family: crate::ui::MONO.into(), ..base.clone() };
     let mut runs = vec![];
@@ -305,13 +398,13 @@ fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Wi
                 crate::ui::seen("mdInline", name);
             }
         }
-        let col = if link.is_some() { k.accent } else if st.code { k.text } else { color };
+        let col = if link.is_some() { blue } else if st.code { k.text } else { color };
         runs.push(TextRun {
             len: r.end - r.start,
             font: f,
             color: col,
             background_color: if st.code { Some(k.panel2) } else { None },
-            underline: link.map(|_| UnderlineStyle { thickness: zx(1.), color: Some(k.accent.opacity(0.35)), wavy: false }),
+            underline: link.map(|_| UnderlineStyle { thickness: zx(1.), color: Some(blue.opacity(0.6)), wavy: false }),
             strikethrough: if st.strike { Some(StrikethroughStyle { thickness: zx(1.), color: Some(color) }) } else { None },
         });
         if let Some(l) = link {
@@ -326,14 +419,13 @@ fn styled(id: ElementId, il: &Inline, size: f32, color: Hsla, k: &C, window: &Wi
     let st = StyledText::new(text.clone()).with_runs(runs);
     let layout = st.layout().clone();
     let key = id.to_string();
-    let line_h = size * 1.6;
     let d = div().text_size(zx(size)).line_height(zx(line_h)).text_color(color);
     if links.is_empty() {
         d.child(selectable(key, text, layout, st)).into_any_element()
     } else {
         let ranges: Vec<Range<usize>> = links.iter().map(|l| l.0.clone()).collect();
         let urls: Vec<String> = links.into_iter().map(|l| l.1).collect();
-        d.child(selectable(key, text, layout, InteractiveText::new(id, st).on_click(ranges, move |ix, _w, cx| cx.open_url(&urls[ix]))))
+        d.child(selectable(key, text, layout, InteractiveText::new(id, st).on_click(ranges, move |ix, _w, cx| open_link(&urls[ix], cx))))
             .into_any_element()
     }
 }
@@ -550,6 +642,10 @@ mod tests {
     use super::*;
     #[::core::prelude::v1::test]
     fn parses() {
+        let l = linkify("see https://chat.reframe.dev/engine, or (www.x.io/a_(b)) and mailto:a@b.c. not http:// x");
+        let links: Vec<_> = l.iter().filter_map(|(_, u)| u.clone()).collect();
+        assert_eq!(links, ["https://chat.reframe.dev/engine", "https://www.x.io/a_(b)", "mailto:a@b.c"]);
+        assert_eq!(l.iter().map(|(r, _)| r.len()).sum::<usize>(), "see https://chat.reframe.dev/engine, or (www.x.io/a_(b)) and mailto:a@b.c. not http:// x".len());
         let d = parse("# Title\n\nsome **bold** and `code` [link](https://x.y)\n\n- a\n- [x] b\n  - nested\n\n```rust\nfn x() {}\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> quote");
         assert!(matches!(d[0], Block::Heading(1, _)));
         match &d[1] {

@@ -799,7 +799,7 @@ impl Feed {
         div().flex().justify_end().gap(zx(8.)).mt(zx(4.)).text_size(zx(10.5)).font_family(crate::ui::MONO).text_color(k.faint).child(format!("#{}", e.i)).child(fmt::time(&e.date))
     }
 
-    fn user(&mut self, e: &Arc<LogEntry>, _w: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn user(&mut self, e: &Arc<LogEntry>, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let k = c(cx).clone();
         let (text, n) = self.cut_text(e);
         let copy = e.text.clone();
@@ -827,11 +827,7 @@ impl Feed {
                             .text_size(zx(14.))
                             .line_height(zx(21.5))
                             .text_color(k.text)
-                            .child({
-                                let st = StyledText::new(text.clone());
-                                let layout = st.layout().clone();
-                                crate::select::selectable(format!("u{}", e.i), text, layout, st)
-                            })
+                            .child(markdown::linked_text(format!("u{}", e.i), &text, 14., 21.5, k.text, window, cx))
                             .context_menu(move |m, _, _| m.item(PopupMenuItem::new("Copy text").on_click({ let c2 = copy.clone(); move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(c2.clone())) }))),
                     )
                     .children(self.cut_button(e, n, cx))
@@ -966,9 +962,7 @@ impl Feed {
             let doc = markdown::parse(&shown);
             markdown::render(&format!("rb{}", e.i), &doc, &markdown::Opts { size: 13.5, color: k.text2 }, w, cx).into_any_element()
         } else {
-            let st = StyledText::new(shown.clone());
-            let layout = st.layout().clone();
-            div().text_size(zx(13.5)).line_height(zx(21.)).text_color(k.text2).child(crate::select::selectable(format!("rp{}", e.i), shown, layout, st)).into_any_element()
+            markdown::linked_text(format!("rp{}", e.i), &shown, 13.5, 21., k.text2, w, cx)
         };
         let hover = k.hover;
         let copy = body.clone();
