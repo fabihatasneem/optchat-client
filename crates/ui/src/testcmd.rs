@@ -85,6 +85,15 @@ pub fn mouse_dispatch(c: &Value, window: &mut Window, cx: &mut App) {
             send(down(f("x"), f("y"), 1), window, cx);
         }
         "up" => send(up(f("x"), f("y"), 1), window, cx),
+        // a touchpad swipe: pixel deltas in `steps` events (dy > 0 moves the content down, like swiping down)
+        "scroll" => {
+            send(mv(f("x"), f("y"), None), window, cx);
+            let n = c["steps"].as_u64().unwrap_or(1).max(1);
+            for i in 0..n {
+                let phase = if i == 0 { TouchPhase::Started } else if i + 1 == n { TouchPhase::Ended } else { TouchPhase::Moved };
+                send(PlatformInput::ScrollWheel(ScrollWheelEvent { position: point(px(f("x")), px(f("y"))), delta: ScrollDelta::Pixels(point(px(0.), px(f("dy") / n as f32))), modifiers: m, touch_phase: phase }), window, cx);
+            }
+        }
         _ => {}
     }
     crate::ui::set_state_extra("lastCmd", serde_json::json!({ "op": c["op"], "ok": true }));

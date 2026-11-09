@@ -96,6 +96,11 @@ pub struct InputState {
     /// from the last paint: the lines, where they start (byte offsets in the display text), bounds, line height, scroll
     layout: Option<Laid>,
     scroll_y: Pixels,
+    /// (caret, selection, length) at the last paint: the view follows the caret only when one of these changes, so the
+    /// wheel / touchpad can scroll away from it
+    follow: Option<(usize, Range<usize>, usize)>,
+    /// dragging the scrollbar thumb: (pointer y, scroll) where the drag started
+    thumb: Option<(Pixels, Pixels)>,
     /// up/down keep the column they started from
     goal_x: Option<Pixels>,
     _subs: Vec<Subscription>,
@@ -143,6 +148,8 @@ impl InputState {
             selecting: false,
             layout: None,
             scroll_y: px(0.),
+            follow: None,
+            thumb: None,
             goal_x: None,
             _subs: vec![s1, s2],
         }
@@ -611,6 +618,21 @@ impl InputState {
         self.paste_at = None;
         window.focus(&self.focus_handle, cx);
         window.request_virtual_keyboard();
+        // the scrollbar: drag the thumb, or click the track to jump there
+        if let Some(t) = self.thumb_bounds() {
+            let l = self.layout.as_ref().unwrap();
+            if e.position.x >= t.left() - px(4.) && e.position.x <= l.bounds.right() + px(2.) && e.position.y >= l.bounds.top() && e.position.y <= l.bounds.bottom() {
+                if !t.contains(&point(t.left() + px(1.), e.position.y)) {
+                    let (_, h, max) = self.extent().unwrap();
+                    let f = ((e.position.y - l.bounds.top() - t.size.height / 2.) / (h - t.size.height)).clamp(0., 1.);
+                    self.scroll_y = max * f;
+                }
+                self.thumb = Some((e.position.y, self.scroll_y));
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
+        }
         let Some(l) = self.layout.as_ref() else { return };
         let local = point(e.position.x - l.bounds.left(), e.position.y - l.bounds.top() + self.scroll_y);
         let o = self.offset_for(local);
@@ -634,6 +656,18 @@ impl InputState {
         cx.notify();
     }
     fn mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some((y0, s0)) = self.thumb {
+            if e.pressed_button != Some(MouseButton::Left) {
+                self.thumb = None;
+                return;
+            }
+            if let (Some((_, h, max)), Some(t)) = (self.extent(), self.thumb_bounds()) {
+                let track = (h - t.size.height).max(px(1.));
+                self.scroll_y = (s0 + (e.position.y - y0) * (max / track)).clamp(px(0.), max);
+                cx.notify();
+            }
+            return;
+        }
         if !self.selecting || e.pressed_button != Some(MouseButton::Left) {
             return;
         }
@@ -644,18 +678,35 @@ impl InputState {
     }
     fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.selecting = false;
+        self.thumb = None;
+    }
+    /// (content height, visible height, furthest scroll) from the last paint
+    fn extent(&self) -> Option<(Pixels, Pixels, Pixels)> {
+        let l = self.layout.as_ref()?;
+        let total: Pixels = l.lines.iter().map(|(_, x)| x.size(l.line_height).height).sum();
+        let h = l.bounds.size.height;
+        Some((total, h, (total - h).max(px(0.))))
     }
     fn scroll(&mut self, e: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(l) = self.layout.as_ref() else { return };
-        let total: Pixels = l.lines.iter().map(|(_, x)| x.size(l.line_height).height).sum();
-        let max = (total - l.bounds.size.height).max(px(0.));
+        let Some((_, _, max)) = self.extent() else { return };
         if max <= px(0.) {
             return cx.propagate();
         }
         let dy = e.delta.pixel_delta(window.line_height()).y;
-        self.scroll_y = (self.scroll_y - dy).clamp(px(0.), max);
+        let to = (self.scroll_y - dy).clamp(px(0.), max);
+        // at the top or bottom already: let the feed behind scroll instead
+        if to == self.scroll_y && dy != px(0.) {
+            return cx.propagate();
+        }
+        self.scroll_y = to;
         cx.stop_propagation();
         cx.notify();
+    }
+    /// the scrollbar thumb's bounds (window coordinates), when the text overflows
+    fn thumb_bounds(&self) -> Option<Bounds<Pixels>> {
+        let l = self.layout.as_ref()?;
+        let (total, h, max) = self.extent()?;
+        thumb_rect(l.bounds, total, h, max, self.scroll_y)
     }
 
     // ---- utf-16 for the platform's input handler -------------------------------------------------------------------
@@ -918,6 +969,21 @@ pub struct Prepaint {
     cursor: Option<PaintQuad>,
     selections: Vec<PaintQuad>,
     line_height: Pixels,
+    scrollbar: Option<PaintQuad>,
+}
+
+/// room kept right of multi-line text for the scrollbar
+const SCROLLBAR_GAP: Pixels = px(10.);
+
+/// the scrollbar thumb for a field at `bounds` showing `h` of `total` (scrolled `scroll` of `max`)
+fn thumb_rect(bounds: Bounds<Pixels>, total: Pixels, h: Pixels, max: Pixels, scroll: Pixels) -> Option<Bounds<Pixels>> {
+    if max <= px(0.5) || total <= px(0.) {
+        return None;
+    }
+    let th = (h * (h / total)).max(px(18.)).min(h);
+    let y = bounds.top() + (h - th) * (scroll / max).clamp(0., 1.);
+    let w = px(4.);
+    Some(Bounds::new(point(bounds.right() - w - px(1.), y), gpui::size(w, th)))
 }
 
 fn runs_for(text: &str, font: Font, color: Hsla, marked: Option<Range<usize>>) -> Vec<TextRun> {
@@ -992,7 +1058,7 @@ impl Element for TextArea {
             let text = if placeholder { s.placeholder.to_string() } else { s.display() };
             let color = if placeholder { self.placeholder_color } else { style.color };
             let marked = s.marked.as_ref().map(|m| s.to_display(m.start)..s.to_display(m.end));
-            let wrap = s.multi_line.then_some(bounds.size.width);
+            let wrap = s.multi_line.then_some((bounds.size.width - SCROLLBAR_GAP).max(px(20.)));
             let lines = shape(window, &text, style.font(), self.size, color, marked, wrap);
             (lines, placeholder, s.cursor(), s.selected.clone(), s.scroll_y)
         };
@@ -1001,7 +1067,7 @@ impl Element for TextArea {
             let s = self.input.read(cx);
             let text = if placeholder { s.placeholder.to_string() } else { s.display() };
             let marked = s.marked.as_ref().map(|m| s.to_display(m.start)..s.to_display(m.end));
-            let wrap = s.multi_line.then_some(bounds.size.width);
+            let wrap = s.multi_line.then_some((bounds.size.width - SCROLLBAR_GAP).max(px(20.)));
             let color = if placeholder { self.placeholder_color } else { style.color };
             shape(window, &text, style.font(), self.size, color, marked, wrap)
         };
@@ -1012,7 +1078,10 @@ impl Element for TextArea {
             let s = self.input.read(cx);
             let cp = if placeholder { Some(point(px(0.), px(0.))) } else { s.point_for(cursor_o) };
             let mut scroll = scroll;
-            if let Some(p) = cp {
+            // follow the caret only when it (or the text) moved since the last paint; otherwise keep the user's scroll
+            let key = (cursor_o, selected.clone(), s.content.len());
+            let moved = s.follow.as_ref() != Some(&key);
+            if let Some(p) = cp.filter(|_| moved) {
                 if p.y < scroll {
                     scroll = p.y;
                 } else if p.y + lh > scroll + bounds.size.height {
@@ -1036,7 +1105,17 @@ impl Element for TextArea {
             }
             (cp, rects, scroll)
         };
-        self.input.update(cx, |s, _| s.scroll_y = scroll.max(px(0.)));
+        let (scroll, scrollbar) = self.input.update(cx, |s, _| {
+            s.follow = Some((cursor_o, selected.clone(), s.content.len()));
+            let (total, h, max) = s.extent().unwrap_or((px(0.), px(0.), px(0.)));
+            s.scroll_y = scroll.clamp(px(0.), max);
+            let bar = if s.multi_line { thumb_rect(bounds, total, h, max, s.scroll_y) } else { None };
+            if s.multi_line && crate::ui::probes_on() {
+                crate::ui::set_state_extra("inputScroll", serde_json::json!({ "y": f32::from(s.scroll_y), "max": f32::from(max), "thumb": bar.map(|b| [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height)]) }));
+            }
+            (s.scroll_y, bar)
+        });
+        let scrollbar = scrollbar.map(|b| fill(b, self.placeholder_color.opacity(if self.input.read(cx).thumb.is_some() { 0.9 } else { 0.55 })).corner_radii(px(2.)));
         let origin = point(bounds.left(), bounds.top() - scroll);
         let cursor = if selected.is_empty() {
             cursor_p.map(|p| fill(Bounds::new(point(origin.x + p.x, origin.y + p.y), gpui::size(px(1.5), lh)), self.caret))
@@ -1044,7 +1123,7 @@ impl Element for TextArea {
             None
         };
         let selections = sel_rects.into_iter().map(|r| fill(Bounds::new(point(origin.x + r.origin.x, origin.y + r.origin.y), r.size), self.selection)).collect();
-        Prepaint { lines, placeholder, cursor, selections, line_height: lh }
+        Prepaint { lines, placeholder, cursor, selections, line_height: lh, scrollbar }
     }
     fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), p: &mut Prepaint, window: &mut Window, cx: &mut App) {
         let focus = self.input.read(cx).focus_handle.clone();
@@ -1075,6 +1154,10 @@ impl Element for TextArea {
                 }
             }
         });
+        // the scrollbar sits just right of the text, outside its mask
+        if let Some(b) = p.scrollbar.take() {
+            window.paint_quad(b);
+        }
     }
 }
 

@@ -19,6 +19,8 @@ struct Sel {
     anchor: Option<Pos>,
     focus: Option<Pos>,
     dragging: bool,
+    /// the pointer position a block under the pointer last took the drag at (so blocks merely level with it yield)
+    exact_at: Option<Point<Pixels>>,
     texts: HashMap<SharedString, SharedString>,
     views: HashSet<EntityId>,
 }
@@ -122,6 +124,7 @@ pub fn bind(cx: &mut App) {
         let m = &k.modifiers;
         if k.key == "c" && m.secondary() && !m.shift && !m.alt {
             if let Some(t) = selected_text() {
+                crate::ui::set_state_extra("copied", serde_json::json!(t));
                 cx.write_to_clipboard(ClipboardItem::new_string(t));
                 cx.stop_propagation();
             }
@@ -140,9 +143,24 @@ fn word_at(text: &str, ix: usize) -> Range<usize> {
     ix.min(text.len())..ix.min(text.len())
 }
 
+/// the start or end of the visual line at `p.y`
+fn line_edge(layout: &TextLayout, p: Point<Pixels>, end: bool) -> usize {
+    let b = layout.bounds();
+    let x = if end { b.right() + px(10_000.) } else { b.left() - px(10_000.) };
+    index_at(layout, point(x, p.y.clamp(b.top(), b.bottom() - px(0.5))))
+}
+
 fn index_at(layout: &TextLayout, p: Point<Pixels>) -> usize {
-    match layout.index_for_position(p) {
+    let ix = match layout.index_for_position(p) {
         Ok(i) | Err(i) => i,
+    };
+    // past the middle of the character under the pointer: the boundary after it (so a drag takes the last character too)
+    let text = layout.text();
+    let Some(ch) = text.get(ix..).and_then(|t| t.chars().next()) else { return ix };
+    let next = ix + ch.len_utf8();
+    match (layout.position_for_index(ix), layout.position_for_index(next)) {
+        (Some(a), Some(b)) if (a.y - b.y).abs() < px(0.5) && b.x > a.x && p.x > a.x + (b.x - a.x) / 2. => next,
+        _ => ix,
     }
 }
 
@@ -258,13 +276,24 @@ impl Element for Selectable {
         });
         let (k3, l3) = (key, self.layout.clone());
         window.on_mouse_event(move |e: &MouseMoveEvent, phase, _w, cx| {
-            if phase != DispatchPhase::Bubble || !bounds.contains(&e.position) {
+            if phase != DispatchPhase::Bubble {
                 return;
             }
-            let ix = index_at(&l3, e.position);
+            // inside the block, or level with it (dragging past a line's end or start selects to that end)
+            let exact = bounds.contains(&e.position);
+            if !exact && !(e.position.y >= bounds.top() && e.position.y < bounds.bottom()) {
+                return;
+            }
+            let p = point(e.position.x.clamp(bounds.left(), bounds.right() - px(0.5)), e.position.y);
+            let ix = if exact { index_at(&l3, p) } else if e.position.x < bounds.left() { line_edge(&l3, p, false) } else { line_edge(&l3, p, true) };
             let moved = with(|s| {
                 if !s.dragging || e.pressed_button != Some(MouseButton::Left) {
                     s.dragging = false;
+                    return false;
+                }
+                if exact {
+                    s.exact_at = Some(e.position);
+                } else if s.exact_at == Some(e.position) {
                     return false;
                 }
                 let f = (k3.clone(), ix);

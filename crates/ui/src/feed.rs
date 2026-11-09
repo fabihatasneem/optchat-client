@@ -827,7 +827,11 @@ impl Feed {
                             .text_size(zx(14.))
                             .line_height(zx(21.5))
                             .text_color(k.text)
-                            .child(text)
+                            .child({
+                                let st = StyledText::new(text.clone());
+                                let layout = st.layout().clone();
+                                crate::select::selectable(format!("u{}", e.i), text, layout, st)
+                            })
                             .context_menu(move |m, _, _| m.item(PopupMenuItem::new("Copy text").on_click({ let c2 = copy.clone(); move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(c2.clone())) }))),
                     )
                     .children(self.cut_button(e, n, cx))
@@ -962,7 +966,9 @@ impl Feed {
             let doc = markdown::parse(&shown);
             markdown::render(&format!("rb{}", e.i), &doc, &markdown::Opts { size: 13.5, color: k.text2 }, w, cx).into_any_element()
         } else {
-            div().text_size(zx(13.5)).line_height(zx(21.)).text_color(k.text2).child(shown).into_any_element()
+            let st = StyledText::new(shown.clone());
+            let layout = st.layout().clone();
+            div().text_size(zx(13.5)).line_height(zx(21.)).text_color(k.text2).child(crate::select::selectable(format!("rp{}", e.i), shown, layout, st)).into_any_element()
         };
         let hover = k.hover;
         let copy = body.clone();
