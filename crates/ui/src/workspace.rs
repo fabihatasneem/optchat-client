@@ -750,6 +750,10 @@ impl Render for Workspace {
                     w.state.update(cx, |s, _| s.save_prefs());
                 }
             }));
+        // Linux without server-side decorations (GNOME on Wayland): our own title bar with close / maximize / minimize
+        if crate::titlebar::client_side(window) {
+            root = root.child(crate::titlebar::render(&self.title, window, cx));
+        }
 
         if self.composer.read(cx).touch != narrow {
             self.composer.update(cx, |c, cx| {
@@ -823,6 +827,9 @@ impl Workspace {
         }
         // the open popup / context menu (kit::menu), above everything
         root = root.children(crate::kit::menu::layer(cx));
+        if crate::titlebar::client_side(window) {
+            root = root.children(crate::titlebar::edges(window));
+        }
         root
     }
 }
